@@ -33,3 +33,4 @@ class Employee(Base):
             name="chk_emp_status"
         ),
     )
+

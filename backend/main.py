@@ -7,6 +7,10 @@ from api.org import router as org_router
 
 app = FastAPI(title="RBM Resource Fulfillment Module")
 
+from api.employee_contacts import router as employee_contacts_router
+
+app.include_router(employee_contacts_router)
+
 app.include_router(users_router)
 app.include_router(employees_router)
 app.include_router(org_router)
