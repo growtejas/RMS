@@ -1,3 +1,5 @@
+from db.models.user_employee_map import UserEmployeeMap
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -36,9 +38,24 @@ def create_employee(payload: EmployeeCreate, db: Session = Depends(get_db)):
     db.refresh(employee)
     return employee
 # API 2 — List All Employees
-@router.get("/", response_model=list[EmployeeResponse])
+@router.get("/employees")
 def list_employees(db: Session = Depends(get_db)):
-    return db.query(Employee).all()
+    results = (
+        db.query(Employee, UserEmployeeMap.user_id)
+        .outerjoin(UserEmployeeMap)
+        .all()
+    )
+
+    response = []
+    for emp, user_id in results:
+        response.append({
+            "emp_id": emp.emp_id,
+            "full_name": emp.full_name,
+            "user_id": user_id
+        })
+
+    return response
+
 # API 3 — Get Employee by ID
 @router.get("/{emp_id}", response_model=EmployeeResponse)
 def get_employee(emp_id: str, db: Session = Depends(get_db)):
