@@ -32,3 +32,6 @@ app.include_router(users_router)
 app.include_router(employees_router)
 app.include_router(employee_finance_router)
 
+from api.employee_availability import router as employee_availability_router
+
+app.include_router(employee_availability_router)

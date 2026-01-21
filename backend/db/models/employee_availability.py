@@ -27,3 +27,5 @@ class EmployeeAvailability(Base):
             name="chk_availability_pct"
         ),
     )
+
+
