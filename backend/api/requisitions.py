@@ -14,22 +14,6 @@ router = APIRouter(
     tags=["Requisitions"]
 )
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-
-from database import get_db
-from db.models.requisition import Requisition
-from schemas.requisition import (
-    RequisitionCreate,
-    RequisitionUpdate,
-    RequisitionStatusUpdate,
-)
-
-router = APIRouter(
-    prefix="/requisitions",
-    tags=["Requisitions"]
-)
-
 
 @router.post("/")
 def create_requisition(
