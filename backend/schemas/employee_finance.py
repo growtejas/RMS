@@ -9,3 +9,6 @@ class EmployeeFinanceResponse(BaseModel):
     emp_id: str
     bank_details: Optional[str]
     tax_id: Optional[str]
+
+    class Config:
+        from_attributes = True

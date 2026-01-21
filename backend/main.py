@@ -26,6 +26,9 @@ from api.requisition_status_history import router as requisition_status_history_
 # ---- Audit ----
 from api.audit_log import router as audit_log_router
 
+# ---- HR ----
+from api.hr import router as hr_router
+
 
 # ---- Include routers (EACH EXACTLY ONCE) ----
 app.include_router(users_router)
@@ -45,3 +48,4 @@ app.include_router(requisition_items_router)
 app.include_router(requisition_status_history_router)
 
 app.include_router(audit_log_router)
+app.include_router(hr_router)
