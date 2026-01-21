@@ -11,14 +11,12 @@ from schemas.role import AssignRoleRequest
 from schemas.user_employee import LinkUserEmployeeRequest
 
 from utils.security import hash_password
-
+from sqlalchemy import func
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
-
-# ------------------------------------------------------------------
+'''
 # GET /users  → List users with roles
-# ------------------------------------------------------------------
 @router.get("/")
 def get_users(db: Session = Depends(get_db)):
     results = (
@@ -37,7 +35,35 @@ def get_users(db: Session = Depends(get_db)):
         })
 
     return response
+'''
+@router.get("/")
+def list_users(db: Session = Depends(get_db)):
+    results = (
+        db.query(
+            User.user_id,
+            User.username,
+            User.is_active,
+            UserEmployeeMap.emp_id,
+            func.coalesce(func.array_agg(Role.role_name), []).label("roles")
+        )
+        .outerjoin(UserEmployeeMap, User.user_id == UserEmployeeMap.user_id)
+        .outerjoin(UserRole, User.user_id == UserRole.user_id)
+        .outerjoin(Role, Role.role_id == UserRole.role_id)
+        .group_by(User.user_id, UserEmployeeMap.emp_id)
+        .all()
+    )
 
+    response = []
+    for row in results:
+        response.append({
+            "user_id": row.user_id,
+            "username": row.username,
+            "emp_id": row.emp_id,      # None if user not linked to employee
+            "is_active": row.is_active,
+            "roles": row.roles         # [] if no roles
+        })
+
+    return response
 
 # ------------------------------------------------------------------
 # POST /users  → Create user

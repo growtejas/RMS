@@ -22,3 +22,13 @@ from api.employee_education import router as employee_education_router
 app.include_router(skills_router)
 app.include_router(employee_skills_router)
 app.include_router(employee_education_router)
+
+from api.users import router as users_router
+from api.employees import router as employees_router
+from api.employee_finance import router as employee_finance_router
+
+
+app.include_router(users_router)
+app.include_router(employees_router)
+app.include_router(employee_finance_router)
+
