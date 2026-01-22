@@ -18,7 +18,7 @@ class Employee(Base):
     emp_status = Column(
         String(20),
         nullable=False,
-        server_default="Active"
+        server_default="Onboarding"
     )
 
     created_at = Column(
@@ -29,7 +29,7 @@ class Employee(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "emp_status IN ('Active', 'On Leave', 'Exited')",
+            "emp_status IN ('Onboarding', 'Active', 'On Leave', 'Exited')",
             name="chk_emp_status"
         ),
     )

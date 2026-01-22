@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Optional
+from typing import Optional, Literal
 from pydantic import BaseModel, EmailStr
 
 
@@ -20,7 +20,7 @@ class EmployeeUpdate(BaseModel):
 
 
 class EmployeeStatusUpdate(BaseModel):
-    emp_status: str  # Active / On Leave / Exited
+    emp_status: Literal["Onboarding", "Active", "On Leave", "Exited"]
 
 
 class EmployeeResponse(BaseModel):

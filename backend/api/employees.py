@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from db.session import get_db
 
 from db.models.employee import Employee
+from db.models.employee_skill import EmployeeSkill
 from schemas.employee import (
     EmployeeCreate,
     EmployeeUpdate,
@@ -30,7 +31,8 @@ def create_employee(payload: EmployeeCreate, db: Session = Depends(get_db)):
         rbm_email=payload.rbm_email,
         dob=payload.dob,
         gender=payload.gender,
-        doj=payload.doj
+        doj=payload.doj,
+        emp_status="Onboarding"  # Start onboarding when employee is created
     )
 
     db.add(employee)
@@ -98,4 +100,49 @@ def update_employee_status(
     employee.emp_status = payload.emp_status
     db.commit()
     db.refresh(employee)
+    return employee
+
+# API 6 — Complete Onboarding
+@router.post("/{emp_id}/complete-onboarding", response_model=EmployeeResponse)
+def complete_onboarding(
+    emp_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Complete employee onboarding by validating prerequisites and marking employee as Active.
+    
+    Prerequisites:
+    - Employee profile must exist
+    - Employee status must be "Onboarding"
+    - At least one skill must be added
+    """
+    # 1. Check employee exists
+    employee = db.query(Employee).filter(Employee.emp_id == emp_id).first()
+    
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # 2. Check employee is in Onboarding status
+    if employee.emp_status != "Onboarding":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot complete onboarding. Employee status is '{employee.emp_status}'. Only employees with status 'Onboarding' can complete onboarding."
+        )
+    
+    # 3. Check at least one skill exists
+    skill_count = db.query(EmployeeSkill).filter(
+        EmployeeSkill.emp_id == emp_id
+    ).count()
+    
+    if skill_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot complete onboarding. At least one skill must be added to the employee profile."
+        )
+    
+    # 4. Update status to Active
+    employee.emp_status = "Active"
+    db.commit()
+    db.refresh(employee)
+    
     return employee

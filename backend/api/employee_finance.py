@@ -2,11 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
+from db.models.auth import User
 from db.models.employee_finance import EmployeeFinance
 from schemas.employee_finance import (
     EmployeeFinanceCreate,
     EmployeeFinanceResponse
 )
+from utils.dependencies import require_any_role
 
 router = APIRouter(
     prefix="/employees/{emp_id}/finance",
@@ -18,7 +20,8 @@ router = APIRouter(
 def create_or_update_finance(
     emp_id: str,
     payload: EmployeeFinanceCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin"))
 ):
     record = db.query(EmployeeFinance).filter_by(emp_id=emp_id).first()
 
@@ -42,7 +45,8 @@ def create_or_update_finance(
 @router.get("/", response_model=EmployeeFinanceResponse)
 def get_finance(
     emp_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin"))
 ):
     record = db.query(EmployeeFinance).filter_by(emp_id=emp_id).first()
     if not record:

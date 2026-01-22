@@ -57,6 +57,25 @@ backend/
 - Generate migration: `python -m alembic revision --autogenerate -m "description"`
 - Migration file structure in `/backend/alembic/versions/`
 
+**Authentication & RBAC** (`utils/jwt.py`, `utils/dependencies.py`, `api/auth.py`):
+
+- JWT-based authentication with `python-jose` and `passlib`
+- Login endpoint: `POST /auth/login` returns JWT token with user info and roles
+- Token verification via `utils.jwt.verify_token()`
+- Password hashing uses `pbkdf2_sha256` (see `utils/security.py`)
+- RBAC dependency factories for route protection:
+  - `Depends(get_current_user)` - validates JWT, returns User object
+  - `Depends(require_role("RoleName"))` - requires single role
+  - `Depends(require_any_role("Role1", "Role2"))` - requires any of multiple roles
+- Example protected route (see `api/hr.py`):
+  ```python
+  @router.get("/employees")
+  def list_employees(
+      db: Session = Depends(get_db),
+      current_user: User = Depends(require_any_role("HR", "Admin"))
+  ):
+  ```
+
 ## Critical Conventions
 
 1. **Database Session Dependency**: Always use `Depends(get_db)` in route signatures
@@ -124,9 +143,74 @@ backend/
 - **Security**: passlib (password hashing via pbkdf2_sha256), python-dotenv
 - **Frontend**: axios (see `package.json`)
 
+## Implementation Notes
+
+### Security Best Practices ✅
+- **JWT Secret Key**: Stored in `utils/jwt.py` with default for dev (TODO: Move to `.env` in production)
+- **Token Expiration**: 30 days default (configurable in `ACCESS_TOKEN_EXPIRE_MINUTES`)
+- **Password Security**: pbkdf2_sha256 with passlib (industry standard)
+- **User Status Check**: Active users only; inactive users rejected at login
+- **Role-Based Access**: Flexible RBAC with single/multiple role checks
+
+### Protecting Routes
+When adding new endpoints, always protect them based on business logic:
+```python
+# Public endpoint
+@router.get("/public")
+def public_endpoint(db: Session = Depends(get_db)):
+    pass
+
+# Requires authentication
+@router.post("/protected")
+def protected_endpoint(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    pass
+
+# Requires specific role
+@router.delete("/{id}")
+def admin_only(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("Admin"))
+):
+    pass
+```
+
+### Role Setup
+1. Create roles in database or via API: `POST /users` then `POST /users/{user_id}/roles`
+2. Common roles: "Admin", "HR", "Manager", "Employee" (define per your needs)
+3. Link users to employees: `POST /users/link-employee` (required for user-employee mapping)
+
+## Known Improvements Needed
+
+1. **JWT Secret Key**: Move `SECRET_KEY` from hardcoded string to `.env` variable
+2. **OpenAPI Security**: Add HTTPBearer configuration to `main.py` for `/docs` endpoint
+3. **Endpoint Protection**: Most endpoints unprotected—add `Depends(require_any_role(...))` based on business logic
+4. **Role Seeding**: Create script to seed default roles on startup
+5. **Logout Implementation**: Consider token blacklist for logout (stateless JWT makes this optional)
+6. **API Response Consistency**: Standardize response format across endpoints (some return objects, others `{"message": "...", "id": ...}`)
+7. **Duplicate Imports**: `/api/requisitions.py` has duplicate imports—consolidate
+
+## Frontend Integration (React + Axios)
+
+See `AUTH_SETUP.md` for full API documentation. Quick example:
+
+```javascript
+// Login
+const response = await axios.post("/auth/login", {
+  username: "user",
+  password: "pass"
+});
+const token = response.data.access_token;
+
+// Protected request
+axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+const data = await axios.get("/hr/employees");
+```
+
 ## Notes for Improvement
 
 - Deduplicate imports in `/api/requisitions.py` (imports defined twice)
-- Frontend `/package.json` is minimal—likely needs React/ReactDOM/build config
-- Security: Ensure RBAC is enforced in route handlers (currently not visible)
-- API response consistency: Some endpoints return objects, others return `{"message": "...", "id": ...}` format
+- Frontend `/package.json` is minimal—needs React/ReactDOM/build config

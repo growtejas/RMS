@@ -1,3 +1,9 @@
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+from fastapi import FastAPI
 from fastapi import FastAPI
 
 # ---- Create app ----
@@ -29,6 +35,9 @@ from api.audit_log import router as audit_log_router
 # ---- HR ----
 from api.hr import router as hr_router
 
+# ---- Authentication ----
+from api.auth import router as auth_router
+
 
 # ---- Include routers (EACH EXACTLY ONCE) ----
 app.include_router(users_router)
@@ -49,3 +58,5 @@ app.include_router(requisition_status_history_router)
 
 app.include_router(audit_log_router)
 app.include_router(hr_router)
+app.include_router(auth_router)
+
