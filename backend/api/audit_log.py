@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from database import get_db
+from db.session import get_db
+from db.models.auth import User
+from utils.dependencies import require_any_role
 from db.models.audit_log import AuditLog
 from schemas.audit_log import AuditLogCreate
 
@@ -15,6 +17,7 @@ router = APIRouter(
 def create_audit_log(
     payload: AuditLogCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Admin", "HR"))
 ):
     audit = AuditLog(
         entity_name=payload.entity_name,

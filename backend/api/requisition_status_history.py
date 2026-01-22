@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database import get_db
+from db.session import get_db
+from db.models.auth import User
+from utils.dependencies import require_any_role
 from db.models.requisition_status_history import RequisitionStatusHistory
 from db.models.requisition import Requisition
 from schemas.requisition_status_history import (
@@ -19,6 +21,7 @@ def create_requisition_status_history(
     req_id: int,
     payload: RequisitionStatusHistoryCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR"))
 ):
     requisition = db.query(Requisition).filter(
         Requisition.req_id == req_id
@@ -48,6 +51,7 @@ def create_requisition_status_history(
 def list_requisition_status_history(
     req_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee"))
 ):
     return (
         db.query(RequisitionStatusHistory)

@@ -5,6 +5,7 @@ from db.session import get_db
 from db.models.auth import User, Role, UserRole
 from db.models.user_employee_map import UserEmployeeMap
 from db.models.employee import Employee
+from utils.dependencies import require_role, require_any_role
 
 from schemas.user import UserCreate
 from schemas.role import AssignRoleRequest
@@ -37,7 +38,10 @@ def get_users(db: Session = Depends(get_db)):
     return response
 '''
 @router.get("/")
-def list_users(db: Session = Depends(get_db)):
+def list_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Admin", "HR"))
+):
     results = (
         db.query(
             User.user_id,
@@ -69,7 +73,11 @@ def list_users(db: Session = Depends(get_db)):
 # POST /users  → Create user
 # ------------------------------------------------------------------
 @router.post("/")
-def create_user(payload: UserCreate, db: Session = Depends(get_db)):
+def create_user(
+    payload: UserCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("Admin"))
+):
 
     # bcrypt hard limit: 72 BYTES
     if len(payload.password.encode("utf-8")) > 72:
@@ -115,7 +123,8 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)):
 def assign_role_to_user(
     user_id: int,
     payload: AssignRoleRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("Admin"))
 ):
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
@@ -159,7 +168,8 @@ def assign_role_to_user(
 @router.post("/link-employee")
 def link_user_employee(
     payload: LinkUserEmployeeRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("Admin"))
 ):
     # 1. Validate user exists
     user = db.query(User).filter(User.user_id == payload.user_id).first()

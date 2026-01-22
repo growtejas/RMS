@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database import get_db
+from db.session import get_db
+from db.models.auth import User
+from utils.dependencies import require_role, require_any_role
 from db.models.employee import Employee
 from db.models.department import Department
 from db.models.location import Location
@@ -19,7 +21,11 @@ from schemas.employee_assignment import AssignmentEnd
 router = APIRouter(tags=["Organization"])
 # ---------- DEPARTMENTS ----------
 @router.post("/departments/", response_model=DepartmentResponse)
-def create_department(payload: DepartmentCreate, db: Session = Depends(get_db)):
+def create_department(
+    payload: DepartmentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("Admin"))
+):
     existing = db.query(Department).filter(
         Department.department_name == payload.department_name
     ).first()
@@ -34,12 +40,19 @@ def create_department(payload: DepartmentCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/departments/", response_model=list[DepartmentResponse])
-def list_departments(db: Session = Depends(get_db)):
+def list_departments(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Admin", "HR", "Manager"))
+):
     return db.query(Department).all()
 
 # ---------- LOCATIONS ----------
 @router.post("/locations/", response_model=LocationResponse)
-def create_location(payload: LocationCreate, db: Session = Depends(get_db)):
+def create_location(
+    payload: LocationCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("Admin"))
+):
     loc = Location(city=payload.city, country=payload.country)
     db.add(loc)
     db.commit()
@@ -48,7 +61,10 @@ def create_location(payload: LocationCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/locations/", response_model=list[LocationResponse])
-def list_locations(db: Session = Depends(get_db)):
+def list_locations(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Admin", "HR", "Manager"))
+):
     return db.query(Location).all()
 
 #EMPLOYEE ASSIGNMENTS API Assign Employee
@@ -60,7 +76,8 @@ def list_locations(db: Session = Depends(get_db)):
 def assign_employee(
     emp_id: str,
     payload: AssignmentCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin", "Manager"))
 ):
     employee = db.query(Employee).filter(Employee.emp_id == emp_id).first()
     if not employee:
@@ -85,7 +102,11 @@ def assign_employee(
     "/employees/{emp_id}/assignments",
     response_model=list[AssignmentResponse]
 )
-def get_assignment_history(emp_id: str, db: Session = Depends(get_db)):
+def get_assignment_history(
+    emp_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee"))
+):
     return (
         db.query(EmployeeAssignment)
         .filter(EmployeeAssignment.emp_id == emp_id)
@@ -100,7 +121,8 @@ def get_assignment_history(emp_id: str, db: Session = Depends(get_db)):
 def update_department(
     department_id: int,
     payload: DepartmentUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("Admin"))
 ):
     dept = db.query(Department).filter(
         Department.department_id == department_id
@@ -121,7 +143,8 @@ def update_department(
 def update_location(
     location_id: int,
     payload: LocationUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("Admin"))
 ):
     loc = db.query(Location).filter(
         Location.location_id == location_id

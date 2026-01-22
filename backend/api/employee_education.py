@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database import get_db
+from db.session import get_db
+from db.models.auth import User
+from utils.dependencies import require_any_role
 from db.models.employee_education import EmployeeEducation
 from schemas.employee_education import (
     EmployeeEducationCreate,
@@ -19,7 +21,8 @@ router = APIRouter(
 def add_education(
     emp_id: str,
     payload: EmployeeEducationCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin", "Employee"))
 ):
     record = EmployeeEducation(emp_id=emp_id, **payload.dict())
     db.add(record)
@@ -29,7 +32,11 @@ def add_education(
 
 
 @router.get("/", response_model=list[EmployeeEducationResponse])
-def list_education(emp_id: str, db: Session = Depends(get_db)):
+def list_education(
+    emp_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee"))
+):
     return (
         db.query(EmployeeEducation)
         .filter(EmployeeEducation.emp_id == emp_id)
@@ -44,6 +51,7 @@ def update_education(
     edu_id: int,
     payload: EmployeeEducationUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin", "Employee"))
 ):
     record = (
         db.query(EmployeeEducation)

@@ -1,57 +1,63 @@
-"""employee onbording
+"""employee onboarding status support
 
 Revision ID: 7dfe41ef72c5
 Revises: cd89dff74b22
 Create Date: 2026-01-22 09:40:35.487251
-
 """
+
 from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-
-# Alembic revision identifiers (MANDATORY)
-revision: str = "a1b2c3d4e5f6"
-down_revision: Union[str, Sequence[str], None] = "75ce56ac4e23"
+# Alembic revision identifiers
+revision: str = "7dfe41ef72c5"
+down_revision: Union[str, Sequence[str], None] = "cd89dff74b22"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Add 'Onboarding' status to employee status constraint and update default."""
-    # Drop the old constraint
-    op.drop_constraint("chk_emp_status", "employees", type_="check")
+    """Add 'Onboarding' to employee status and set default."""
     
-    # Create new constraint with 'Onboarding' included
+    # Drop old constraint
+    op.drop_constraint(
+        "chk_emp_status",
+        "employees",
+        type_="check"
+    )
+
+    # Create new constraint with onboarding
     op.create_check_constraint(
         "chk_emp_status",
         "employees",
         "emp_status IN ('Onboarding', 'Active', 'On Leave', 'Exited')"
     )
-    
-    # Update default value to 'Onboarding' for new employees
+
+    # Set default to Onboarding
     op.alter_column(
         "employees",
         "emp_status",
-        server_default="Onboarding"
+        server_default=sa.text("'Onboarding'")
     )
 
 
 def downgrade() -> None:
-    """Revert to original constraint and default."""
-    # Drop the new constraint
-    op.drop_constraint("chk_emp_status", "employees", type_="check")
+    """Revert employee status constraint and default."""
     
-    # Restore original constraint
+    op.drop_constraint(
+        "chk_emp_status",
+        "employees",
+        type_="check"
+    )
+
     op.create_check_constraint(
         "chk_emp_status",
         "employees",
         "emp_status IN ('Active', 'On Leave', 'Exited')"
     )
-    
-    # Restore original default
+
     op.alter_column(
         "employees",
         "emp_status",
-        server_default="Active"
+        server_default=sa.text("'Active'")
     )

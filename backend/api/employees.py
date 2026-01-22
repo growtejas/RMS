@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from db.session import get_db
+from db.models.auth import User
+from utils.dependencies import require_any_role
 
 from db.models.employee import Employee
 from db.models.employee_skill import EmployeeSkill
@@ -17,7 +19,11 @@ from schemas.employee import (
 router = APIRouter(prefix="/employees", tags=["Employees"])
 # API 1 — Create Employee
 @router.post("/", response_model=EmployeeResponse)
-def create_employee(payload: EmployeeCreate, db: Session = Depends(get_db)):
+def create_employee(
+    payload: EmployeeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin"))
+):
     existing = db.query(Employee).filter(
         Employee.emp_id == payload.emp_id
     ).first()
@@ -41,7 +47,10 @@ def create_employee(payload: EmployeeCreate, db: Session = Depends(get_db)):
     return employee
 # API 2 — List All Employees
 @router.get("/employees")
-def list_employees(db: Session = Depends(get_db)):
+def list_employees(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee"))
+):
     results = (
         db.query(Employee, UserEmployeeMap.user_id)
         .outerjoin(UserEmployeeMap)
@@ -60,7 +69,11 @@ def list_employees(db: Session = Depends(get_db)):
 
 # API 3 — Get Employee by ID
 @router.get("/{emp_id}", response_model=EmployeeResponse)
-def get_employee(emp_id: str, db: Session = Depends(get_db)):
+def get_employee(
+    emp_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee"))
+):
     employee = db.query(Employee).filter(Employee.emp_id == emp_id).first()
 
     if not employee:
@@ -72,7 +85,8 @@ def get_employee(emp_id: str, db: Session = Depends(get_db)):
 def update_employee(
     emp_id: str,
     payload: EmployeeUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin"))
 ):
     employee = db.query(Employee).filter(Employee.emp_id == emp_id).first()
 
@@ -90,7 +104,8 @@ def update_employee(
 def update_employee_status(
     emp_id: str,
     payload: EmployeeStatusUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin"))
 ):
     employee = db.query(Employee).filter(Employee.emp_id == emp_id).first()
 
@@ -106,7 +121,8 @@ def update_employee_status(
 @router.post("/{emp_id}/complete-onboarding", response_model=EmployeeResponse)
 def complete_onboarding(
     emp_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin"))
 ):
     """
     Complete employee onboarding by validating prerequisites and marking employee as Active.

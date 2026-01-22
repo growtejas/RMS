@@ -1,14 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database import get_db
+from db.session import get_db
+from db.models.auth import User
+from utils.dependencies import require_any_role
 from db.models.skill import Skill
 from schemas.skill import SkillCreate, SkillResponse
 
 router = APIRouter(prefix="/skills", tags=["Skills"])
 
 @router.post("/", response_model=SkillResponse)
-def create_skill(payload: SkillCreate, db: Session = Depends(get_db)):
+def create_skill(
+    payload: SkillCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin"))
+):
     existing = db.query(Skill).filter(Skill.skill_name == payload.skill_name).first()
     if existing:
         raise HTTPException(status_code=400, detail="Skill already exists")
@@ -20,5 +26,8 @@ def create_skill(payload: SkillCreate, db: Session = Depends(get_db)):
 
     return skill
 @router.get("/", response_model=list[SkillResponse])
-def list_skills(db: Session = Depends(get_db)):
+def list_skills(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee"))
+):
     return db.query(Skill).order_by(Skill.skill_name).all()

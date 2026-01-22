@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database import get_db
+from db.session import get_db
+from db.models.auth import User
+from utils.dependencies import require_any_role
 from db.models.requisition_item import RequisitionItem
 from db.models.requisition import Requisition
 from db.models.employee import Employee
@@ -24,6 +26,7 @@ def create_requisition_item(
     req_id: int,
     payload: RequisitionItemCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR"))
 ):
     requisition = db.query(Requisition).filter(
         Requisition.req_id == req_id

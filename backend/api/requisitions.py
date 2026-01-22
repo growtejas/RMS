@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database import get_db
+from db.session import get_db
+from db.models.auth import User
+from utils.dependencies import require_any_role
 from db.models.requisition import Requisition
 from schemas.requisition import (
     RequisitionCreate,
@@ -19,6 +21,7 @@ router = APIRouter(
 def create_requisition(
     payload: RequisitionCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR"))
 ):
     requisition = Requisition(
         client_name=payload.client_name,
@@ -40,13 +43,17 @@ def create_requisition(
     }
 
 @router.get("/")
-def list_requisitions(db: Session = Depends(get_db)):
+def list_requisitions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee"))
+):
     return db.query(Requisition).all()
 
 @router.get("/{req_id}")
 def get_requisition(
     req_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee"))
 ):
     requisition = db.query(Requisition).filter(
         Requisition.req_id == req_id
@@ -63,6 +70,7 @@ def update_requisition(
     req_id: int,
     payload: RequisitionUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR"))
 ):
     requisition = db.query(Requisition).filter(
         Requisition.req_id == req_id
@@ -82,6 +90,7 @@ def update_requisition_status(
     req_id: int,
     payload: RequisitionStatusUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR"))
 ):
     if payload.status not in ("Open", "In Progress", "Closed", "Cancelled"):
         raise HTTPException(status_code=400, detail="Invalid status")
@@ -102,6 +111,7 @@ def update_requisition_status(
 def approve_budget(
     req_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Admin", "HR"))
 ):
     requisition = db.query(Requisition).filter(
         Requisition.req_id == req_id
@@ -120,6 +130,7 @@ def approve_budget(
 def cancel_requisition(
     req_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR"))
 ):
     requisition = db.query(Requisition).filter(
         Requisition.req_id == req_id

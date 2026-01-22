@@ -4,6 +4,7 @@ import os
 load_dotenv()
 
 from fastapi import FastAPI
+
 from fastapi import FastAPI
 
 # ---- Create app ----

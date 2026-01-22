@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database import get_db
+from db.session import get_db
+from db.models.auth import User
+from utils.dependencies import require_any_role
 from db.models.employee_contact import EmployeeContact
 from db.models.employee import Employee
 from schemas.employee_contact import (
@@ -17,7 +19,8 @@ router = APIRouter(
 def upsert_contact(
     emp_id: str,
     payload: EmployeeContactUpsert,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin", "Employee"))
 ):
     # Ensure employee exists
     employee = db.query(Employee).filter(Employee.emp_id == emp_id).first()
@@ -60,7 +63,8 @@ def upsert_contact(
 @router.get("/", response_model=list[EmployeeContactResponse])
 def list_contacts(
     emp_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee"))
 ):
     return (
         db.query(EmployeeContact)

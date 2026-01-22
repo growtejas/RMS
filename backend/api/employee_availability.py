@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database import get_db
+from db.session import get_db
+from db.models.auth import User
+from utils.dependencies import require_any_role
 from db.models.employee import Employee
 from db.models.employee_availability import EmployeeAvailability
 from schemas.employee_availability import (
@@ -20,6 +22,7 @@ def add_availability(
     emp_id: str,
     payload: AvailabilityCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee"))
 ):
     # 1️⃣ Ensure employee exists
     employee = db.query(Employee).filter(Employee.emp_id == emp_id).first()
@@ -93,6 +96,7 @@ def add_availability(
 def get_availability_history(
     emp_id: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee"))
 ):
     return (
         db.query(EmployeeAvailability)
