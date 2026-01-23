@@ -4,11 +4,19 @@ import os
 load_dotenv()
 
 from fastapi import FastAPI
-
-from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 # ---- Create app ----
 app = FastAPI(title="RBM Resource Fulfillment Module")
+
+# ---- CORS Configuration ----
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ---- Core APIs ----
 from api.users import router as users_router
@@ -41,23 +49,23 @@ from api.auth import router as auth_router
 
 
 # ---- Include routers (EACH EXACTLY ONCE) ----
-app.include_router(users_router)
-app.include_router(employees_router)
-app.include_router(org_router)
+app.include_router(users_router, prefix="/api")
+app.include_router(employees_router, prefix="/api")
+app.include_router(org_router, prefix="/api")
 
-app.include_router(employee_contacts_router)
-app.include_router(employee_finance_router)
-app.include_router(employee_availability_router)
+app.include_router(employee_contacts_router, prefix="/api")
+app.include_router(employee_finance_router, prefix="/api")
+app.include_router(employee_availability_router, prefix="/api")
 
-app.include_router(skills_router)
-app.include_router(employee_skills_router)
-app.include_router(employee_education_router)
+app.include_router(skills_router, prefix="/api")
+app.include_router(employee_skills_router, prefix="/api")
+app.include_router(employee_education_router, prefix="/api")
 
-app.include_router(requisitions_router)
-app.include_router(requisition_items_router)
-app.include_router(requisition_status_history_router)
+app.include_router(requisitions_router, prefix="/api")
+app.include_router(requisition_items_router, prefix="/api")
+app.include_router(requisition_status_history_router, prefix="/api")
 
-app.include_router(audit_log_router)
-app.include_router(hr_router)
-app.include_router(auth_router)
+app.include_router(audit_log_router, prefix="/api")
+app.include_router(hr_router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
 

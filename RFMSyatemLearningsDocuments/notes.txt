@@ -92,12 +92,8 @@ alembic command
 
 
 
-
-
-
-
-
-
+jwt secrate key
+8npRVsLejKk6ax76+pT26+cbnKM4IvOV7VZZ18lzbNHsRFN9P47Q0KRCJp7UjYKxZc8zdtuWtF3NnUcSh7VTTw==
 
 
 
