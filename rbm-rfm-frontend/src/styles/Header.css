@@ -1,0 +1,136 @@
+.header {
+  background: linear-gradient(
+    135deg,
+    var(--primary-gradient-start) 0%,
+    var(--primary-gradient-end) 100%
+  );
+  color: var(--text-light);
+  padding: var(--spacing-lg) 0;
+  box-shadow: var(--shadow-sm);
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header);
+}
+
+.header-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--spacing-xl);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+}
+
+.header-title {
+  font-size: var(--font-2xl);
+  font-weight: var(--font-bold);
+  margin: 0;
+  color: var(--text-light);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xl);
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-md);
+}
+
+.user-icon {
+  font-size: var(--font-xl);
+  flex-shrink: 0;
+}
+
+.user-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.username {
+  font-weight: var(--font-semibold);
+  font-size: var(--font-base);
+  line-height: 1.2;
+}
+
+.user-roles {
+  font-size: var(--font-xs);
+  opacity: 0.9;
+  font-weight: var(--font-medium);
+  line-height: 1.2;
+  text-transform: capitalize;
+}
+
+.logout-button {
+  padding: var(--spacing-md) var(--spacing-xl);
+  background-color: rgba(255, 255, 255, 0.3);
+  color: var(--text-light);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: var(--radius-md);
+  font-size: var(--font-base);
+  font-weight: var(--font-semibold);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.logout-button:hover {
+  background-color: rgba(255, 255, 255, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.logout-button:active {
+  transform: translateY(0);
+}
+
+.logout-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .header-container {
+    padding: 0 var(--spacing-md);
+  }
+
+  .header-title {
+    font-size: var(--font-xl);
+  }
+
+  .header-right {
+    gap: var(--spacing-md);
+  }
+
+  .user-info {
+    padding: var(--spacing-sm) var(--spacing-md);
+  }
+
+  .user-icon {
+    font-size: var(--font-lg);
+  }
+
+  .username {
+    font-size: var(--font-sm);
+  }
+
+  .user-roles {
+    font-size: 10px;
+  }
+
+  .logout-button {
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: 12px;
+  }
+}

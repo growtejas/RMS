@@ -1,18 +1,27 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Login from "../pages/Login";
+import Header from "../components/Header";
 import ProtectedRoute from "../components/ProtectedRoute";
 
 const Dashboard = () => (
-  <div style={{ padding: "20px" }}>
+  <div style={{ padding: "40px 20px" }}>
     <h1>Dashboard</h1>
     <p>Welcome to RBM Resource Fulfillment Module</p>
   </div>
 );
 
 const Unauthorized = () => (
-  <div style={{ padding: "20px", textAlign: "center" }}>
+  <div style={{ padding: "40px 20px", textAlign: "center" }}>
     <h1>Unauthorized</h1>
     <p>You don't have permission to access this page.</p>
+  </div>
+);
+
+// Layout wrapper for protected pages with header
+const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
+  <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+    <Header />
+    <main style={{ flex: 1 }}>{children}</main>
   </div>
 );
 
@@ -25,11 +34,20 @@ export const AppRouter = () => {
           path="/dashboard"
           element={
             <ProtectedRoute>
-              <Dashboard />
+              <ProtectedLayout>
+                <Dashboard />
+              </ProtectedLayout>
             </ProtectedRoute>
           }
         />
-        <Route path="/unauthorized" element={<Unauthorized />} />
+        <Route
+          path="/unauthorized"
+          element={
+            <ProtectedLayout>
+              <Unauthorized />
+            </ProtectedLayout>
+          }
+        />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </BrowserRouter>
