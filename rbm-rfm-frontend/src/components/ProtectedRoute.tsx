@@ -21,9 +21,9 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
   // Check role-based access
   if (requiredRoles && user) {
-    const hasRequiredRole = requiredRoles.some((role) =>
-      user.roles.includes(role),
-    );
+    const userRoles = (user.roles || []).map((r) => r.toLowerCase());
+    const required = requiredRoles.map((r) => r.toLowerCase());
+    const hasRequiredRole = required.some((role) => userRoles.includes(role));
 
     if (!hasRequiredRole) {
       return <Navigate to="/unauthorized" replace />;

@@ -6,32 +6,45 @@ import React, {
   ReactNode,
 } from "react";
 
-export interface User {
-  user_id: number;
-  username: string;
-  roles: string[];
-}
-
-export interface AuthContextType {
-  user: User | null;
-  token: string | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  error: string | null;
-  login: (username: string, password: string) => Promise<void>;
-  logout: () => void;
-  clearError: () => void;
-}
+import { User, AuthContextType } from "../types/auth";
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const parseUserFromToken = (token: string | null): User | null => {
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) {
+      return null;
+    }
+    const decoded = JSON.parse(atob(payload));
+    const roles = Array.isArray(decoded.roles)
+      ? decoded.roles.map((role: string) => role.toLowerCase())
+      : [];
+
+    return {
+      user_id: Number(decoded.sub),
+      username: decoded.username || "",
+      roles,
+    };
+  } catch (error) {
+    console.error("❌ Failed to parse token payload:", error);
+    return null;
+  }
+};
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
-  const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(() => {
     return localStorage.getItem("authToken");
   });
+  const [user, setUser] = useState<User | null>(() =>
+    parseUserFromToken(localStorage.getItem("authToken")),
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,14 +86,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
         username: data.username,
       });
 
+      // Normalize roles to lowercase for consistent RBAC checks
+      const normalizedRoles = Array.isArray(data.roles)
+        ? data.roles.map((role: string) => role.toLowerCase())
+        : [];
+
+      const userObj: User = {
+        user_id: data.user_id,
+        username: data.username,
+        roles: normalizedRoles,
+      };
+
       // Store token and user info
       localStorage.setItem("authToken", data.access_token);
       setToken(data.access_token);
-      setUser({
-        user_id: data.user_id,
-        username: data.username,
-        roles: data.roles,
-      });
+      setUser(userObj);
+
+      return userObj;
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "An unexpected error occurred";
@@ -106,7 +128,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   const value: AuthContextType = {
     user,
     token,
-    isAuthenticated: !!token && !!user,
+    isAuthenticated: !!token,
     isLoading,
     error,
     login,
@@ -117,6 +139,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {

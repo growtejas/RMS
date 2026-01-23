@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import "../styles/Login.css";
 
@@ -10,6 +10,7 @@ const Login: React.FC = () => {
   const [error, setError] = useState("");
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -17,13 +18,26 @@ const Login: React.FC = () => {
     setIsLoading(true);
 
     try {
-      await login(username, password);
-      navigate("/dashboard");
-    } catch (err: any) {
-      setError(
-        err.response?.data?.detail ||
-          "Login failed. Please check your credentials.",
-      );
+      const loggedInUser = await login(username, password);
+
+      // If user was redirected here, go back to requested page (but ignore stale /login)
+      const fromState = (location.state as { from?: { pathname?: string } })
+        ?.from?.pathname;
+
+      // Default: admin/owner to /admin, otherwise /dashboard
+      const defaultRedirect = loggedInUser.roles.some(
+        (r) => r === "admin" || r === "owner",
+      )
+        ? "/admin"
+        : "/dashboard";
+
+      const target =
+        fromState && fromState !== "/login" ? fromState : defaultRedirect;
+      navigate(target, { replace: true });
+    } catch (err: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const errorDetail = (err as any).response?.data?.detail;
+      setError(errorDetail || "Login failed. Please check your credentials.");
     } finally {
       setIsLoading(false);
     }
@@ -229,7 +243,7 @@ const Login: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    className="demo-button user"
+                    className="demo-button owner"
                     onClick={() => handleDemoLogin("owner")}
                   >
                     Owner Access
@@ -240,7 +254,7 @@ const Login: React.FC = () => {
               {/* Footer Links */}
               <div className="form-footer">
                 <p>
-                  Don't have an account? <a href="/register">Request Access</a>
+                  Don't have an account? <a href="">Request Access</a>
                 </p>
                 <div className="tech-info">
                   <span className="tech-badge">React 19</span>

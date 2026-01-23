@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Login from "../pages/Login";
 import Header from "../components/Header";
 import ProtectedRoute from "../components/ProtectedRoute";
+import AdminDashboard from "../components/admin/Dashboard";
+import { useAuth } from "../contexts/AuthContext";
 
 const Dashboard = () => (
   <div style={{ padding: "40px 20px" }}>
@@ -26,16 +28,38 @@ const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
 );
 
 export const AppRouter = () => {
+  const { isAuthenticated, user } = useAuth();
+  const isAdmin = user?.roles?.some((r) => r === "admin" || r === "owner");
+
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={<Login />} />
+        <Route
+          path="/login"
+          element={
+            isAuthenticated ? (
+              <Navigate to={isAdmin ? "/admin" : "/dashboard"} replace />
+            ) : (
+              <Login />
+            )
+          }
+        />
         <Route
           path="/dashboard"
           element={
             <ProtectedRoute>
               <ProtectedLayout>
                 <Dashboard />
+              </ProtectedLayout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute requiredRoles={["admin", "owner"]}>
+              <ProtectedLayout>
+                <AdminDashboard />
               </ProtectedLayout>
             </ProtectedRoute>
           }

@@ -1,0 +1,492 @@
+// rbm-rfm-frontend/src/components/admin/AuditLogViewer.tsx
+import React, { useState, useEffect } from "react";
+import {
+  Search,
+  Filter,
+  Download,
+  Eye,
+  RefreshCw,
+  AlertTriangle,
+} from "lucide-react";
+
+interface AuditLog {
+  id: number;
+  timestamp: string;
+  user: string;
+  action: string;
+  entityType: "employee" | "requisition" | "user" | "role" | "system";
+  entityId: number;
+  entityName: string;
+  oldValue: string;
+  newValue: string;
+  ipAddress: string;
+  severity: "info" | "warning" | "error" | "critical";
+}
+
+
+// Mock data
+const mockLogs: AuditLog[] = [
+  {
+    id: 1,
+    timestamp: "2024-01-20 14:30:25",
+    user: "admin",
+    action: "UPDATE",
+    entityType: "employee",
+    entityId: 123,
+    entityName: "John Smith",
+    oldValue: "Status: Active",
+    newValue: "Status: Inactive",
+    ipAddress: "192.168.1.100",
+    severity: "warning",
+  },
+  {
+    id: 2,
+    timestamp: "2024-01-20 11:15:42",
+    user: "manager1",
+    action: "CREATE",
+    entityType: "requisition",
+    entityId: 456,
+    entityName: "AI Practitioner Requisition",
+    oldValue: "",
+    newValue: "Created requisition for AI role",
+    ipAddress: "192.168.1.101",
+    severity: "info",
+  },
+  {
+    id: 3,
+    timestamp: "2024-01-19 16:45:10",
+    user: "hr1",
+    action: "DELETE",
+    entityType: "user",
+    entityId: 789,
+    entityName: "temp_user",
+    oldValue: "User account exists",
+    newValue: "User account deleted",
+    ipAddress: "192.168.1.102",
+    severity: "error",
+  },
+  {
+    id: 4,
+    timestamp: "2024-01-19 09:20:33",
+    user: "system",
+    action: "LOGIN_FAILED",
+    entityType: "system",
+    entityId: 0,
+    entityName: "Authentication",
+    oldValue: "",
+    newValue: "Failed login attempt",
+    ipAddress: "203.0.113.5",
+    severity: "warning",
+  }
+];
+
+const AuditLogViewer: React.FC = () => {
+  const [logs] = useState<AuditLog[]>(mockLogs);
+  const [filteredLogs, setFilteredLogs] = useState<AuditLog[]>(mockLogs);
+  const [filters, setFilters] = useState({
+    search: "",
+    dateFrom: "",
+    dateTo: "",
+    user: "",
+    action: "",
+    severity: "",
+  });
+  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
+
+
+
+  useEffect(() => {
+    // Mock data load - in real app would be API call
+    // Using simple effect to simulate async load if needed, but for now
+    // logic is handled in initial state or could be moved
+  }, []);
+
+  const applyFilters = () => {
+    let filtered = [...logs];
+
+    if (filters.search) {
+      filtered = filtered.filter(
+        (log) =>
+          log.user.toLowerCase().includes(filters.search.toLowerCase()) ||
+          log.entityName.toLowerCase().includes(filters.search.toLowerCase()) ||
+          log.action.toLowerCase().includes(filters.search.toLowerCase()),
+      );
+    }
+
+    if (filters.dateFrom) {
+      filtered = filtered.filter((log) => log.timestamp >= filters.dateFrom);
+    }
+
+    if (filters.dateTo) {
+      filtered = filtered.filter(
+        (log) => log.timestamp <= filters.dateTo + " 23:59:59",
+      );
+    }
+
+    if (filters.user) {
+      filtered = filtered.filter((log) => log.user === filters.user);
+    }
+
+    if (filters.action) {
+      filtered = filtered.filter((log) => log.action === filters.action);
+    }
+
+    if (filters.severity) {
+      filtered = filtered.filter((log) => log.severity === filters.severity);
+    }
+
+    setFilteredLogs(filtered);
+  };
+
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case "critical":
+        return "#dc2626";
+      case "error":
+        return "#ef4444";
+      case "warning":
+        return "#f59e0b";
+      case "info":
+        return "#3b82f6";
+      default:
+        return "#6b7280";
+    }
+  };
+
+  const getActionIcon = (action: string) => {
+    switch (action) {
+      case "CREATE":
+        return "🆕";
+      case "UPDATE":
+        return "✏️";
+      case "DELETE":
+        return "🗑️";
+      case "LOGIN":
+        return "🔐";
+      case "LOGOUT":
+        return "🚪";
+      default:
+        return "📝";
+    }
+  };
+
+  return (
+    <div className="audit-log-viewer">
+      <div className="viewer-header">
+        <div className="header-left">
+          <h2>Audit Log Review</h2>
+          <p className="subtitle">
+            Track all system changes and user activities
+          </p>
+        </div>
+        <div className="header-actions">
+          <button className="action-button" onClick={applyFilters}>
+            <RefreshCw size={16} />
+            Refresh
+          </button>
+          <button className="action-button">
+            <Download size={16} />
+            Export Logs
+          </button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="log-filters">
+        <div className="filter-group">
+          <div className="search-box">
+            <Search size={18} />
+            <input
+              type="text"
+              placeholder="Search logs..."
+              value={filters.search}
+              onChange={(e) =>
+                setFilters({ ...filters, search: e.target.value })
+              }
+            />
+          </div>
+        </div>
+
+        <div className="filter-grid">
+          <div className="filter-item">
+            <label>From Date</label>
+            <input
+              type="date"
+              value={filters.dateFrom}
+              onChange={(e) =>
+                setFilters({ ...filters, dateFrom: e.target.value })
+              }
+            />
+          </div>
+          <div className="filter-item">
+            <label>To Date</label>
+            <input
+              type="date"
+              value={filters.dateTo}
+              onChange={(e) =>
+                setFilters({ ...filters, dateTo: e.target.value })
+              }
+            />
+          </div>
+          <div className="filter-item">
+            <label>User</label>
+            <select
+              value={filters.user}
+              onChange={(e) => setFilters({ ...filters, user: e.target.value })}
+            >
+              <option value="">All Users</option>
+              {[...new Set(logs.map((log) => log.user))].map((user) => (
+                <option key={user} value={user}>
+                  {user}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="filter-item">
+            <label>Severity</label>
+            <select
+              value={filters.severity}
+              onChange={(e) =>
+                setFilters({ ...filters, severity: e.target.value })
+              }
+            >
+              <option value="">All Levels</option>
+              <option value="info">Info</option>
+              <option value="warning">Warning</option>
+              <option value="error">Error</option>
+              <option value="critical">Critical</option>
+            </select>
+          </div>
+          <div className="filter-item">
+            <label>Action</label>
+            <select
+              value={filters.action}
+              onChange={(e) =>
+                setFilters({ ...filters, action: e.target.value })
+              }
+            >
+              <option value="">All Actions</option>
+              {[...new Set(logs.map((log) => log.action))].map((action) => (
+                <option key={action} value={action}>
+                  {action}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="filter-item">
+            <button className="apply-filters-button" onClick={applyFilters}>
+              <Filter size={16} />
+              Apply Filters
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Summary Stats */}
+      <div className="log-stats">
+        <div className="stat-card">
+          <span className="stat-number">{logs.length}</span>
+          <span className="stat-label">Total Logs</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-number">
+            {
+              logs.filter(
+                (l) => l.severity === "warning" || l.severity === "error",
+              ).length
+            }
+          </span>
+          <span className="stat-label">Warnings & Errors</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-number">
+            {[...new Set(logs.map((l) => l.user))].length}
+          </span>
+          <span className="stat-label">Active Users</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-number">
+            {logs.filter((l) => l.action === "LOGIN_FAILED").length}
+          </span>
+          <span className="stat-label">Failed Logins</span>
+        </div>
+      </div>
+
+      {/* Log Table */}
+      <div className="log-table-container">
+        <table className="log-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>User</th>
+              <th>Action</th>
+              <th>Entity</th>
+              <th>Details</th>
+              <th>Severity</th>
+              <th>IP Address</th>
+              <th>View</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredLogs.map((log) => (
+              <tr key={log.id} className={`log-row severity-${log.severity}`}>
+                <td className="timestamp">
+                  <div className="date">{log.timestamp.split(" ")[0]}</div>
+                  <div className="time">{log.timestamp.split(" ")[1]}</div>
+                </td>
+                <td className="user-cell">
+                  <span className="user-badge">{log.user}</span>
+                </td>
+                <td className="action-cell">
+                  <span className="action-icon">
+                    {getActionIcon(log.action)}
+                  </span>
+                  {log.action}
+                </td>
+                <td className="entity-cell">
+                  <div className="entity-type">{log.entityType}</div>
+                  <div className="entity-name">{log.entityName}</div>
+                </td>
+                <td className="details-cell">
+                  <div className="change-summary">
+                    {log.oldValue && (
+                      <span className="old-value">{log.oldValue}</span>
+                    )}
+                    {log.oldValue && log.newValue && (
+                      <span className="arrow">→</span>
+                    )}
+                    {log.newValue && (
+                      <span className="new-value">{log.newValue}</span>
+                    )}
+                  </div>
+                </td>
+                <td className="severity-cell">
+                  <span
+                    className="severity-badge"
+                    style={{ backgroundColor: getSeverityColor(log.severity) }}
+                  >
+                    {log.severity.toUpperCase()}
+                  </span>
+                </td>
+                <td className="ip-cell">
+                  <code>{log.ipAddress}</code>
+                </td>
+                <td className="actions-cell">
+                  <button
+                    className="view-button"
+                    onClick={() => setSelectedLog(log)}
+                    title="View Details"
+                  >
+                    <Eye size={14} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {filteredLogs.length === 0 && (
+          <div className="empty-logs">
+            <AlertTriangle size={48} />
+            <p>No audit logs found matching your filters</p>
+          </div>
+        )}
+      </div>
+
+      {/* Log Detail Modal */}
+      {selectedLog && (
+        <div className="modal-overlay">
+          <div className="modal-content wide">
+            <div className="modal-header">
+              <h3>Audit Log Details</h3>
+              <button
+                className="close-button"
+                onClick={() => setSelectedLog(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="log-details-grid">
+                <div className="detail-item">
+                  <label>Timestamp</label>
+                  <span>{selectedLog.timestamp}</span>
+                </div>
+                <div className="detail-item">
+                  <label>User</label>
+                  <span className="user-highlight">{selectedLog.user}</span>
+                </div>
+                <div className="detail-item">
+                  <label>IP Address</label>
+                  <code>{selectedLog.ipAddress}</code>
+                </div>
+                <div className="detail-item">
+                  <label>Action</label>
+                  <span className="action-badge">
+                    {getActionIcon(selectedLog.action)} {selectedLog.action}
+                  </span>
+                </div>
+                <div className="detail-item">
+                  <label>Entity Type</label>
+                  <span>{selectedLog.entityType}</span>
+                </div>
+                <div className="detail-item">
+                  <label>Entity ID</label>
+                  <span>{selectedLog.entityId}</span>
+                </div>
+                <div className="detail-item">
+                  <label>Entity Name</label>
+                  <span>{selectedLog.entityName}</span>
+                </div>
+                <div className="detail-item full-width">
+                  <label>Severity</label>
+                  <span
+                    className="severity-badge-large"
+                    style={{
+                      backgroundColor: getSeverityColor(selectedLog.severity),
+                    }}
+                  >
+                    {selectedLog.severity.toUpperCase()}
+                  </span>
+                </div>
+                <div className="detail-item full-width">
+                  <label>Old Value</label>
+                  <div className="value-box old">
+                    {selectedLog.oldValue || <em>No previous value</em>}
+                  </div>
+                </div>
+                <div className="detail-item full-width">
+                  <label>New Value</label>
+                  <div className="value-box new">{selectedLog.newValue}</div>
+                </div>
+                <div className="detail-item full-width">
+                  <label>Change Summary</label>
+                  <div className="change-visualization">
+                    <div className="old-value-visual">
+                      <span className="visual-label">Before:</span>
+                      {selectedLog.oldValue || "Empty"}
+                    </div>
+                    <div className="arrow-visual">→</div>
+                    <div className="new-value-visual">
+                      <span className="visual-label">After:</span>
+                      {selectedLog.newValue}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="close-details-button"
+                onClick={() => setSelectedLog(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AuditLogViewer;
