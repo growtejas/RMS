@@ -9,115 +9,289 @@ import {
   Download,
   Upload,
 } from "lucide-react";
+import { apiClient } from "../../api/client";
+
+type MasterDataType = "skill" | "location" | "department" | "technology";
 
 interface MasterDataItem {
   id: number;
   name: string;
-  type: "skill" | "location" | "department" | "technology";
+  type: MasterDataType;
   description: string;
   createdBy: string;
   createdAt: string;
   isActive: boolean;
 }
 
+type SkillResponse = {
+  skill_id: number;
+  skill_name: string;
+  created_by?: string | null;
+  created_at?: string | null;
+};
 
-// Mock data - replace with API call
-const mockSkills: MasterDataItem[] = [
-  {
-    id: 1,
-    name: "AI Practitioner",
-    type: "skill",
-    description: "Artificial Intelligence specialist",
-    createdBy: "admin",
-    createdAt: "2024-01-15",
-    isActive: true,
-  },
-  {
-    id: 2,
-    name: "React Developer",
-    type: "skill",
-    description: "Frontend development with React",
-    createdBy: "admin",
-    createdAt: "2024-01-10",
-    isActive: true,
-  },
-  {
-    id: 3,
-    name: "Python Engineer",
-    type: "skill",
-    description: "Backend development with Python",
-    createdBy: "admin",
-    createdAt: "2024-01-05",
-    isActive: true,
-  },
-];
+type DepartmentResponse = {
+  department_id: number;
+  department_name: string;
+  created_by?: string | null;
+  created_at?: string | null;
+};
 
-const mockLocations: MasterDataItem[] = [
-  {
-    id: 1,
-    name: "New York Office",
-    type: "location",
-    description: "Main headquarters",
-    createdBy: "admin",
-    createdAt: "2024-01-12",
-    isActive: true,
-  },
-  {
-    id: 2,
-    name: "Remote - US",
-    type: "location",
-    description: "Remote workers in US",
-    createdBy: "admin",
-    createdAt: "2024-01-08",
-    isActive: true,
-  },
-];
+type LocationResponse = {
+  location_id: number;
+  city?: string | null;
+  country?: string | null;
+  created_by?: string | null;
+  created_at?: string | null;
+};
+
+type NewItemState = {
+  name: string;
+  description: string;
+  type: Exclude<MasterDataType, "technology">;
+};
+
+const normalizeItem = (item: MasterDataItem): MasterDataItem => ({
+  ...item,
+  createdBy: item.createdBy || "System",
+  createdAt: item.createdAt || "-",
+  isActive: item.isActive ?? true,
+});
+
+const formatDate = (value?: string | null) => {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleDateString();
+};
 
 const MasterDataManager: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
     "skills" | "locations" | "departments"
   >("skills");
-  const [items, setItems] = useState<MasterDataItem[]>([]);
+  const [skills, setSkills] = useState<MasterDataItem[]>([]);
+  const [locations, setLocations] = useState<MasterDataItem[]>([]);
+  const [departments, setDepartments] = useState<MasterDataItem[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newItem, setNewItem] = useState({
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingItem, setEditingItem] = useState<MasterDataItem | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [newItem, setNewItem] = useState<NewItemState>({
     name: "",
     description: "",
-    type: "skill" as const,
+    type: "skill",
   });
-
-  // Mock data - replace with API call
-
-
-  useEffect(() => {
-    // Load data based on active tab - ensuring effects are clean
-    const loadData = () => {
-      if (activeTab === "skills") {
-        setItems(mockSkills);
-      } else if (activeTab === "locations") {
-        setItems(mockLocations);
-      } else {
-        setItems([]);
-      }
-    };
-    loadData();
-  }, [activeTab]);
-
-  const handleAddItem = () => {
-    // API call to add new item
-    console.log("Adding new item:", newItem);
-    setShowAddModal(false);
-    setNewItem({ name: "", description: "", type: "skill" });
-  };
-
-  const handleDeleteItem = (id: number) => {
-    if (window.confirm("Are you sure you want to delete this item?")) {
-      // API call to delete item
-      console.log("Deleting item:", id);
+  const fetchSkills = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await apiClient.get<SkillResponse[]>("/skills/");
+      const mapped = response.data.map((skill) =>
+        normalizeItem({
+          id: skill.skill_id,
+          name: skill.skill_name,
+          type: "skill",
+          description: "",
+          createdBy: skill.created_by ?? "System",
+          createdAt: formatDate(skill.created_at),
+          isActive: true,
+        }),
+      );
+      setSkills(mapped);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to load skills";
+      setError(message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const filteredItems = items.filter(
+  const fetchDepartments = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response =
+        await apiClient.get<DepartmentResponse[]>("/departments/");
+      const mapped = response.data.map((dept) =>
+        normalizeItem({
+          id: dept.department_id,
+          name: dept.department_name,
+          type: "department",
+          description: "",
+          createdBy: dept.created_by ?? "System",
+          createdAt: formatDate(dept.created_at),
+          isActive: true,
+        }),
+      );
+      setDepartments(mapped);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to load departments";
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const fetchLocations = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await apiClient.get<LocationResponse[]>("/locations/");
+      const mapped = response.data.map((loc) =>
+        normalizeItem({
+          id: loc.location_id,
+          name: loc.city || "Unknown",
+          type: "location",
+          description: loc.country || "",
+          createdBy: loc.created_by ?? "System",
+          createdAt: formatDate(loc.created_at),
+          isActive: true,
+        }),
+      );
+      setLocations(mapped);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to load locations";
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "skills") {
+      fetchSkills();
+      setNewItem((prev) => ({ ...prev, type: "skill" }));
+    } else if (activeTab === "locations") {
+      fetchLocations();
+      setNewItem((prev) => ({ ...prev, type: "location" }));
+    } else {
+      fetchDepartments();
+      setNewItem((prev) => ({ ...prev, type: "department" }));
+    }
+  }, [activeTab]);
+
+  const handleAddItem = async () => {
+    if (!newItem.name.trim()) {
+      window.alert("Name is required.");
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    try {
+      if (activeTab === "skills") {
+        await apiClient.post("/skills/", {
+          skill_name: newItem.name.trim(),
+        });
+        await fetchSkills();
+      } else if (activeTab === "departments") {
+        await apiClient.post("/departments/", {
+          department_name: newItem.name.trim(),
+        });
+        await fetchDepartments();
+      } else {
+        await apiClient.post("/locations/", {
+          city: newItem.name.trim(),
+          country: newItem.description.trim() || null,
+        });
+        await fetchLocations();
+      }
+
+      setShowAddModal(false);
+      setNewItem({ name: "", description: "", type: "skill" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to add item";
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteItem = async (id: number) => {
+    if (!window.confirm("Are you sure you want to delete this item?")) {
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    try {
+      if (activeTab === "skills") {
+        await apiClient.delete(`/skills/${id}`);
+        await fetchSkills();
+      } else if (activeTab === "departments") {
+        await apiClient.delete(`/departments/${id}`);
+        await fetchDepartments();
+      } else {
+        await apiClient.delete(`/locations/${id}`);
+        await fetchLocations();
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to delete";
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleEditItem = (item: MasterDataItem) => {
+    setEditingItem(item);
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingItem || !editingItem.name.trim()) {
+      window.alert("Name is required.");
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    try {
+      if (editingItem.type === "skill") {
+        await apiClient.patch(`/skills/${editingItem.id}`, {
+          skill_name: editingItem.name.trim(),
+        });
+        await fetchSkills();
+      } else if (editingItem.type === "department") {
+        await apiClient.patch(`/departments/${editingItem.id}`, {
+          department_name: editingItem.name.trim(),
+        });
+        await fetchDepartments();
+      } else {
+        await apiClient.patch(`/locations/${editingItem.id}`, {
+          city: editingItem.name.trim(),
+          country: editingItem.description.trim() || null,
+        });
+        await fetchLocations();
+      }
+
+      setShowEditModal(false);
+      setEditingItem(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update";
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const currentItems =
+    activeTab === "skills"
+      ? skills
+      : activeTab === "locations"
+        ? locations
+        : departments;
+
+  const filteredItems = currentItems.filter(
     (item) =>
       item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       item.description.toLowerCase().includes(searchTerm.toLowerCase()),
@@ -144,19 +318,19 @@ const MasterDataManager: React.FC = () => {
           className={`tab-button ${activeTab === "skills" ? "active" : ""}`}
           onClick={() => setActiveTab("skills")}
         >
-          Skills ({mockSkills.length})
+          Skills ({skills.length})
         </button>
         <button
           className={`tab-button ${activeTab === "locations" ? "active" : ""}`}
           onClick={() => setActiveTab("locations")}
         >
-          Locations ({mockLocations.length})
+          Locations ({locations.length})
         </button>
         <button
           className={`tab-button ${activeTab === "departments" ? "active" : ""}`}
           onClick={() => setActiveTab("departments")}
         >
-          Departments (0)
+          Departments ({departments.length})
         </button>
       </div>
 
@@ -201,15 +375,17 @@ const MasterDataManager: React.FC = () => {
             </tr>
           </thead>
           <tbody>
+            {isLoading && (
+              <tr>
+                <td colSpan={6} className="table-loading">
+                  Loading {activeTab}...
+                </td>
+              </tr>
+            )}
             {filteredItems.map((item) => (
               <tr key={item.id}>
                 <td>
-                  <div className="item-name">
-                    <span className="type-badge">
-                      {item.type.charAt(0).toUpperCase()}
-                    </span>
-                    {item.name}
-                  </div>
+                  <div className="item-name">{item.name}</div>
                 </td>
                 <td>{item.description}</td>
                 <td>{item.createdBy}</td>
@@ -223,7 +399,11 @@ const MasterDataManager: React.FC = () => {
                 </td>
                 <td>
                   <div className="action-buttons">
-                    <button className="action-button edit" title="Edit">
+                    <button
+                      className="action-button edit"
+                      title="Edit"
+                      onClick={() => handleEditItem(item)}
+                    >
                       <Edit size={14} />
                     </button>
                     <button
@@ -239,9 +419,11 @@ const MasterDataManager: React.FC = () => {
             ))}
           </tbody>
         </table>
-        {filteredItems.length === 0 && (
+        {!isLoading && filteredItems.length === 0 && (
           <div className="empty-state">
-            <p>No {activeTab} found. Add your first item!</p>
+            <p>
+              {error ? error : `No ${activeTab} found. Add your first item!`}
+            </p>
           </div>
         )}
       </div>
@@ -292,6 +474,72 @@ const MasterDataManager: React.FC = () => {
               </button>
               <button className="save-button" onClick={handleAddItem}>
                 Save {activeTab.slice(0, -1)}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Item Modal */}
+      {showEditModal && editingItem && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3>Edit {editingItem.type}</h3>
+              <button
+                className="close-button"
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditingItem(null);
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>Name *</label>
+                <input
+                  type="text"
+                  value={editingItem.name}
+                  onChange={(e) =>
+                    setEditingItem({
+                      ...editingItem,
+                      name: e.target.value,
+                    })
+                  }
+                  placeholder={`Enter ${editingItem.type} name`}
+                />
+              </div>
+              {editingItem.type === "location" && (
+                <div className="form-group">
+                  <label>Country</label>
+                  <input
+                    type="text"
+                    value={editingItem.description}
+                    onChange={(e) =>
+                      setEditingItem({
+                        ...editingItem,
+                        description: e.target.value,
+                      })
+                    }
+                    placeholder="Enter country"
+                  />
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button
+                className="cancel-button"
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditingItem(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button className="save-button" onClick={handleSaveEdit}>
+                Save Changes
               </button>
             </div>
           </div>

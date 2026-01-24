@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 
@@ -11,6 +11,8 @@ class DepartmentCreate(BaseModel):
 class DepartmentResponse(BaseModel):
     department_id: int
     department_name: str
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -27,6 +29,8 @@ class LocationResponse(BaseModel):
     location_id: int
     city: Optional[str]
     country: Optional[str]
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
