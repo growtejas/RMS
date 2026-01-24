@@ -3,5 +3,4 @@ export type DashboardView =
   | "master-data"
   | "role-management"
   | "audit-logs"
-  | "system-health"
   | "users";

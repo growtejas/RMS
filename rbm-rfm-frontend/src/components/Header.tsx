@@ -12,28 +12,65 @@ const Header: React.FC = () => {
     navigate("/login", { replace: true });
   };
 
+  const getInitials = (username: string) => {
+    return username
+      .split(" ")
+      .map((name) => name[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
   return (
     <header className="header">
       <div className="header-container">
         <div className="header-left">
-          <h1 className="header-title">RBM Resource Module</h1>
+          <div className="logo-container">
+            <div className="logo-icon">⚙️</div>
+            <div className="logo-text">
+              <h1 className="header-title">Resource Module</h1>
+              <span className="header-subtitle">
+                Resource Management System
+              </span>
+            </div>
+          </div>
         </div>
         <div className="header-right">
           {user && (
-            <>
-              <div className="user-info">
-                <span className="user-icon">👤</span>
+            <div className="user-section">
+              <div className="user-profile">
+                <div className="avatar-container">
+                  <div className="avatar">{getInitials(user.username)}</div>
+                </div>
                 <div className="user-details">
                   <span className="username">{user.username}</span>
-                  <span className="user-roles">
-                    {user.roles.length > 0 ? user.roles.join(", ") : "No roles"}
-                  </span>
+                  <div className="role-badges">
+                    {user.roles.map((role, index) => (
+                      <span key={index} className="role-badge">
+                        {role}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
+              <div className="divider"></div>
               <button className="logout-button" onClick={handleLogout}>
-                Logout
+                <svg
+                  className="logout-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                  />
+                </svg>
+                <span>Logout</span>
               </button>
-            </>
+            </div>
           )}
         </div>
       </div>

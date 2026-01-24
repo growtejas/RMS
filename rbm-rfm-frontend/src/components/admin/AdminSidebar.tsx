@@ -1,14 +1,5 @@
 import React from "react";
-import {
-  Shield,
-  Database,
-  Users,
-  FileText,
-  Activity,
-  Settings,
-  Menu,
-  X,
-} from "lucide-react";
+import { Shield, Database, Users, FileText, Menu, X } from "lucide-react";
 import { DashboardView } from "../../types/dashboard";
 
 interface AdminSidebarProps {
@@ -37,11 +28,6 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
       icon: <Users size={20} />,
     },
     { id: "audit-logs", label: "Audit Logs", icon: <FileText size={20} /> },
-    {
-      id: "system-health",
-      label: "System Health",
-      icon: <Activity size={20} />,
-    },
     { id: "users", label: "User Management", icon: <Users size={20} /> },
   ];
 

@@ -2,45 +2,58 @@ import React from "react";
 import { Bell, Search, User } from "lucide-react";
 
 interface AdminHeaderProps {
-    title: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    user: any;
-    onLogout: () => void;
+  title: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  user: any;
+  onLogout: () => void;
 }
 
 const AdminHeader: React.FC<AdminHeaderProps> = ({ title, user, onLogout }) => {
-    return (
-        <header className="admin-header">
-            <div className="header-title">
-                <h1>{title}</h1>
-                <p>Manage and monitor your resource fulfillment system</p>
-            </div>
+  const displayName = user?.username || user?.name || "Admin User";
+  const displayRole = Array.isArray(user?.roles)
+    ? user.roles.join(", ")
+    : user?.role || "Administrator";
 
-            <div className="header-actions">
-                {/* Search Bar - Hidden on mobile in some layouts */}
-                <div className="search-bar" style={{ display: "none" }}>
-                    <Search size={18} />
-                    <input type="text" placeholder="Search..." />
-                </div>
+  return (
+    <header className="admin-header">
+      <div className="header-title">
+        <h1>{title}</h1>
+        <p>Manage and monitor your resource fulfillment system</p>
+      </div>
 
-                <div className="header-user">
-                    <button className="notification-btn" title="Notifications">
-                        <Bell size={20} />
-                        <span className="notification-badge">3</span>
-                    </button>
+      <div className="header-actions">
+        <div className="search-bar">
+          <Search size={16} />
+          <input type="text" placeholder="Search" />
+        </div>
 
-                    <div className="user-info">
-                        <div className="user-name">{user?.name || "Admin User"}</div>
-                        <div className="user-role">{user?.role || "Administrator"}</div>
-                    </div>
+        <div className="header-user">
+          <button className="notification-btn" title="Notifications">
+            <Bell size={18} />
+            <span className="notification-badge">3</span>
+          </button>
 
-                    <div className="user-avatar" onClick={onLogout} title="Click to logout">
-                        {user?.name ? user.name.charAt(0).toUpperCase() : <User size={20} />}
-                    </div>
-                </div>
-            </div>
-        </header>
-    );
+          <div className="user-info">
+            <div className="user-name">{displayName}</div>
+            <div className="user-role">{displayRole}</div>
+          </div>
+
+          <button
+            className="user-avatar"
+            onClick={onLogout}
+            title="Logout"
+            type="button"
+          >
+            {displayName ? (
+              displayName.charAt(0).toUpperCase()
+            ) : (
+              <User size={18} />
+            )}
+          </button>
+        </div>
+      </div>
+    </header>
+  );
 };
 
 export default AdminHeader;

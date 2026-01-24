@@ -2,41 +2,44 @@ import React from "react";
 import { Users, Database, AlertTriangle, CheckCircle } from "lucide-react";
 
 const AdminMetrics: React.FC = () => {
-    return (
-        <div className="admin-metrics">
-            <div className="stat-card">
-                <div className="stat-icon-wrapper" style={{ background: "#e0e7ff", color: "#4f46e5", padding: "10px", borderRadius: "50%", width: "fit-content", marginBottom: "10px" }}>
-                    <Users size={24} />
-                </div>
-                <span className="stat-number">1,234</span>
-                <span className="stat-label">Total Users</span>
-            </div>
+  const metrics = [
+    {
+      key: "users",
+      label: "Total Users",
+      value: "1,234",
+      icon: <Users size={20} />,
+    },
+    {
+      key: "resources",
+      label: "Resources Tracked",
+      value: "456",
+      icon: <Database size={20} />,
+    },
+    {
+      key: "alerts",
+      label: "System Alerts",
+      value: "12",
+      icon: <AlertTriangle size={20} />,
+    },
+    {
+      key: "uptime",
+      label: "Uptime",
+      value: "99.9%",
+      icon: <CheckCircle size={20} />,
+    },
+  ];
 
-            <div className="stat-card">
-                <div className="stat-icon-wrapper" style={{ background: "#dbeafe", color: "#2563eb", padding: "10px", borderRadius: "50%", width: "fit-content", marginBottom: "10px" }}>
-                    <Database size={24} />
-                </div>
-                <span className="stat-number">456</span>
-                <span className="stat-label">Resources tracked</span>
-            </div>
-
-            <div className="stat-card">
-                <div className="stat-icon-wrapper" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px", borderRadius: "50%", width: "fit-content", marginBottom: "10px" }}>
-                    <AlertTriangle size={24} />
-                </div>
-                <span className="stat-number">12</span>
-                <span className="stat-label">System Alerts</span>
-            </div>
-
-            <div className="stat-card">
-                <div className="stat-icon-wrapper" style={{ background: "#d1fae5", color: "#059669", padding: "10px", borderRadius: "50%", width: "fit-content", marginBottom: "10px" }}>
-                    <CheckCircle size={24} />
-                </div>
-                <span className="stat-number">99.9%</span>
-                <span className="stat-label">Uptime</span>
-            </div>
+  return (
+    <div className="admin-metrics">
+      {metrics.map((metric) => (
+        <div className="stat-card" key={metric.key}>
+          <div className={`stat-icon-wrapper ${metric.key}`}>{metric.icon}</div>
+          <span className="stat-number">{metric.value}</span>
+          <span className="stat-label">{metric.label}</span>
         </div>
-    );
+      ))}
+    </div>
+  );
 };
 
 export default AdminMetrics;
