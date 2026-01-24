@@ -48,7 +48,11 @@ const AdminDashboard: React.FC = () => {
   };
 
   return (
-    <div className="admin-dashboard">
+    <div
+      className={`admin-dashboard ${
+        sidebarCollapsed ? "sidebar-collapsed" : ""
+      }`}
+    >
       <AdminSidebar
         activeView={activeView}
         onViewChange={setActiveView}

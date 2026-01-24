@@ -1,3 +1,5 @@
+@import "./variables.css";
+
 .theme-switcher {
   display: flex;
   align-items: center;

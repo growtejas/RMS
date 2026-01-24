@@ -1,6 +1,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import RbmLogo from "../assets/rbm-logo.svg";
 import "../styles/Header.css";
 
 const Header: React.FC = () => {
@@ -26,9 +27,11 @@ const Header: React.FC = () => {
       <div className="header-container">
         <div className="header-left">
           <div className="logo-container">
-            <div className="logo-icon">⚙️</div>
+            <div className="logo-icon" aria-hidden="true">
+              <img src={RbmLogo} alt="RBM" />
+            </div>
             <div className="logo-text">
-              <h1 className="header-title">Resource Module</h1>
+              <h1 className="header-title">RBM Software</h1>
               <span className="header-subtitle">
                 Resource Management System
               </span>
@@ -38,7 +41,7 @@ const Header: React.FC = () => {
         <div className="header-right">
           {user && (
             <div className="user-section">
-              <div className="user-profile">
+              {/* <div className="user-profile">
                 <div className="avatar-container">
                   <div className="avatar">{getInitials(user.username)}</div>
                 </div>
@@ -52,7 +55,7 @@ const Header: React.FC = () => {
                     ))}
                   </div>
                 </div>
-              </div>
+              </div> */}
               <div className="divider"></div>
               <button className="logout-button" onClick={handleLogout}>
                 <svg

@@ -37,7 +37,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
         {!collapsed && (
           <div className="sidebar-brand">
             <Shield size={24} className="brand-icon" />
-            <span className="brand-text">System Guard</span>
+            <span className="brand-text">Admin Dashboard</span>
           </div>
         )}
         <button className="sidebar-toggle" onClick={onToggleCollapse}>
