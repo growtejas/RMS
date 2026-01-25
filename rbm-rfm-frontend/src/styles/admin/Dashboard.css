@@ -951,6 +951,8 @@ body {
   max-width: 520px;
   max-height: 90vh;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
   box-shadow: var(--shadow-xl);
   animation: modalSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   border: 1px solid var(--border-subtle);
@@ -1006,6 +1008,8 @@ body {
 
 .modal-body {
   padding: 32px;
+  overflow-y: auto;
+  flex: 1;
 }
 
 .modal-footer {
@@ -1015,6 +1019,100 @@ body {
   justify-content: flex-end;
   gap: 12px;
   background: var(--bg-tertiary);
+}
+
+/* Edit User Modal Enhancements */
+.edit-user-modal {
+  max-width: 720px;
+}
+
+.modal-subtitle {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.edit-user-body {
+  display: grid;
+  gap: 20px;
+}
+
+.edit-user-section {
+  padding: 16px 18px;
+  border: 1px solid var(--border-light);
+  border-radius: 14px;
+  background: var(--bg-primary);
+}
+
+.edit-user-section .section-header {
+  margin-bottom: 12px;
+}
+
+.edit-user-section .section-header h4 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.edit-user-section .section-header p {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.edit-user-modal .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.edit-user-modal .form-group label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.edit-user-modal .form-group input,
+.edit-user-modal .form-group select {
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 13px;
+  transition: all var(--transition-duration) var(--transition-smooth);
+}
+
+.edit-user-modal .form-group input:focus,
+.edit-user-modal .form-group select:focus {
+  outline: none;
+  border-color: var(--primary-accent);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+  background: var(--bg-primary);
+}
+
+.role-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.role-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-tertiary);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.role-option input {
+  accent-color: var(--primary-accent);
 }
 
 /* ============================================================================

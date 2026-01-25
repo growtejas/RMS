@@ -8,6 +8,9 @@ class AuditLogCreate(BaseModel):
     entity_id: Optional[str] = None
     action: str
     performed_by: Optional[int] = None
+    target_user_id: Optional[int] = None
+    old_value: Optional[str] = None
+    new_value: Optional[str] = None
 
 
 class AuditLogResponse(BaseModel):
@@ -16,6 +19,9 @@ class AuditLogResponse(BaseModel):
     entity_id: Optional[str]
     action: str
     performed_by: Optional[int]
+    target_user_id: Optional[int] = None
+    old_value: Optional[str] = None
+    new_value: Optional[str] = None
     performed_at: datetime
 
     class Config:

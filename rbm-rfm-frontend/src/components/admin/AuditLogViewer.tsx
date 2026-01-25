@@ -8,6 +8,7 @@ import {
   RefreshCw,
   AlertTriangle,
 } from "lucide-react";
+import { apiClient } from "../../api/client";
 
 interface AuditLog {
   id: number;
@@ -23,66 +24,35 @@ interface AuditLog {
   severity: "info" | "warning" | "error" | "critical";
 }
 
+type AuditLogResponse = {
+  audit_id: number;
+  entity_name: string;
+  entity_id: string | null;
+  action: string;
+  performed_by: number | null;
+  performed_at: string;
+  performed_by_username?: string | null;
+};
 
-// Mock data
-const mockLogs: AuditLog[] = [
-  {
-    id: 1,
-    timestamp: "2024-01-20 14:30:25",
-    user: "admin",
-    action: "UPDATE",
-    entityType: "employee",
-    entityId: 123,
-    entityName: "John Smith",
-    oldValue: "Status: Active",
-    newValue: "Status: Inactive",
-    ipAddress: "192.168.1.100",
-    severity: "warning",
-  },
-  {
-    id: 2,
-    timestamp: "2024-01-20 11:15:42",
-    user: "manager1",
-    action: "CREATE",
-    entityType: "requisition",
-    entityId: 456,
-    entityName: "AI Practitioner Requisition",
-    oldValue: "",
-    newValue: "Created requisition for AI role",
-    ipAddress: "192.168.1.101",
-    severity: "info",
-  },
-  {
-    id: 3,
-    timestamp: "2024-01-19 16:45:10",
-    user: "hr1",
-    action: "DELETE",
-    entityType: "user",
-    entityId: 789,
-    entityName: "temp_user",
-    oldValue: "User account exists",
-    newValue: "User account deleted",
-    ipAddress: "192.168.1.102",
-    severity: "error",
-  },
-  {
-    id: 4,
-    timestamp: "2024-01-19 09:20:33",
-    user: "system",
-    action: "LOGIN_FAILED",
-    entityType: "system",
-    entityId: 0,
-    entityName: "Authentication",
-    oldValue: "",
-    newValue: "Failed login attempt",
-    ipAddress: "203.0.113.5",
-    severity: "warning",
-  }
-];
+const normalizeAudit = (log: AuditLogResponse): AuditLog => ({
+  id: log.audit_id,
+  timestamp: log.performed_at,
+  user: log.performed_by_username || log.performed_by?.toString() || "System",
+  action: log.action,
+  entityType: "system",
+  entityId: log.entity_id ? Number(log.entity_id) : 0,
+  entityName: log.entity_name,
+  oldValue: "",
+  newValue: "",
+  ipAddress: "-",
+  severity: log.action === "DELETE" ? "error" : "info",
+});
 
 const AuditLogViewer: React.FC = () => {
-  const [logs] = useState<AuditLog[]>(mockLogs);
-  const [filteredLogs, setFilteredLogs] = useState<AuditLog[]>(mockLogs);
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [filteredLogs, setFilteredLogs] = useState<AuditLog[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState({
     search: "",
     dateFrom: "",
@@ -93,12 +63,25 @@ const AuditLogViewer: React.FC = () => {
   });
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
 
-
+  const fetchLogs = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await apiClient.get<AuditLogResponse[]>("/audit-logs/");
+      const mapped = response.data.map(normalizeAudit);
+      setLogs(mapped);
+      setFilteredLogs(mapped);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to load audit logs";
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    // Mock data load - in real app would be API call
-    // Using simple effect to simulate async load if needed, but for now
-    // logic is handled in initial state or could be moved
+    fetchLogs();
   }, []);
 
   const applyFilters = () => {
@@ -114,13 +97,15 @@ const AuditLogViewer: React.FC = () => {
     }
 
     if (filters.dateFrom) {
-      filtered = filtered.filter((log) => log.timestamp >= filters.dateFrom);
+      filtered = filtered.filter(
+        (log) => new Date(log.timestamp) >= new Date(filters.dateFrom),
+      );
     }
 
     if (filters.dateTo) {
-      filtered = filtered.filter(
-        (log) => log.timestamp <= filters.dateTo + " 23:59:59",
-      );
+      const end = new Date(filters.dateTo);
+      end.setHours(23, 59, 59, 999);
+      filtered = filtered.filter((log) => new Date(log.timestamp) <= end);
     }
 
     if (filters.user) {
@@ -180,7 +165,7 @@ const AuditLogViewer: React.FC = () => {
           </p>
         </div>
         <div className="header-actions">
-          <button className="action-button" onClick={applyFilters}>
+          <button className="action-button" onClick={fetchLogs}>
             <RefreshCw size={16} />
             Refresh
           </button>
@@ -328,11 +313,22 @@ const AuditLogViewer: React.FC = () => {
             </tr>
           </thead>
           <tbody>
+            {isLoading && (
+              <tr>
+                <td colSpan={8} className="table-loading">
+                  Loading audit logs...
+                </td>
+              </tr>
+            )}
             {filteredLogs.map((log) => (
               <tr key={log.id} className={`log-row severity-${log.severity}`}>
                 <td className="timestamp">
-                  <div className="date">{log.timestamp.split(" ")[0]}</div>
-                  <div className="time">{log.timestamp.split(" ")[1]}</div>
+                  <div className="date">
+                    {new Date(log.timestamp).toLocaleDateString()}
+                  </div>
+                  <div className="time">
+                    {new Date(log.timestamp).toLocaleTimeString()}
+                  </div>
                 </td>
                 <td className="user-cell">
                   <span className="user-badge">{log.user}</span>
@@ -384,10 +380,10 @@ const AuditLogViewer: React.FC = () => {
             ))}
           </tbody>
         </table>
-        {filteredLogs.length === 0 && (
+        {!isLoading && filteredLogs.length === 0 && (
           <div className="empty-logs">
             <AlertTriangle size={48} />
-            <p>No audit logs found matching your filters</p>
+            <p>{error ?? "No audit logs found matching your filters"}</p>
           </div>
         )}
       </div>

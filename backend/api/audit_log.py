@@ -24,6 +24,9 @@ def create_audit_log(
         entity_id=payload.entity_id,
         action=payload.action,
         performed_by=payload.performed_by,
+        target_user_id=payload.target_user_id,
+        old_value=payload.old_value,
+        new_value=payload.new_value,
     )
 
     db.add(audit)
@@ -50,4 +53,27 @@ def list_audit_logs(
     if entity_id:
         query = query.filter(AuditLog.entity_id == entity_id)
 
-    return query.order_by(AuditLog.performed_at.desc()).all()
+    logs = query.order_by(AuditLog.performed_at.desc()).all()
+
+    user_ids = {log.performed_by for log in logs if log.performed_by}
+    users_by_id = {
+        user.user_id: user.username
+        for user in db.query(User).filter(User.user_id.in_(user_ids)).all()
+    } if user_ids else {}
+
+    response = []
+    for log in logs:
+        response.append({
+            "audit_id": log.audit_id,
+            "entity_name": log.entity_name,
+            "entity_id": log.entity_id,
+            "action": log.action,
+            "performed_by": log.performed_by,
+            "performed_by_username": users_by_id.get(log.performed_by),
+            "target_user_id": log.target_user_id,
+            "old_value": log.old_value,
+            "new_value": log.new_value,
+            "performed_at": log.performed_at,
+        })
+
+    return response

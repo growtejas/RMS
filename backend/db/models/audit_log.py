@@ -3,7 +3,8 @@ from sqlalchemy import (
     Integer,
     String,
     TIMESTAMP,
-    ForeignKey
+    ForeignKey,
+    Text
 )
 from sqlalchemy.sql import func
 from db.base import Base
@@ -24,6 +25,15 @@ class AuditLog(Base):
         ForeignKey("users.user_id"),
         nullable=True
     )
+
+    target_user_id = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=True
+    )
+
+    old_value = Column(Text, nullable=True)
+    new_value = Column(Text, nullable=True)
 
     performed_at = Column(
         TIMESTAMP,

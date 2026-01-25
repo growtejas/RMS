@@ -15,6 +15,8 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime)
+    # Direct link to employee for admin UI and reporting
+    employee_id = Column(String(20), ForeignKey("employees.emp_id"), nullable=True, unique=True)
 
 
 class Role(Base):

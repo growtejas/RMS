@@ -1,0 +1,85 @@
+# RBM Resource Fulfillment Module: System Architecture & Flow Analysis
+
+## 1. High-Level Architecture
+The application follows a standard **Client-Server** architecture, specifically a Single Page Application (SPA) consuming a RESTful API.
+
+- **Frontend (Client):** A React application (built with Vite) that runs entirely in the user's browser. It handles the UI, routing, and user state.
+- **Backend (Server):** A FastAPI (Python) application that exposes JSON endpoints. It handles business logic, database interactions, and authentication.
+- **Database:** PostgreSQL stores all persistent data (employees, auth, requisitions, etc.).
+
+---
+
+## 2. Authentication & Security Flow
+This is the "Gatekeeper" of the system. It ensures only authorized users can access data.
+
+### Step 1: Login (The Handshake)
+1. **User Action:** Enters credentials in `Login.tsx`.
+2. **Frontend:** Calls `authService.login(username, password)`.
+3. **Backend (`api/auth.py`):**
+   - Verifies password hash.
+   - Generates an **Access Token** (JWT) containing the `sub` (username) and `role`.
+4. **Storage:** Frontend receives the token and stores it in `localStorage`.
+
+### Step 2: protecting the Routes (The Bouncer)
+- The React App is wrapped in `AuthContext` (`contexts/AuthContext.tsx`).
+- The `AppRouter` checks if a token exists. If not, it redirects to `/login`.
+- **Role-Based Access:** Routes like `/admin` are protected by `<ProtectedRoute role="Admin">`. It decodes the token to check if the user has the required permission.
+
+### Step 3: Authenticated Requests (The Badge)
+- **Axios Interceptor (`api/client.ts`):** Before *any* request leaves the frontend, this code runs. It automatically attaches the header: `Authorization: Bearer <token>`.
+- **Backend Dependency (`utils/dependencies.py`):** Every protected API endpoint checks this header.
+  - `get_current_user`: Decodes the token.
+  - `require_role`: Checks if the decoded user has the right privileges.
+
+---
+
+## 3. Data Flow: From Button Click to Database
+Let's trace how data moves when an Admin loads the "Master Data" page.
+
+### Layer 1: The View (Frontend Component)
+- **File:** `MasterDataManager.tsx`
+- **Action:** The component mounts (`useEffect`).
+- **Logic:** It calls a specific service function, e.g., `fetchDepartments()`.
+
+### Layer 2: The Service & Client (Frontend Networking)
+- **File:** `services/masterDataService.ts` calls `apiClient.get('/admin/departments')`.
+- **File:** `api/client.ts` attaches the JWT token and sends the HTTP GET request to `http://localhost:8000/api/v1/admin/departments`.
+
+### Layer 3: The API Router (Backend Entry)
+- **File:** `api/org.py` (or similar endpoint definition).
+- **Code:**
+  ```python
+  @router.get("/departments", response_model=List[DepartmentResponse])
+  def get_departments(db: Session = Depends(get_db), current_user = Depends(require_role("Admin"))):
+      ...
+  ```
+- **Validation:** FastAPI ensures the user is an Admin and injects a fresh Database Session.
+
+### Layer 4: The Database Interaction (ORM)
+- **Logic:** `departments = db.query(Department).all()`
+- **SQL:** SQLAlchemy translates this Python code into SQL: `SELECT * FROM departments;`
+- **Return:** The data travels back up the chain: Database -> Backend -> API Response (JSON) -> Frontend Service -> Component State -> UI Render.
+
+---
+
+## 5. Layout & UI Structure
+The Admin interface uses a "Shell" pattern to keep navigation consistent.
+
+### The Shell (`Dashboard.tsx`)
+This component acts as the frame for the entire Admin section.
+- **Sidebar:** Fixed functionality on the left.
+- **Header:** Top bar for user info/logout.
+- **Main Content Area:** This is dynamic.
+
+### State Management for Views
+Instead of navigating to different URLs for every tab (like "Departments" vs "Locations"), `Dashboard.tsx` often uses local state:
+```tsx
+const [activeView, setActiveView] = useState('employees');
+```
+When you click a sidebar button, it changes `activeView`. The main content area conditionally renders the component specifically for that view:
+```tsx
+{activeView === 'master-data' && <MasterDataManager />}
+{activeView === 'audit-logs' && <AuditLogViewer />}
+```
+
+This makes the dashboard feel instant and app-like, without full page reloads.

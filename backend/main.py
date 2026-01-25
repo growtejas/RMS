@@ -20,6 +20,7 @@ app.add_middleware(
 
 # ---- Core APIs ----
 from api.users import router as users_router
+from api.users import admin_router as admin_users_router
 from api.employees import router as employees_router
 from api.org import router as org_router
 
@@ -50,6 +51,7 @@ from api.auth import router as auth_router
 
 # ---- Include routers (EACH EXACTLY ONCE) ----
 app.include_router(users_router, prefix="/api")
+app.include_router(admin_users_router, prefix="/api")
 app.include_router(employees_router, prefix="/api")
 app.include_router(org_router, prefix="/api")
 
