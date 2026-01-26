@@ -36,7 +36,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
           </div>
         )}
         <button className="sidebar-toggle" onClick={onToggleCollapse}>
-          {collapsed ? <Menu size={20} /> : <X size={20} />}
+          {collapsed ? <Menu size={20} /> : <X size={20} color="white" />}
         </button>
       </div>
 

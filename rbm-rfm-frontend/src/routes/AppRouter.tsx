@@ -3,6 +3,7 @@ import Login from "../pages/Login";
 import Header from "../components/Header";
 import ProtectedRoute from "../components/ProtectedRoute";
 import AdminDashboard from "../components/admin/Dashboard";
+import HrDashboard from "../components/hr/Dashboard";
 import { useAuth } from "../contexts/AuthContext";
 
 const Dashboard = () => (
@@ -30,6 +31,7 @@ const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
 export const AppRouter = () => {
   const { isAuthenticated, user } = useAuth();
   const isAdmin = user?.roles?.some((r) => r === "admin" || r === "owner");
+  const isHr = user?.roles?.some((r) => r === "hr");
 
   return (
     <BrowserRouter>
@@ -38,7 +40,10 @@ export const AppRouter = () => {
           path="/login"
           element={
             isAuthenticated ? (
-              <Navigate to={isAdmin ? "/admin" : "/dashboard"} replace />
+              <Navigate
+                to={isAdmin ? "/admin" : isHr ? "/hr" : "/dashboard"}
+                replace
+              />
             ) : (
               <Login />
             )
@@ -63,6 +68,14 @@ export const AppRouter = () => {
           }
         />
         <Route
+          path="/hr"
+          element={
+            <ProtectedRoute requiredRoles={["hr"]}>
+              <HrDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/admin/overview"
           element={<Navigate to="/admin" replace />}
         />
@@ -74,7 +87,10 @@ export const AppRouter = () => {
             </ProtectedLayout>
           }
         />
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route
+          path="/"
+          element={<Navigate to={isHr ? "/hr" : "/dashboard"} replace />}
+        />
       </Routes>
     </BrowserRouter>
   );
