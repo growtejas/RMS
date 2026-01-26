@@ -291,10 +291,8 @@ const MasterDataManager: React.FC = () => {
         ? locations
         : departments;
 
-  const filteredItems = currentItems.filter(
-    (item) =>
-      item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.description.toLowerCase().includes(searchTerm.toLowerCase()),
+  const filteredItems = currentItems.filter((item) =>
+    item.name.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
   return (
@@ -367,17 +365,15 @@ const MasterDataManager: React.FC = () => {
           <thead>
             <tr>
               <th>Name</th>
-              <th>Description</th>
               <th>Created By</th>
               <th>Created At</th>
-              <th>Status</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={6} className="table-loading">
+                <td colSpan={4} className="table-loading">
                   Loading {activeTab}...
                 </td>
               </tr>
@@ -387,16 +383,8 @@ const MasterDataManager: React.FC = () => {
                 <td>
                   <div className="item-name">{item.name}</div>
                 </td>
-                <td>{item.description}</td>
                 <td>{item.createdBy}</td>
                 <td>{item.createdAt}</td>
-                <td>
-                  <span
-                    className={`status-badge ${item.isActive ? "active" : "inactive"}`}
-                  >
-                    {item.isActive ? "Active" : "Inactive"}
-                  </span>
-                </td>
                 <td>
                   <div className="action-buttons">
                     <button
@@ -431,9 +419,14 @@ const MasterDataManager: React.FC = () => {
       {/* Add New Item Modal */}
       {showAddModal && (
         <div className="modal-overlay">
-          <div className="modal-content">
+          <div className="modal-content edit-user-modal">
             <div className="modal-header">
-              <h3>Add New {activeTab.slice(0, -1)}</h3>
+              <div>
+                <h3>Add New {activeTab.slice(0, -1)}</h3>
+                <p className="modal-subtitle">
+                  Provide the details for the new {activeTab.slice(0, -1)}
+                </p>
+              </div>
               <button
                 className="close-button"
                 onClick={() => setShowAddModal(false)}
@@ -441,28 +434,39 @@ const MasterDataManager: React.FC = () => {
                 ×
               </button>
             </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label>Name *</label>
-                <input
-                  type="text"
-                  value={newItem.name}
-                  onChange={(e) =>
-                    setNewItem({ ...newItem, name: e.target.value })
-                  }
-                  placeholder={`Enter ${activeTab.slice(0, -1)} name`}
-                />
-              </div>
-              <div className="form-group">
-                <label>Description</label>
-                <textarea
-                  value={newItem.description}
-                  onChange={(e) =>
-                    setNewItem({ ...newItem, description: e.target.value })
-                  }
-                  placeholder={`Describe this ${activeTab.slice(0, -1)}`}
-                  rows={3}
-                />
+            <div className="modal-body edit-user-body">
+              <div className="edit-user-section">
+                <div className="section-header">
+                  <h4>Details</h4>
+                  <p>Fill in the required information</p>
+                </div>
+                <div className="form-group">
+                  <label>Name *</label>
+                  <input
+                    type="text"
+                    value={newItem.name}
+                    onChange={(e) =>
+                      setNewItem({ ...newItem, name: e.target.value })
+                    }
+                    placeholder={`Enter ${activeTab.slice(0, -1)} name`}
+                  />
+                </div>
+                {activeTab === "locations" && (
+                  <div className="form-group">
+                    <label>Country</label>
+                    <input
+                      type="text"
+                      value={newItem.description}
+                      onChange={(e) =>
+                        setNewItem({
+                          ...newItem,
+                          description: e.target.value,
+                        })
+                      }
+                      placeholder="Enter country"
+                    />
+                  </div>
+                )}
               </div>
             </div>
             <div className="modal-footer">

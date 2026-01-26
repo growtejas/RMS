@@ -45,6 +45,9 @@ from api.audit_log import router as audit_log_router
 # ---- HR ----
 from api.hr import router as hr_router
 
+# ---- Admin Overview ----
+from api.admin_overview import router as admin_overview_router
+
 # ---- Authentication ----
 from api.auth import router as auth_router
 
@@ -69,5 +72,6 @@ app.include_router(requisition_status_history_router, prefix="/api")
 
 app.include_router(audit_log_router, prefix="/api")
 app.include_router(hr_router, prefix="/api")
+app.include_router(admin_overview_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 

@@ -58,11 +58,13 @@ export const AppRouter = () => {
           path="/admin"
           element={
             <ProtectedRoute requiredRoles={["admin", "owner"]}>
-              <ProtectedLayout>
-                <AdminDashboard />
-              </ProtectedLayout>
+              <AdminDashboard />
             </ProtectedRoute>
           }
+        />
+        <Route
+          path="/admin/overview"
+          element={<Navigate to="/admin" replace />}
         />
         <Route
           path="/unauthorized"

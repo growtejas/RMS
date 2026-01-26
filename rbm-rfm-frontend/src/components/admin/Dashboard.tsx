@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import AdminSidebar from "../../components/admin/AdminSidebar";
+import Header from "../../components/Header";
 import AdminHeader from "../../components/admin/AdminHeader";
 import AdminMetrics from "../../components/admin/AdminMetrics";
 import MasterDataManager from "../../components/admin/MasterDataManager";
@@ -8,6 +9,17 @@ import AuditLogViewer from "../../components/admin/AuditLogViewer";
 import UserManager from "./UserManager";
 import "../../styles/admin/Dashboard.css";
 import { DashboardView } from "../../types/dashboard";
+
+const getViewTitle = (view: DashboardView): string => {
+  const titles: Record<DashboardView, string> = {
+    overview: "System Overview",
+    "master-data": "Master Data Management",
+    "audit-logs": "Audit Log Review",
+    users: "User Management",
+  };
+
+  return titles[view];
+};
 
 const AdminDashboard: React.FC = () => {
   const { user } = useAuth();
@@ -62,27 +74,19 @@ const AdminDashboard: React.FC = () => {
           sidebarCollapsed ? "sidebar-collapsed" : ""
         }`}
       >
+        <Header />
+
         <AdminHeader
           title={getViewTitle(activeView)}
           user={user}
           onLogout={() => {}}
+          showUser={false}
         />
 
         <div className="admin-content-area">{renderActiveView()}</div>
       </div>
     </div>
   );
-};
-
-const getViewTitle = (view: DashboardView): string => {
-  const titles: Record<DashboardView, string> = {
-    overview: "System Overview",
-    "master-data": "Master Data Management",
-    "audit-logs": "Audit Log Review",
-    users: "User Management",
-  };
-
-  return titles[view];
 };
 
 export default AdminDashboard;

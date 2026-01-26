@@ -13,15 +13,18 @@ import { apiClient } from "../../api/client";
 interface AuditLog {
   id: number;
   timestamp: string;
+  userId?: number | null;
   user: string;
+  userFullName?: string;
+  userRoles?: string[];
+  targetUserName?: string;
+  targetUserFullName?: string;
   action: string;
   entityType: "employee" | "requisition" | "user" | "role" | "system";
   entityId: number;
   entityName: string;
   oldValue: string;
   newValue: string;
-  ipAddress: string;
-  severity: "info" | "warning" | "error" | "critical";
 }
 
 type AuditLogResponse = {
@@ -32,36 +35,80 @@ type AuditLogResponse = {
   performed_by: number | null;
   performed_at: string;
   performed_by_username?: string | null;
+  performed_by_full_name?: string | null;
+  performed_by_roles?: string[];
+  target_user_id?: number | null;
+  target_user_username?: string | null;
+  target_user_full_name?: string | null;
+};
+
+type AuditSummaryResponse = {
+  total_logs: number;
+  warnings_errors: number;
+  active_users: number;
+  failed_logins: number;
 };
 
 const normalizeAudit = (log: AuditLogResponse): AuditLog => ({
   id: log.audit_id,
   timestamp: log.performed_at,
+  userId: log.performed_by ?? null,
   user: log.performed_by_username || log.performed_by?.toString() || "System",
+  userFullName: log.performed_by_full_name || undefined,
+  userRoles: log.performed_by_roles || undefined,
+  targetUserName: log.target_user_username || undefined,
+  targetUserFullName: log.target_user_full_name || undefined,
   action: log.action,
   entityType: "system",
   entityId: log.entity_id ? Number(log.entity_id) : 0,
   entityName: log.entity_name,
   oldValue: "",
   newValue: "",
-  ipAddress: "-",
-  severity: log.action === "DELETE" ? "error" : "info",
 });
 
 const AuditLogViewer: React.FC = () => {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [filteredLogs, setFilteredLogs] = useState<AuditLog[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<AuditSummaryResponse>({
+    total_logs: 0,
+    warnings_errors: 0,
+    active_users: 0,
+    failed_logins: 0,
+  });
   const [filters, setFilters] = useState({
     search: "",
     dateFrom: "",
     dateTo: "",
     user: "",
     action: "",
-    severity: "",
   });
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
+
+  const fetchSummary = async () => {
+    try {
+      const response = await apiClient.get<AuditSummaryResponse>(
+        "/audit-logs/summary",
+        {
+          params: {
+            search: debouncedSearch || undefined,
+            date_from: filters.dateFrom || undefined,
+            date_to: filters.dateTo || undefined,
+            user_id: filters.user || undefined,
+            action: filters.action || undefined,
+          },
+        },
+      );
+      setSummary(response.data);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to load audit summary";
+      setError(message);
+    }
+  };
 
   const fetchLogs = async () => {
     setIsLoading(true);
@@ -69,13 +116,22 @@ const AuditLogViewer: React.FC = () => {
     try {
       const response = await apiClient.get<
         AuditLogResponse[] | { logs: AuditLogResponse[] }
-      >("/audit-logs/");
+      >("/audit-logs/", {
+        params: {
+          search: debouncedSearch || undefined,
+          date_from: filters.dateFrom || undefined,
+          date_to: filters.dateTo || undefined,
+          user_id: filters.user || undefined,
+          action: filters.action || undefined,
+        },
+      });
       const raw = Array.isArray(response.data)
         ? response.data
         : response.data.logs || [];
       const mapped = raw.map(normalizeAudit);
       setLogs(mapped);
       setFilteredLogs(mapped);
+      await fetchSummary();
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to load audit logs";
@@ -89,58 +145,93 @@ const AuditLogViewer: React.FC = () => {
     fetchLogs();
   }, []);
 
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedSearch(filters.search);
+    }, 300);
+
+    return () => window.clearTimeout(timeout);
+  }, [filters.search]);
+
+  useEffect(() => {
+    fetchLogs();
+  }, [debouncedSearch]);
+
   const applyFilters = () => {
-    let filtered = [...logs];
-
-    if (filters.search) {
-      filtered = filtered.filter(
-        (log) =>
-          log.user.toLowerCase().includes(filters.search.toLowerCase()) ||
-          log.entityName.toLowerCase().includes(filters.search.toLowerCase()) ||
-          log.action.toLowerCase().includes(filters.search.toLowerCase()),
-      );
-    }
-
-    if (filters.dateFrom) {
-      filtered = filtered.filter(
-        (log) => new Date(log.timestamp) >= new Date(filters.dateFrom),
-      );
-    }
-
-    if (filters.dateTo) {
-      const end = new Date(filters.dateTo);
-      end.setHours(23, 59, 59, 999);
-      filtered = filtered.filter((log) => new Date(log.timestamp) <= end);
-    }
-
-    if (filters.user) {
-      filtered = filtered.filter((log) => log.user === filters.user);
-    }
-
-    if (filters.action) {
-      filtered = filtered.filter((log) => log.action === filters.action);
-    }
-
-    if (filters.severity) {
-      filtered = filtered.filter((log) => log.severity === filters.severity);
-    }
-
-    setFilteredLogs(filtered);
+    fetchLogs();
   };
 
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case "critical":
-        return "#dc2626";
-      case "error":
-        return "#ef4444";
-      case "warning":
-        return "#f59e0b";
-      case "info":
-        return "#3b82f6";
-      default:
-        return "#6b7280";
+  const resetFilters = () => {
+    setFilters({
+      search: "",
+      dateFrom: "",
+      dateTo: "",
+      user: "",
+      action: "",
+    });
+    setDebouncedSearch("");
+    fetchLogs();
+  };
+
+  const handleRefresh = () => {
+    fetchLogs();
+  };
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      const response = await apiClient.get("/audit-logs/export", {
+        params: {
+          date_from: filters.dateFrom || undefined,
+          date_to: filters.dateTo || undefined,
+        },
+        responseType: "blob",
+      });
+
+      const blobUrl = window.URL.createObjectURL(response.data);
+      const link = document.createElement("a");
+      const contentDisposition = response.headers["content-disposition"] as
+        | string
+        | undefined;
+      const match = contentDisposition?.match(/filename=([^;]+)/i);
+      const filename = match?.[1]?.replace(/"/g, "") || "audit-log.pdf";
+
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to export audit logs";
+      setError(message);
+    } finally {
+      setIsExporting(false);
     }
+  };
+
+  const formatDetails = (log: AuditLog) => {
+    const targetName =
+      log.targetUserFullName || log.targetUserName || "the user";
+
+    if (log.action === "USER_VIEW") {
+      return "Viewed user list";
+    }
+
+    if (log.action === "USER_ROLE_UPDATE") {
+      return `Assigned role changes to user ${targetName}`;
+    }
+
+    if (log.action === "USER_DELETE") {
+      return `Marked user ${targetName} as inactive`;
+    }
+
+    if (log.action === "USER_EDIT") {
+      return `Updated user ${targetName}`;
+    }
+
+    return `${log.action} ${log.entityName}`.trim();
   };
 
   const getActionIcon = (action: string) => {
@@ -170,13 +261,21 @@ const AuditLogViewer: React.FC = () => {
           </p>
         </div>
         <div className="header-actions">
-          <button className="action-button" onClick={fetchLogs}>
+          <button
+            className="action-button"
+            onClick={handleRefresh}
+            disabled={isLoading}
+          >
             <RefreshCw size={16} />
-            Refresh
+            {isLoading ? "Refreshing..." : "Refresh"}
           </button>
-          <button className="action-button">
+          <button
+            className="action-button"
+            onClick={handleExport}
+            disabled={isExporting}
+          >
             <Download size={16} />
-            Export Logs
+            {isExporting ? "Exporting..." : "Export Logs"}
           </button>
         </div>
       </div>
@@ -225,26 +324,26 @@ const AuditLogViewer: React.FC = () => {
               onChange={(e) => setFilters({ ...filters, user: e.target.value })}
             >
               <option value="">All Users</option>
-              {[...new Set(logs.map((log) => log.user))].map((user) => (
-                <option key={user} value={user}>
-                  {user}
+              {Array.from(
+                new Map(
+                  logs.map((log) => {
+                    const name = log.userFullName || log.user;
+                    const roles = log.userRoles?.length
+                      ? log.userRoles.join(", ")
+                      : "-";
+                    const label = `${name} (${roles})`;
+                    const value =
+                      log.userId !== null && log.userId !== undefined
+                        ? log.userId.toString()
+                        : "system";
+                    return [value, { value, label }];
+                  }),
+                ).values(),
+              ).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
                 </option>
               ))}
-            </select>
-          </div>
-          <div className="filter-item">
-            <label>Severity</label>
-            <select
-              value={filters.severity}
-              onChange={(e) =>
-                setFilters({ ...filters, severity: e.target.value })
-              }
-            >
-              <option value="">All Levels</option>
-              <option value="info">Info</option>
-              <option value="warning">Warning</option>
-              <option value="error">Error</option>
-              <option value="critical">Critical</option>
             </select>
           </div>
           <div className="filter-item">
@@ -263,43 +362,47 @@ const AuditLogViewer: React.FC = () => {
               ))}
             </select>
           </div>
-          <div className="filter-item">
-            <button className="apply-filters-button" onClick={applyFilters}>
-              <Filter size={16} />
-              Apply Filters
-            </button>
-          </div>
+        </div>
+        <div
+          className="filter-actions"
+          role="group"
+          aria-label="Filter actions"
+        >
+          <button className="apply-filters-button" onClick={applyFilters}>
+            <Filter size={16} />
+            Apply Filters
+          </button>
+          <button className="apply-filters-button" onClick={resetFilters}>
+            <RefreshCw size={16} />
+            Reset Filters
+          </button>
         </div>
       </div>
 
       {/* Summary Stats */}
       <div className="log-stats">
         <div className="stat-card">
-          <span className="stat-number">{logs.length}</span>
+          <span className="stat-number">{summary.total_logs}</span>
           <span className="stat-label">Total Logs</span>
         </div>
         <div className="stat-card">
-          <span className="stat-number">
-            {
-              logs.filter(
-                (l) => l.severity === "warning" || l.severity === "error",
-              ).length
-            }
-          </span>
+          <span className="stat-number">{summary.warnings_errors}</span>
           <span className="stat-label">Warnings & Errors</span>
         </div>
         <div className="stat-card">
-          <span className="stat-number">
-            {[...new Set(logs.map((l) => l.user))].length}
-          </span>
+          <span className="stat-number">{summary.active_users}</span>
           <span className="stat-label">Active Users</span>
         </div>
         <div className="stat-card">
+          <span className="stat-number">{summary.failed_logins}</span>
+          <span className="stat-label">Failed Logins</span>
+        </div>
+        {/* <div className="stat-card">
           <span className="stat-number">
             {logs.filter((l) => l.action === "LOGIN_FAILED").length}
           </span>
           <span className="stat-label">Failed Logins</span>
-        </div>
+        </div> */}
       </div>
 
       {/* Log Table */}
@@ -312,21 +415,18 @@ const AuditLogViewer: React.FC = () => {
               <th>Action</th>
               <th>Entity</th>
               <th>Details</th>
-              <th>Severity</th>
-              <th>IP Address</th>
-              <th>View</th>
             </tr>
           </thead>
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={8} className="table-loading">
+                <td colSpan={5} className="table-loading">
                   Loading audit logs...
                 </td>
               </tr>
             )}
             {filteredLogs.map((log) => (
-              <tr key={log.id} className={`log-row severity-${log.severity}`}>
+              <tr key={log.id} className="log-row">
                 <td className="timestamp">
                   <div className="date">
                     {new Date(log.timestamp).toLocaleDateString()}
@@ -336,7 +436,12 @@ const AuditLogViewer: React.FC = () => {
                   </div>
                 </td>
                 <td className="user-cell">
-                  <span className="user-badge">{log.user}</span>
+                  <span className="user-badge">
+                    {log.userFullName || log.user}
+                    {log.userRoles?.length
+                      ? ` (${log.userRoles.join(", ")})`
+                      : ""}
+                  </span>
                 </td>
                 <td className="action-cell">
                   <span className="action-icon">
@@ -349,37 +454,7 @@ const AuditLogViewer: React.FC = () => {
                   <div className="entity-name">{log.entityName}</div>
                 </td>
                 <td className="details-cell">
-                  <div className="change-summary">
-                    {log.oldValue && (
-                      <span className="old-value">{log.oldValue}</span>
-                    )}
-                    {log.oldValue && log.newValue && (
-                      <span className="arrow">→</span>
-                    )}
-                    {log.newValue && (
-                      <span className="new-value">{log.newValue}</span>
-                    )}
-                  </div>
-                </td>
-                <td className="severity-cell">
-                  <span
-                    className="severity-badge"
-                    style={{ backgroundColor: getSeverityColor(log.severity) }}
-                  >
-                    {log.severity.toUpperCase()}
-                  </span>
-                </td>
-                <td className="ip-cell">
-                  <code>{log.ipAddress}</code>
-                </td>
-                <td className="actions-cell">
-                  <button
-                    className="view-button"
-                    onClick={() => setSelectedLog(log)}
-                    title="View Details"
-                  >
-                    <Eye size={14} />
-                  </button>
+                  <div className="change-summary">{formatDetails(log)}</div>
                 </td>
               </tr>
             ))}
@@ -392,100 +467,6 @@ const AuditLogViewer: React.FC = () => {
           </div>
         )}
       </div>
-
-      {/* Log Detail Modal */}
-      {selectedLog && (
-        <div className="modal-overlay">
-          <div className="modal-content wide">
-            <div className="modal-header">
-              <h3>Audit Log Details</h3>
-              <button
-                className="close-button"
-                onClick={() => setSelectedLog(null)}
-              >
-                ×
-              </button>
-            </div>
-            <div className="modal-body">
-              <div className="log-details-grid">
-                <div className="detail-item">
-                  <label>Timestamp</label>
-                  <span>{selectedLog.timestamp}</span>
-                </div>
-                <div className="detail-item">
-                  <label>User</label>
-                  <span className="user-highlight">{selectedLog.user}</span>
-                </div>
-                <div className="detail-item">
-                  <label>IP Address</label>
-                  <code>{selectedLog.ipAddress}</code>
-                </div>
-                <div className="detail-item">
-                  <label>Action</label>
-                  <span className="action-badge">
-                    {getActionIcon(selectedLog.action)} {selectedLog.action}
-                  </span>
-                </div>
-                <div className="detail-item">
-                  <label>Entity Type</label>
-                  <span>{selectedLog.entityType}</span>
-                </div>
-                <div className="detail-item">
-                  <label>Entity ID</label>
-                  <span>{selectedLog.entityId}</span>
-                </div>
-                <div className="detail-item">
-                  <label>Entity Name</label>
-                  <span>{selectedLog.entityName}</span>
-                </div>
-                <div className="detail-item full-width">
-                  <label>Severity</label>
-                  <span
-                    className="severity-badge-large"
-                    style={{
-                      backgroundColor: getSeverityColor(selectedLog.severity),
-                    }}
-                  >
-                    {selectedLog.severity.toUpperCase()}
-                  </span>
-                </div>
-                <div className="detail-item full-width">
-                  <label>Old Value</label>
-                  <div className="value-box old">
-                    {selectedLog.oldValue || <em>No previous value</em>}
-                  </div>
-                </div>
-                <div className="detail-item full-width">
-                  <label>New Value</label>
-                  <div className="value-box new">{selectedLog.newValue}</div>
-                </div>
-                <div className="detail-item full-width">
-                  <label>Change Summary</label>
-                  <div className="change-visualization">
-                    <div className="old-value-visual">
-                      <span className="visual-label">Before:</span>
-                      {selectedLog.oldValue || "Empty"}
-                    </div>
-                    <div className="arrow-visual">→</div>
-                    <div className="new-value-visual">
-                      <span className="visual-label">After:</span>
-                      {selectedLog.newValue}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button
-                className="close-details-button"
-                onClick={() => setSelectedLog(null)}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
