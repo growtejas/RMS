@@ -4,7 +4,10 @@ import { useAuth } from "../../contexts/AuthContext";
 import Header from "../Header";
 import HrHeader from "./HRHeader";
 import HrSidebar, { HrDashboardView } from "./HRSidebar";
-import "../../styles/admin/Dashboard.css";
+import "../../styles/hr/hr-dashboard.css";
+import EmployeeList from "./EmployeeList";
+import CreateEmployee from "./CreateEmployee";
+import EmployeeProfile from "./EmployeeProfile";
 
 const viewLabels: Record<HrDashboardView, string> = {
   dashboard: "Dashboard",
@@ -18,6 +21,19 @@ const viewLabels: Record<HrDashboardView, string> = {
   "audit-logs": "Audit Logs",
 };
 
+/**
+ * Temporary mock metrics
+ * Will be replaced by API response later
+ */
+const dashboardMetrics = [
+  { label: "Total Employees", value: 128 },
+  { label: "Onboarding", value: 6 },
+  { label: "Active & Available", value: 82 },
+  { label: "Allocated", value: 31 },
+  { label: "Exited", value: 9 },
+  { label: "Bench Count", value: 14 },
+];
+
 const HrDashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -25,6 +41,39 @@ const HrDashboard: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
 
   const activeLabel = useMemo(() => viewLabels[activeView], [activeView]);
+
+  const renderDashboard = () => (
+    <>
+      <div className="admin-metrics">
+        {dashboardMetrics.map((metric) => (
+          <div key={metric.label} className="stat-card">
+            <span className="stat-number">{metric.value}</span>
+            <span className="stat-label">{metric.label}</span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+
+  const renderContent = () => {
+    switch (activeView) {
+      case "dashboard":
+        return renderDashboard();
+      case "employees":
+        return <EmployeeList />;
+      case "create-employee":
+        return <CreateEmployee />;
+      case "employee-profile":
+        return <EmployeeProfile />;
+      default:
+        return (
+          <>
+            <h2 style={{ marginBottom: "12px" }}>{activeLabel}</h2>
+            <p>HR view under construction.</p>
+          </>
+        );
+    }
+  };
 
   return (
     <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
@@ -34,10 +83,12 @@ const HrDashboard: React.FC = () => {
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((prev) => !prev)}
       />
+
       <div
         className={`admin-main-content ${collapsed ? "sidebar-collapsed" : ""}`}
       >
         <Header />
+
         <HrHeader
           title={activeLabel}
           user={user}
@@ -46,10 +97,8 @@ const HrDashboard: React.FC = () => {
             navigate("/login", { replace: true });
           }}
         />
-        <section className="admin-content-area">
-          <h2 style={{ marginBottom: "12px" }}>{activeLabel}</h2>
-          <p>HR dashboard view: {activeLabel}</p>
-        </section>
+
+        <section className="admin-content-area">{renderContent()}</section>
       </div>
     </div>
   );
