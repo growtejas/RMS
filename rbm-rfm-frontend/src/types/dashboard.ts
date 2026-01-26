@@ -1,6 +1,1 @@
-export type DashboardView =
-  | "overview"
-  | "master-data"
-  | "role-management"
-  | "audit-logs"
-  | "users";
+export type DashboardView = "overview" | "master-data" | "audit-logs" | "users";

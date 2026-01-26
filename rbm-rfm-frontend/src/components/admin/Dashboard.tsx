@@ -4,7 +4,6 @@ import AdminSidebar from "../../components/admin/AdminSidebar";
 import AdminHeader from "../../components/admin/AdminHeader";
 import AdminMetrics from "../../components/admin/AdminMetrics";
 import MasterDataManager from "../../components/admin/MasterDataManager";
-import RolePermissionManager from "../../components/admin/RolePermissionManager";
 import AuditLogViewer from "../../components/admin/AuditLogViewer";
 import UserManager from "./UserManager";
 import "../../styles/admin/Dashboard.css";
@@ -38,8 +37,6 @@ const AdminDashboard: React.FC = () => {
         );
       case "master-data":
         return <MasterDataManager />;
-      case "role-management":
-        return <RolePermissionManager />;
       case "audit-logs":
         return <AuditLogViewer />;
       case "users":
@@ -81,7 +78,6 @@ const getViewTitle = (view: DashboardView): string => {
   const titles: Record<DashboardView, string> = {
     overview: "System Overview",
     "master-data": "Master Data Management",
-    "role-management": "Role & Permission Management",
     "audit-logs": "Audit Log Review",
     users: "User Management",
   };

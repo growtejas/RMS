@@ -22,11 +22,6 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
   }[] = [
     { id: "overview", label: "Overview", icon: <Shield size={20} /> },
     { id: "master-data", label: "Master Data", icon: <Database size={20} /> },
-    {
-      id: "role-management",
-      label: "Roles & Permissions",
-      icon: <Users size={20} />,
-    },
     { id: "audit-logs", label: "Audit Logs", icon: <FileText size={20} /> },
     { id: "users", label: "User Management", icon: <Users size={20} /> },
   ];

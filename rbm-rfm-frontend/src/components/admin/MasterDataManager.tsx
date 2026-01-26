@@ -345,7 +345,7 @@ const MasterDataManager: React.FC = () => {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        <div className="control-buttons">
+        {/* <div className="control-buttons">
           <button className="control-button">
             <Filter size={16} />
             Filter
@@ -358,7 +358,7 @@ const MasterDataManager: React.FC = () => {
             <Upload size={16} />
             Import
           </button>
-        </div>
+        </div> */}
       </div>
 
       {/* Data Table */}

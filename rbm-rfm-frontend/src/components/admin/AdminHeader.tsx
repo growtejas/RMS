@@ -22,16 +22,16 @@ const AdminHeader: React.FC<AdminHeaderProps> = ({ title, user, onLogout }) => {
       </div>
 
       <div className="header-actions">
-        <div className="search-bar">
+        {/* <div className="search-bar">
           <Search size={16} />
           <input type="text" placeholder="Search" />
-        </div>
+        </div> */}
 
         <div className="header-user">
-          <button className="notification-btn" title="Notifications">
+          {/* <button className="notification-btn" title="Notifications">
             <Bell size={18} />
             <span className="notification-badge">3</span>
-          </button>
+          </button> */}
 
           <div className="user-info">
             <div className="user-name">{displayName}</div>

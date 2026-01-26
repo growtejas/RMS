@@ -67,8 +67,13 @@ const AuditLogViewer: React.FC = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await apiClient.get<AuditLogResponse[]>("/audit-logs/");
-      const mapped = response.data.map(normalizeAudit);
+      const response = await apiClient.get<
+        AuditLogResponse[] | { logs: AuditLogResponse[] }
+      >("/audit-logs/");
+      const raw = Array.isArray(response.data)
+        ? response.data
+        : response.data.logs || [];
+      const mapped = raw.map(normalizeAudit);
       setLogs(mapped);
       setFilteredLogs(mapped);
     } catch (err) {
