@@ -77,6 +77,7 @@ const HrDashboard: React.FC = () => {
         return <EmployeeProfile />;
       case "onboarding":
         return <OnboardingTracker />;
+
       case "bench-availability":
         return <BenchAvailability />;
       case "skills":

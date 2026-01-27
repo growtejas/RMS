@@ -1,5 +1,4 @@
-// components/hr/EmployeeProfile.tsx
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   User,
   Phone,
@@ -9,6 +8,8 @@ import {
   FileText,
   Edit,
   Plus,
+  Search,
+  ArrowLeft,
 } from "lucide-react";
 
 type ProfileTab =
@@ -20,31 +21,141 @@ type ProfileTab =
   | "financial"
   | "audit";
 
-const EmployeeProfile: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<ProfileTab>("overview");
+interface Employee {
+  empId: string;
+  fullName: string;
+  email: string;
+  status: string;
+  department: string;
+  doj: string;
+}
 
-  const employee = {
+/* ================= MOCK EMPLOYEES ================= */
+const EMPLOYEES: Employee[] = [
+  {
     empId: "RBM-001",
     fullName: "John Doe",
     email: "john.doe@rbm.com",
-    doj: "2023-01-15",
     status: "Onboarding",
     department: "Engineering",
-  };
+    doj: "2023-01-15",
+  },
+  {
+    empId: "RBM-002",
+    fullName: "Priya Sharma",
+    email: "priya.sharma@rbm.com",
+    status: "Active",
+    department: "Marketing",
+    doj: "2022-11-03",
+  },
+  {
+    empId: "RBM-003",
+    fullName: "Amit Patel",
+    email: "amit.patel@rbm.com",
+    status: "Bench",
+    department: "Engineering",
+    doj: "2021-06-21",
+  },
+];
 
+const EmployeeProfile: React.FC = () => {
+  /* ================= STATE ================= */
+  const [search, setSearch] = useState("");
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(
+    null,
+  );
+  const [activeTab, setActiveTab] = useState<ProfileTab>("overview");
+
+  /* ================= FILTER ================= */
+  const filteredEmployees = useMemo(() => {
+    return EMPLOYEES.filter(
+      (e) =>
+        e.fullName.toLowerCase().includes(search.toLowerCase()) ||
+        e.empId.toLowerCase().includes(search.toLowerCase()) ||
+        e.email.toLowerCase().includes(search.toLowerCase()),
+    );
+  }, [search]);
+
+  /* ================= TABS ================= */
   const tabs: { id: ProfileTab; label: string; icon: React.ReactNode }[] = [
-    { id: "overview", label: "Overview", icon: <User size={16} /> },
-    { id: "core", label: "Core Details", icon: <User size={16} /> },
-    { id: "contact", label: "Contact Details", icon: <Phone size={16} /> },
-    { id: "skills", label: "Skills", icon: <Award size={16} /> },
-    { id: "education", label: "Education", icon: <GraduationCap size={16} /> },
-    { id: "financial", label: "Financial", icon: <CreditCard size={16} /> },
-    { id: "audit", label: "Audit Log", icon: <FileText size={16} /> },
+    { id: "overview", label: "Overview", icon: <User size={14} /> },
+    { id: "core", label: "Core Details", icon: <User size={14} /> },
+    { id: "contact", label: "Contact Details", icon: <Phone size={14} /> },
+    { id: "skills", label: "Skills", icon: <Award size={14} /> },
+    { id: "education", label: "Education", icon: <GraduationCap size={14} /> },
+    { id: "financial", label: "Financial", icon: <CreditCard size={14} /> },
+    { id: "audit", label: "Audit Log", icon: <FileText size={14} /> },
   ];
+
+  /* ================= EMPLOYEE SELECTOR ================= */
+  if (!selectedEmployee) {
+    return (
+      <>
+        <div className="manager-header">
+          <h2>Employee Profiles</h2>
+          <p className="subtitle">
+            Search and select an employee to view their 360° profile.
+          </p>
+        </div>
+
+        {/* Search */}
+        <div className="log-filters">
+          <div className="search-box">
+            <Search size={16} />
+            <input
+              placeholder="Search by name, employee ID, or email"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Employee Cards */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+            gap: "16px",
+            marginTop: "24px",
+          }}
+        >
+          {filteredEmployees.map((emp) => (
+            <div
+              key={emp.empId}
+              className="stat-card"
+              style={{ cursor: "pointer" }}
+              onClick={() => {
+                setSelectedEmployee(emp);
+                setActiveTab("overview");
+              }}
+            >
+              <div style={{ fontWeight: 600 }}>{emp.fullName}</div>
+              <div className="text-xs text-slate-500">{emp.empId}</div>
+
+              <div style={{ marginTop: "12px", fontSize: "13px" }}>
+                <div>
+                  <strong>Status:</strong> {emp.status}
+                </div>
+                <div>
+                  <strong>Dept:</strong> {emp.department}
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {filteredEmployees.length === 0 && (
+            <div className="empty-state">No employees match your search.</div>
+          )}
+        </div>
+      </>
+    );
+  }
+
+  /* ================= PROFILE VIEW ================= */
+  const employee = selectedEmployee;
 
   const renderTabContent = () => {
     switch (activeTab) {
-      /* ================= OVERVIEW ================= */
       case "overview":
         return (
           <div className="master-data-manager">
@@ -74,13 +185,11 @@ const EmployeeProfile: React.FC = () => {
           </div>
         );
 
-      /* ================= CORE ================= */
       case "core":
         return (
           <div className="master-data-manager">
             <div className="manager-header">
               <h3>Core Details</h3>
-              <p className="subtitle">Primary employee identity information.</p>
             </div>
 
             <div className="form-field">
@@ -103,11 +212,6 @@ const EmployeeProfile: React.FC = () => {
               <input value={employee.doj} disabled />
             </div>
 
-            <div className="form-field">
-              <label>Status</label>
-              <input value={employee.status} disabled />
-            </div>
-
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <button className="action-button primary">
                 <Edit size={14} />
@@ -117,120 +221,27 @@ const EmployeeProfile: React.FC = () => {
           </div>
         );
 
-      /* ================= CONTACT ================= */
-      case "contact":
-        return (
-          <div className="master-data-manager">
-            <div className="manager-header">
-              <h3>Contact Details</h3>
-              <p className="subtitle">
-                Work, personal, and emergency contact information.
-              </p>
-            </div>
-
-            <div className="empty-state">No contact details added yet.</div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button className="action-button primary">
-                <Plus size={14} />
-                Add / Edit Contact Details
-              </button>
-            </div>
-          </div>
-        );
-
-      /* ================= SKILLS ================= */
-      case "skills":
-        return (
-          <div className="master-data-manager">
-            <div className="manager-header">
-              <h3>Skills</h3>
-              <p className="subtitle">Employee skills and proficiency.</p>
-            </div>
-
-            <div className="empty-state">No skills added yet.</div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button className="action-button primary">
-                <Plus size={14} />
-                Add Skill
-              </button>
-            </div>
-          </div>
-        );
-
-      /* ================= EDUCATION ================= */
-      case "education":
-        return (
-          <div className="master-data-manager">
-            <div className="manager-header">
-              <h3>Education</h3>
-              <p className="subtitle">Academic qualifications.</p>
-            </div>
-
-            <div className="empty-state">No education records available.</div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button className="action-button primary">
-                <Plus size={14} />
-                Add Education
-              </button>
-            </div>
-          </div>
-        );
-
-      /* ================= FINANCIAL ================= */
-      case "financial":
-        return (
-          <div className="master-data-manager">
-            <div className="manager-header">
-              <h3>Financial Details</h3>
-              <p className="subtitle">
-                Restricted information. Authorized users only.
-              </p>
-            </div>
-
-            <div className="empty-state">
-              You do not have permission to view financial details.
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button className="action-button primary">
-                <Edit size={14} />
-                Edit Financial Details
-              </button>
-            </div>
-          </div>
-        );
-
-      /* ================= AUDIT ================= */
-      case "audit":
-        return (
-          <div className="audit-log-viewer">
-            <div className="manager-header">
-              <h3>Audit Log</h3>
-              <p className="subtitle">
-                Record of changes made to employee data.
-              </p>
-            </div>
-
-            <div className="empty-logs">No audit records available.</div>
-          </div>
-        );
-
       default:
-        return null;
+        return <div className="empty-state">Section coming soon.</div>;
     }
   };
 
   return (
     <>
-      {/* Page Header */}
+      {/* Back */}
+      <button
+        className="action-button"
+        style={{ marginBottom: "16px" }}
+        onClick={() => setSelectedEmployee(null)}
+      >
+        <ArrowLeft size={14} />
+        Back to Employee List
+      </button>
+
+      {/* Header */}
       <div className="manager-header">
-        <h2>Employee Profile</h2>
-        <p className="subtitle">
-          Consolidated 360° view of employee information.
-        </p>
+        <h2>{employee.fullName}</h2>
+        <p className="subtitle">{employee.empId}</p>
       </div>
 
       {/* Tabs */}
@@ -249,7 +260,6 @@ const EmployeeProfile: React.FC = () => {
         ))}
       </div>
 
-      {/* Tab Content */}
       {renderTabContent()}
     </>
   );
