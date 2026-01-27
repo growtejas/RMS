@@ -8,6 +8,7 @@ import {
   CreditCard,
   FileText,
   Edit,
+  Plus,
 } from "lucide-react";
 
 type ProfileTab =
@@ -43,6 +44,7 @@ const EmployeeProfile: React.FC = () => {
 
   const renderTabContent = () => {
     switch (activeTab) {
+      /* ================= OVERVIEW ================= */
       case "overview":
         return (
           <div className="master-data-manager">
@@ -72,6 +74,7 @@ const EmployeeProfile: React.FC = () => {
           </div>
         );
 
+      /* ================= CORE ================= */
       case "core":
         return (
           <div className="master-data-manager">
@@ -114,6 +117,7 @@ const EmployeeProfile: React.FC = () => {
           </div>
         );
 
+      /* ================= CONTACT ================= */
       case "contact":
         return (
           <div className="master-data-manager">
@@ -125,9 +129,17 @@ const EmployeeProfile: React.FC = () => {
             </div>
 
             <div className="empty-state">No contact details added yet.</div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button className="action-button primary">
+                <Plus size={14} />
+                Add / Edit Contact Details
+              </button>
+            </div>
           </div>
         );
 
+      /* ================= SKILLS ================= */
       case "skills":
         return (
           <div className="master-data-manager">
@@ -137,9 +149,17 @@ const EmployeeProfile: React.FC = () => {
             </div>
 
             <div className="empty-state">No skills added yet.</div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button className="action-button primary">
+                <Plus size={14} />
+                Add Skill
+              </button>
+            </div>
           </div>
         );
 
+      /* ================= EDUCATION ================= */
       case "education":
         return (
           <div className="master-data-manager">
@@ -149,9 +169,17 @@ const EmployeeProfile: React.FC = () => {
             </div>
 
             <div className="empty-state">No education records available.</div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button className="action-button primary">
+                <Plus size={14} />
+                Add Education
+              </button>
+            </div>
           </div>
         );
 
+      /* ================= FINANCIAL ================= */
       case "financial":
         return (
           <div className="master-data-manager">
@@ -163,11 +191,19 @@ const EmployeeProfile: React.FC = () => {
             </div>
 
             <div className="empty-state">
-              You do not have permission to view this section.
+              You do not have permission to view financial details.
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button className="action-button primary">
+                <Edit size={14} />
+                Edit Financial Details
+              </button>
             </div>
           </div>
         );
 
+      /* ================= AUDIT ================= */
       case "audit":
         return (
           <div className="audit-log-viewer">

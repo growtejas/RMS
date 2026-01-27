@@ -8,6 +8,13 @@ import "../../styles/hr/hr-dashboard.css";
 import EmployeeList from "./EmployeeList";
 import CreateEmployee from "./CreateEmployee";
 import EmployeeProfile from "./EmployeeProfile";
+import OnboardingTracker from "./OnboardingTracker";
+import BenchAvailability from "./BenchAvailability";
+import SkillsOverview from "./SkillsOverview";
+import HrReports from "./HrReports";
+import HrAuditLog from "./HrAuditLog";
+import HrTickets from "./HrTickets";
+import TicketDetails from "./TicketDetails";
 
 const viewLabels: Record<HrDashboardView, string> = {
   dashboard: "Dashboard",
@@ -19,6 +26,8 @@ const viewLabels: Record<HrDashboardView, string> = {
   skills: "Skills",
   reports: "Reports",
   "audit-logs": "Audit Logs",
+  ticket: "Tickets",
+  "ticket-detail": "Ticket Details",
 };
 
 /**
@@ -39,6 +48,7 @@ const HrDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [activeView, setActiveView] = useState<HrDashboardView>("dashboard");
   const [collapsed, setCollapsed] = useState(false);
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
 
   const activeLabel = useMemo(() => viewLabels[activeView], [activeView]);
 
@@ -65,6 +75,33 @@ const HrDashboard: React.FC = () => {
         return <CreateEmployee />;
       case "employee-profile":
         return <EmployeeProfile />;
+      case "onboarding":
+        return <OnboardingTracker />;
+      case "bench-availability":
+        return <BenchAvailability />;
+      case "skills":
+        return <SkillsOverview />;
+      case "reports":
+        return <HrReports />;
+      case "audit-logs":
+        return <HrAuditLog />;
+      case "ticket":
+        return (
+          <HrTickets
+            onViewTicket={(ticketId) => {
+              setSelectedTicketId(ticketId);
+              setActiveView("ticket-detail");
+            }}
+          />
+        );
+      case "ticket-detail":
+        return (
+          <TicketDetails
+            ticketId={selectedTicketId}
+            onBack={() => setActiveView("ticket")}
+          />
+        );
+
       default:
         return (
           <>
