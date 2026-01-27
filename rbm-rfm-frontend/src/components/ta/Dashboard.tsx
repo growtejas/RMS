@@ -12,6 +12,10 @@ import ResourcePool from "./ResourcePool";
 import TAReports from "./TAReports";
 import TAAuditLog from "./TAAuditLog";
 
+/* ======================================================
+   View Labels
+   ====================================================== */
+
 const viewLabels: Record<TADashboardView, string> = {
   dashboard: "Dashboard",
   requisitions: "Requisitions",
@@ -22,16 +26,75 @@ const viewLabels: Record<TADashboardView, string> = {
   "audit-logs": "Audit Logs",
 };
 
-const dashboardMetrics = [
-  { label: "Open Requisitions", value: 14 },
-  { label: "In Progress", value: 6 },
-  { label: "Fulfilled", value: 21 },
-  { label: "Avg. Time to Fill (Days)", value: 12 },
+/* ======================================================
+   Dashboard Types
+   ====================================================== */
+
+type TADashboardMetric = {
+  key: string;
+  label: string;
+  value: number;
+  variant: "neutral" | "warning" | "success" | "critical";
+};
+
+type TAAlert = {
+  id: string;
+  message: string;
+  severity: "warning" | "critical";
+};
+
+/* ======================================================
+   Mock Dashboard Data (Replace with API later)
+   ====================================================== */
+
+const taDashboardMetrics: TADashboardMetric[] = [
+  {
+    key: "open",
+    label: "Open Requisitions",
+    value: 14,
+    variant: "neutral",
+  },
+  {
+    key: "inProgress",
+    label: "In Progress",
+    value: 6,
+    variant: "warning",
+  },
+  {
+    key: "assignedToMe",
+    label: "Assigned to Me",
+    value: 4,
+    variant: "success",
+  },
+  {
+    key: "avgTime",
+    label: "Avg Fulfillment Time (Days)",
+    value: 12,
+    variant: "neutral",
+  },
 ];
+
+const taAlerts: TAAlert[] = [
+  {
+    id: "REQ-1023",
+    message: "Requisition REQ-1023 aging over 30 days",
+    severity: "critical",
+  },
+  {
+    id: "REQ-1041",
+    message: "REQ-1041 nearing SLA breach (2 days left)",
+    severity: "warning",
+  },
+];
+
+/* ======================================================
+   Component
+   ====================================================== */
 
 const TADashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+
   const [activeView, setActiveView] = useState<TADashboardView>("dashboard");
   const [collapsed, setCollapsed] = useState(false);
   const [selectedRequisitionId, setSelectedRequisitionId] = useState<
@@ -40,16 +103,66 @@ const TADashboard: React.FC = () => {
 
   const activeLabel = useMemo(() => viewLabels[activeView], [activeView]);
 
+  /* ======================================================
+     Dashboard Render
+     ====================================================== */
+
   const renderDashboard = () => (
-    <div className="admin-metrics">
-      {dashboardMetrics.map((metric) => (
-        <div key={metric.label} className="stat-card">
-          <span className="stat-number">{metric.value}</span>
-          <span className="stat-label">{metric.label}</span>
+    <>
+      {/* KPI GRID */}
+      <div className="tickets-kpi-grid">
+        {taDashboardMetrics.map((metric) => (
+          <div key={metric.key} className={`ticket-kpi-card ${metric.variant}`}>
+            <div className="kpi-number">{metric.value}</div>
+            <div className="kpi-label">{metric.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ALERTS & SLA RISKS */}
+      <div className="stat-card" style={{ marginTop: 24 }}>
+        <div className="manager-header">
+          <h2>Alerts & SLA Risks</h2>
+          <p className="subtitle">Requisitions requiring immediate attention</p>
         </div>
-      ))}
-    </div>
+
+        {taAlerts.length === 0 ? (
+          <div className="empty-state">
+            <p>No alerts at the moment</p>
+          </div>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {taAlerts.map((alert) => (
+              <li
+                key={alert.id}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "14px 0",
+                  borderBottom: "1px solid var(--border-light)",
+                }}
+              >
+                <span>{alert.message}</span>
+
+                {alert.severity === "critical" ? (
+                  <span className="aging-indicator aging-30-plus">
+                    Critical
+                  </span>
+                ) : (
+                  <span className="sla-timer warning">SLA Warning</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </>
   );
+
+  /* ======================================================
+     Navigation Handlers
+     ====================================================== */
 
   const handleViewDetail = (reqId: string) => {
     setSelectedRequisitionId(reqId);
@@ -60,10 +173,13 @@ const TADashboard: React.FC = () => {
     switch (activeView) {
       case "dashboard":
         return renderDashboard();
+
       case "requisitions":
         return <Requisitions onViewRequisition={handleViewDetail} />;
+
       case "my-requisitions":
         return <MyRequisitions onViewRequisition={handleViewDetail} />;
+
       case "requisition-detail":
         return (
           <RequisitionDetail
@@ -71,21 +187,24 @@ const TADashboard: React.FC = () => {
             onBack={() => setActiveView("requisitions")}
           />
         );
+
       case "resource-pool":
         return <ResourcePool />;
+
       case "reports":
         return <TAReports />;
+
       case "audit-logs":
         return <TAAuditLog />;
+
       default:
-        return (
-          <>
-            <h2 style={{ marginBottom: "12px" }}>{activeLabel}</h2>
-            <p>TA view under construction.</p>
-          </>
-        );
+        return null;
     }
   };
+
+  /* ======================================================
+     Layout
+     ====================================================== */
 
   return (
     <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
@@ -100,6 +219,7 @@ const TADashboard: React.FC = () => {
         className={`admin-main-content ${collapsed ? "sidebar-collapsed" : ""}`}
       >
         <Header />
+
         <TAHeader
           title={activeLabel}
           user={user}
@@ -108,6 +228,7 @@ const TADashboard: React.FC = () => {
             navigate("/login", { replace: true });
           }}
         />
+
         <section className="admin-content-area">{renderContent()}</section>
       </div>
     </div>
