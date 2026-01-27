@@ -37,13 +37,13 @@ const skillsData: SkillCapability[] = [
 const SkillsOverview: React.FC = () => {
   return (
     <>
-      {/* Page Header */}
+      {/* Page Header
       <div className="manager-header">
         <h2>Skills & Capability Overview</h2>
         <p className="subtitle">
           Organization-wide visibility into employee skills and proficiency.
         </p>
-      </div>
+      </div> */}
 
       {/* Search */}
       <div className="log-filters">

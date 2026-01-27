@@ -44,14 +44,14 @@ const auditLogs: AuditRecord[] = [
 const HrAuditLog: React.FC = () => {
   return (
     <>
-      {/* Page Header */}
+      {/* Page Header
       <div className="manager-header">
         <h2>Audit Log</h2>
         <p className="subtitle">
           HR-scoped employee data change history for compliance and
           traceability.
         </p>
-      </div>
+      </div> */}
 
       {/* Filters */}
       <div className="log-filters">

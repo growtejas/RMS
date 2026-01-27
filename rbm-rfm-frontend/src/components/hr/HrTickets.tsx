@@ -73,11 +73,11 @@ interface HrTicketsProps {
 const HrTickets: React.FC<HrTicketsProps> = ({ onViewTicket }) => {
   return (
     <>
-      {/* ================= HEADER ================= */}
+      {/* ================= HEADER =================
       <div className="manager-header">
         <h2>Tickets</h2>
         <p className="subtitle">Project Resource Requests</p>
-      </div>
+      </div> */}
 
       {/* ================= KPIs ================= */}
       <div className="admin-metrics">

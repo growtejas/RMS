@@ -35,13 +35,13 @@ const benchEmployees: BenchEmployee[] = [
 const BenchAvailability: React.FC = () => {
   return (
     <>
-      {/* Page Header */}
+      {/* Page Header
       <div className="manager-header">
         <h2>Bench & Availability</h2>
         <p className="subtitle">
           View active employees who are currently unassigned and available.
         </p>
-      </div>
+      </div> */}
 
       {/* Filters */}
       <div className="log-filters">

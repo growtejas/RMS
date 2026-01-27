@@ -10,13 +10,13 @@ const CreateEmployee: React.FC = () => {
 
   return (
     <>
-      {/* Page Header */}
+      {/* Page Header
       <div className="manager-header">
         <h2>Create Employee</h2>
         <p className="subtitle">
           Start employee onboarding by creating the core profile.
         </p>
-      </div>
+      </div> */}
 
       {/* Create Employee Form */}
       <div className="master-data-manager">

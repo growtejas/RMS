@@ -91,12 +91,12 @@ const EmployeeProfile: React.FC = () => {
   if (!selectedEmployee) {
     return (
       <>
-        <div className="manager-header">
+        {/* <div className="manager-header">
           <h2>Employee Profiles</h2>
           <p className="subtitle">
             Search and select an employee to view their 360° profile.
           </p>
-        </div>
+        </div> */}
 
         {/* Search */}
         <div className="log-filters">

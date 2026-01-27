@@ -55,13 +55,13 @@ const OnboardingTracker: React.FC = () => {
 
   return (
     <>
-      {/* Page Header */}
+      {/* Page Header
       <div className="manager-header">
         <h2>Onboarding Tracker</h2>
         <p className="subtitle">
           Track onboarding progress and complete employee activation.
         </p>
-      </div>
+      </div> */}
 
       {/* Progress Steps */}
       <div className="master-data-manager">

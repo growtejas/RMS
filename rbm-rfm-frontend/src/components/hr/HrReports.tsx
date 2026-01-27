@@ -235,13 +235,13 @@ const HrReports: React.FC = () => {
 
   return (
     <>
-      {/* Header */}
+      {/* Header
       <div className="manager-header">
         <h2>HR Reports</h2>
         <p className="subtitle">
           Analytical reports for workforce visibility and decision-making.
         </p>
-      </div>
+      </div> */}
 
       {/* Layout */}
       <div
