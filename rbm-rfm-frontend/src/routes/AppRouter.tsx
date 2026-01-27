@@ -5,6 +5,7 @@ import ProtectedRoute from "../components/ProtectedRoute";
 import AdminDashboard from "../components/admin/Dashboard";
 import HrDashboard from "../components/hr/Dashboard";
 import TADashboard from "../components/ta/Dashboard";
+import ManagerDashboard from "../components/manager/ManagerDashboard";
 import { useAuth } from "../contexts/AuthContext";
 
 const Dashboard = () => (
@@ -34,6 +35,7 @@ export const AppRouter = () => {
   const isAdmin = user?.roles?.some((r) => r === "admin" || r === "owner");
   const isHr = user?.roles?.some((r) => r === "hr");
   const isTa = user?.roles?.some((r) => r === "ta");
+  const isManager = user?.roles?.some((r) => r === "manager");
 
   return (
     <BrowserRouter>
@@ -50,7 +52,9 @@ export const AppRouter = () => {
                       ? "/hr"
                       : isTa
                         ? "/ta"
-                        : "/dashboard"
+                        : isManager
+                          ? "/manager"
+                          : "/dashboard"
                 }
                 replace
               />
@@ -94,6 +98,14 @@ export const AppRouter = () => {
           }
         />
         <Route
+          path="/manager"
+          element={
+            <ProtectedRoute requiredRoles={["manager"]}>
+              <ManagerDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/admin/overview"
           element={<Navigate to="/admin" replace />}
         />
@@ -108,7 +120,18 @@ export const AppRouter = () => {
         <Route
           path="/"
           element={
-            <Navigate to={isHr ? "/hr" : isTa ? "/ta" : "/dashboard"} replace />
+            <Navigate
+              to={
+                isHr
+                  ? "/hr"
+                  : isTa
+                    ? "/ta"
+                    : isManager
+                      ? "/manager"
+                      : "/dashboard"
+              }
+              replace
+            />
           }
         />
       </Routes>
