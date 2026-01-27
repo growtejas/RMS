@@ -6,6 +6,7 @@ import AdminDashboard from "../components/admin/Dashboard";
 import HrDashboard from "../components/hr/Dashboard";
 import TADashboard from "../components/ta/Dashboard";
 import ManagerDashboard from "../components/manager/ManagerDashboard";
+import OwnerDashboard from "../components/owner/OwnerDashboard";
 import { useAuth } from "../contexts/AuthContext";
 
 const Dashboard = () => (
@@ -33,6 +34,7 @@ const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
 export const AppRouter = () => {
   const { isAuthenticated, user } = useAuth();
   const isAdmin = user?.roles?.some((r) => r === "admin" || r === "owner");
+  const isOwner = user?.roles?.some((r) => r === "owner");
   const isHr = user?.roles?.some((r) => r === "hr");
   const isTa = user?.roles?.some((r) => r === "ta");
   const isManager = user?.roles?.some((r) => r === "manager");
@@ -46,15 +48,17 @@ export const AppRouter = () => {
             isAuthenticated ? (
               <Navigate
                 to={
-                  isAdmin
-                    ? "/admin"
-                    : isHr
-                      ? "/hr"
-                      : isTa
-                        ? "/ta"
-                        : isManager
-                          ? "/manager"
-                          : "/dashboard"
+                  isOwner
+                    ? "/owner"
+                    : isAdmin
+                      ? "/admin"
+                      : isHr
+                        ? "/hr"
+                        : isTa
+                          ? "/ta"
+                          : isManager
+                            ? "/manager"
+                            : "/dashboard"
                 }
                 replace
               />
@@ -78,6 +82,14 @@ export const AppRouter = () => {
           element={
             <ProtectedRoute requiredRoles={["admin", "owner"]}>
               <AdminDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/owner"
+          element={
+            <ProtectedRoute requiredRoles={["owner"]}>
+              <OwnerDashboard />
             </ProtectedRoute>
           }
         />
@@ -122,13 +134,15 @@ export const AppRouter = () => {
           element={
             <Navigate
               to={
-                isHr
-                  ? "/hr"
-                  : isTa
-                    ? "/ta"
-                    : isManager
-                      ? "/manager"
-                      : "/dashboard"
+                isOwner
+                  ? "/owner"
+                  : isHr
+                    ? "/hr"
+                    : isTa
+                      ? "/ta"
+                      : isManager
+                        ? "/manager"
+                        : "/dashboard"
               }
               replace
             />
