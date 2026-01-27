@@ -31,8 +31,8 @@ const viewLabels: Record<HrDashboardView, string> = {
 };
 
 /**
- * Temporary mock metrics
- * Will be replaced by API response later
+  Temporary mock metrics
+  Will be replaced by API response later
  */
 const dashboardMetrics = [
   { label: "Total Employees", value: 128 },

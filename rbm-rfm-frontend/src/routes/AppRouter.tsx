@@ -4,6 +4,7 @@ import Header from "../components/Header";
 import ProtectedRoute from "../components/ProtectedRoute";
 import AdminDashboard from "../components/admin/Dashboard";
 import HrDashboard from "../components/hr/Dashboard";
+import TADashboard from "../components/ta/Dashboard";
 import { useAuth } from "../contexts/AuthContext";
 
 const Dashboard = () => (
@@ -32,6 +33,7 @@ export const AppRouter = () => {
   const { isAuthenticated, user } = useAuth();
   const isAdmin = user?.roles?.some((r) => r === "admin" || r === "owner");
   const isHr = user?.roles?.some((r) => r === "hr");
+  const isTa = user?.roles?.some((r) => r === "ta");
 
   return (
     <BrowserRouter>
@@ -41,7 +43,15 @@ export const AppRouter = () => {
           element={
             isAuthenticated ? (
               <Navigate
-                to={isAdmin ? "/admin" : isHr ? "/hr" : "/dashboard"}
+                to={
+                  isAdmin
+                    ? "/admin"
+                    : isHr
+                      ? "/hr"
+                      : isTa
+                        ? "/ta"
+                        : "/dashboard"
+                }
                 replace
               />
             ) : (
@@ -76,6 +86,14 @@ export const AppRouter = () => {
           }
         />
         <Route
+          path="/ta"
+          element={
+            <ProtectedRoute requiredRoles={["ta"]}>
+              <TADashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/admin/overview"
           element={<Navigate to="/admin" replace />}
         />
@@ -89,7 +107,9 @@ export const AppRouter = () => {
         />
         <Route
           path="/"
-          element={<Navigate to={isHr ? "/hr" : "/dashboard"} replace />}
+          element={
+            <Navigate to={isHr ? "/hr" : isTa ? "/ta" : "/dashboard"} replace />
+          }
         />
       </Routes>
     </BrowserRouter>
