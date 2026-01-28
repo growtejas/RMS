@@ -1,3 +1,7 @@
+.\venv\Scripts\python.exe -m alembic revision --autogenerate -m "message"
+.\venv\Scripts\python.exe -m alembic upgrade head
+
+
 /* 1. AUTHENTICATION & AUTHORIZATION (RBAC) */
 
 /* ---- USERS ---- */
