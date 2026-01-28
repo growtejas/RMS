@@ -73,7 +73,7 @@ const HrSidebar: React.FC<HrSidebarProps> = ({
     { id: "skills", label: "Skills", icon: <Award size={20} /> },
     { id: "reports", label: "Reports", icon: <BarChart3 size={20} /> },
     { id: "audit-logs", label: "Audit Logs", icon: <FileText size={20} /> },
-    { id: "ticket", label: "Ticket", icon: <FileText size={20} /> },
+    { id: "ticket", label: "Requisition", icon: <FileText size={20} /> },
   ];
 
   return (

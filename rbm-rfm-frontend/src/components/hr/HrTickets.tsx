@@ -1,6 +1,6 @@
 import React from "react";
 
-interface Ticket {
+interface Requisition {
   id: string;
   project: string;
   skill: string;
@@ -19,7 +19,7 @@ interface Ticket {
 
 /* ================= MOCK DATA ================= */
 
-const tickets: Ticket[] = [
+const requisitions: Requisition[] = [
   {
     id: "REQ-1012",
     project: "Client Alpha Revamp",
@@ -66,16 +66,18 @@ const tickets: Ticket[] = [
 
 /* ================= COMPONENT ================= */
 
-interface HrTicketsProps {
-  onViewTicket?: (ticketId: string) => void;
+interface HrRequisitionsProps {
+  onViewRequisition?: (requisitionId: string) => void;
 }
 
-const HrTickets: React.FC<HrTicketsProps> = ({ onViewTicket }) => {
+const HrRequisitions: React.FC<HrRequisitionsProps> = ({
+  onViewRequisition,
+}) => {
   return (
     <>
       {/* ================= HEADER =================
       <div className="manager-header">
-        <h2>Tickets</h2>
+        <h2>Requisitions</h2>
         <p className="subtitle">Project Resource Requests</p>
       </div> */}
 
@@ -181,7 +183,7 @@ const HrTickets: React.FC<HrTicketsProps> = ({ onViewTicket }) => {
           </thead>
 
           <tbody>
-            {tickets.map((t) => (
+            {requisitions.map((t) => (
               <tr key={t.id}>
                 <td>
                   <strong>{t.id}</strong>
@@ -230,7 +232,7 @@ const HrTickets: React.FC<HrTicketsProps> = ({ onViewTicket }) => {
                   <button
                     className="action-button"
                     type="button"
-                    onClick={() => onViewTicket?.(t.id)}
+                    onClick={() => onViewRequisition?.(t.id)}
                   >
                     View Details
                   </button>
@@ -238,7 +240,7 @@ const HrTickets: React.FC<HrTicketsProps> = ({ onViewTicket }) => {
               </tr>
             ))}
 
-            {tickets.length === 0 && (
+            {requisitions.length === 0 && (
               <tr>
                 <td colSpan={10}>
                   <div className="empty-state">
@@ -254,4 +256,4 @@ const HrTickets: React.FC<HrTicketsProps> = ({ onViewTicket }) => {
   );
 };
 
-export default HrTickets;
+export default HrRequisitions;

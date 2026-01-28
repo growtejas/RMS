@@ -13,7 +13,7 @@ import BenchAvailability from "./BenchAvailability";
 import SkillsOverview from "./SkillsOverview";
 import HrReports from "./HrReports";
 import HrAuditLog from "./HrAuditLog";
-import HrTickets from "./HrTickets";
+import HrRequisitions from "./HrTickets";
 import TicketDetails from "./TicketDetails";
 
 const viewLabels: Record<HrDashboardView, string> = {
@@ -26,8 +26,8 @@ const viewLabels: Record<HrDashboardView, string> = {
   skills: "Skills",
   reports: "Reports",
   "audit-logs": "Audit Logs",
-  ticket: "Tickets",
-  "ticket-detail": "Ticket Details",
+  ticket: "Requisitions",
+  "ticket-detail": "Requisition Details",
 };
 
 /**
@@ -88,8 +88,8 @@ const HrDashboard: React.FC = () => {
         return <HrAuditLog />;
       case "ticket":
         return (
-          <HrTickets
-            onViewTicket={(ticketId) => {
+          <HrRequisitions
+            onViewRequisition={(ticketId) => {
               setSelectedTicketId(ticketId);
               setActiveView("ticket-detail");
             }}
