@@ -7,6 +7,7 @@ import {
   AlertCircle,
   UserPlus,
   Filter,
+  Search,
   BarChart3,
   Briefcase,
 } from "lucide-react";
@@ -865,54 +866,56 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
       </div>
 
       {/* Search and Filters */}
-      <div className="log-filters" style={{ marginBottom: "28px" }}>
+      <div className="log-filters" style={{ marginBottom: "24px" }}>
         <div className="filter-group">
           <div className="search-box">
+            <Search size={14} />
             <input
               type="text"
-              placeholder="Search by ID, project, or client..."
+              placeholder="Search requisitions by ID, project, or client..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
+        </div>
 
-          <div className="filter-grid">
-            <div className="filter-item">
-              <label>Priority</label>
-              <select>
-                <option>All Priorities</option>
-                <option>High</option>
-                <option>Medium</option>
-                <option>Low</option>
-              </select>
-            </div>
-            <div className="filter-item">
-              <label>Status</label>
-              <select>
-                <option>All Status</option>
-                <option>Open</option>
-                <option>In Progress</option>
-                <option>Closed</option>
-              </select>
-            </div>
-            <div className="filter-item">
-              <label>Aging</label>
-              <select>
-                <option>All</option>
-                <option>0–7 days</option>
-                <option>8–30 days</option>
-                <option>30+ days</option>
-              </select>
-            </div>
-            <div className="filter-item">
-              <label>Client</label>
-              <select>
-                <option>All Clients</option>
-                <option>FinTech Corp</option>
-                <option>Global Bank</option>
-                <option>Data Insights Inc</option>
-              </select>
-            </div>
+        <div className="filter-grid">
+          <div className="filter-item">
+            <label>Priority</label>
+            <select>
+              <option>All Priorities</option>
+              <option>High</option>
+              <option>Medium</option>
+              <option>Low</option>
+            </select>
+          </div>
+          <div className="filter-item">
+            <label>Status</label>
+            <select>
+              <option>All Status</option>
+              <option>Open</option>
+              <option>In Progress</option>
+              <option>Closed</option>
+            </select>
+          </div>
+          <div className="filter-item">
+            <label>Location</label>
+            <select>
+              <option>All Locations</option>
+              <option>Bengaluru</option>
+              <option>Mumbai</option>
+              <option>Delhi</option>
+              <option>Pune</option>
+            </select>
+          </div>
+          <div className="filter-item">
+            <label>Work Mode</label>
+            <select>
+              <option>All Modes</option>
+              <option>Remote</option>
+              <option>Hybrid</option>
+              <option>WFO</option>
+            </select>
           </div>
         </div>
       </div>
