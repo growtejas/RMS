@@ -89,7 +89,7 @@ const HrDashboard: React.FC = () => {
       case "ticket":
         return (
           <HrRequisitions
-            onViewRequisition={(ticketId) => {
+            onViewRequisition={(ticketId: string) => {
               setSelectedTicketId(ticketId);
               setActiveView("ticket-detail");
             }}
