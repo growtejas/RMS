@@ -377,7 +377,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
               Requisition Details
             </h1>
             <p style={{ fontSize: "13px", color: "var(--text-tertiary)" }}>
-              Manage and update resource requirements - HR/TA View
+              Manage and update resource requirements
             </p>
           </div>
         </div>
@@ -411,12 +411,12 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
               </button>
             </>
           )}
-          <button className="action-button">
+          {/* <button className="action-button">
             <Download size={16} />
           </button>
           <button className="action-button">
             <Printer size={16} />
-          </button>
+          </button> */}
         </div>
       </div>
 
@@ -513,10 +513,10 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
               color: "var(--text-tertiary)",
             }}
           >
-            <span>✅ {completionStats.fulfilled} Fulfilled</span>
-            <span>⏳ {completionStats.pending} Pending</span>
-            <span>❌ {completionStats.cancelled} Cancelled</span>
-            <span>📋 {completionStats.totalItems} Total Positions</span>
+            <span> {completionStats.fulfilled} Fulfilled</span>
+            <span> {completionStats.pending} Pending</span>
+            <span> {completionStats.cancelled} Cancelled</span>
+            <span> {completionStats.totalItems} Total Positions</span>
           </div>
         </div>
       </div>
@@ -902,7 +902,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
             <div className="audit-log-viewer">
               <div className="viewer-header">
                 <h2>Quick Actions</h2>
-                <p className="subtitle">Common HR/TA operations</p>
+                <p className="subtitle">HR operations</p>
               </div>
 
               <div
@@ -913,22 +913,22 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                   marginTop: "16px",
                 }}
               >
-                <button
+                {/* <button
                   className="action-button"
                   style={{ justifyContent: "flex-start", textAlign: "left" }}
                   onClick={() => setActiveTab("employees")}
                 >
                   <Users size={16} />
                   View Available Employees
-                </button>
-                <button
+                </button> */}
+                {/* <button
                   className="action-button"
                   style={{ justifyContent: "flex-start", textAlign: "left" }}
                   onClick={() => setActiveTab("items")}
                 >
                   <Briefcase size={16} />
                   Manage Requisition Items
-                </button>
+                </button> */}
                 <button
                   className="action-button"
                   style={{ justifyContent: "flex-start", textAlign: "left" }}
@@ -936,13 +936,13 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                   <MessageSquare size={16} />
                   Add Internal Note
                 </button>
-                <button
+                {/* <button
                   className="action-button primary"
                   style={{ justifyContent: "center" }}
                 >
                   <ExternalLink size={16} />
                   Generate Onboarding Plan
-                </button>
+                </button> */}
               </div>
             </div>
           </div>
@@ -2193,7 +2193,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
         <div style={{ display: "flex", gap: "12px" }}>
           {ticket.overallStatus !== "Closed" && (
             <>
-              <button
+              {/* <button
                 className="action-button"
                 onClick={() => {
                   setTicket((prev) => ({ ...prev, priority: "High" }));
@@ -2208,7 +2208,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
               >
                 <AlertCircle size={14} />
                 Mark as Urgent
-              </button>
+              </button> */}
 
               <button
                 className="action-button primary"
@@ -2235,7 +2235,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
             </>
           )}
 
-          <button
+          {/* <button
             className="action-button"
             onClick={() => window.print()}
             style={{
@@ -2248,12 +2248,12 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
           >
             <Printer size={14} />
             Print Summary
-          </button>
+          </button> */}
         </div>
       </div>
 
       {/* Footer - Audit Trail */}
-      <div
+      {/* <div
         style={{
           marginTop: "32px",
           paddingTop: "20px",
@@ -2288,23 +2288,22 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
             <span>Requisition ID: {ticket.ticketId}</span>
           </div>
         </div>
-      </div>
+      </div> */}
 
       {/* Help Section */}
       <div
-        style={{
-          marginTop: "16px",
-          padding: "12px",
-          backgroundColor: "var(--bg-secondary)",
-          borderRadius: "8px",
-          border: "1px solid var(--border-subtle)",
-          fontSize: "11px",
-          color: "var(--text-tertiary)",
-          textAlign: "center",
-        }}
+      // style={{
+      //   marginTop: "16px",
+      //   padding: "12px",
+      //   backgroundColor: "var(--bg-secondary)",
+      //   borderRadius: "8px",
+      //   border: "1px solid var(--border-subtle)",
+      //   fontSize: "11px",
+      //   color: "var(--text-tertiary)",
+      //   textAlign: "center",
+      // }}
       >
-        <strong>Need help?</strong> Contact the Talent Acquisition team at
-        ta-support@company.com or call extension 4567
+        <strong></strong>
       </div>
     </div>
   );

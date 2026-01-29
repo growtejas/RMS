@@ -489,7 +489,6 @@ const Requisitions: React.FC<RequisitionsProps> = ({
   onViewRequisition,
   onSelfAssign,
   onManageItems,
-  onAssignToOther,
 }) => {
   const [requisitions, setRequisitions] =
     useState<Requisition[]>(mockRequisitions);
@@ -497,9 +496,6 @@ const Requisitions: React.FC<RequisitionsProps> = ({
     "all" | "my" | "unassigned" | "high" | "overdue"
   >("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [showAssignmentPanel, setShowAssignmentPanel] = useState<string | null>(
-    null,
-  );
 
   // Filter requisitions
   const filteredRequisitions = requisitions.filter((req) => {
@@ -532,24 +528,6 @@ const Requisitions: React.FC<RequisitionsProps> = ({
     );
     onSelfAssign?.(reqId);
   };
-
-  const handleAssignToTA = (reqId: string, taName: string) => {
-    setRequisitions((prev) =>
-      prev.map((req) =>
-        req.id === reqId ? { ...req, assignedTA: taName } : req,
-      ),
-    );
-    onAssignToOther?.(reqId, taName);
-    setShowAssignmentPanel(null);
-  };
-
-  const availableTAs = [
-    "Anita Sharma",
-    "Priya Patel",
-    "Rajesh Kumar",
-    "Suresh Nair",
-    "Meena Reddy",
-  ];
 
   // Calculate stats for current TA
   const myRequisitions = requisitions.filter((r) => r.assignedTA === currentTA);
@@ -1035,19 +1013,6 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                             >
                               Self Assign
                             </button>
-                            <button
-                              className="action-button"
-                              onClick={() =>
-                                setShowAssignmentPanel(
-                                  showAssignmentPanel === req.id
-                                    ? null
-                                    : req.id,
-                                )
-                              }
-                              style={{ fontSize: "12px", padding: "6px 12px" }}
-                            >
-                              Assign to...
-                            </button>
                           </>
                         ) : isAssignedToMe ? (
                           <>
@@ -1079,27 +1044,6 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                       </div>
                     </td>
                   </tr>
-
-                  {/* Assignment Panel */}
-                  {showAssignmentPanel === req.id && (
-                    <tr>
-                      <td
-                        colSpan={9}
-                        style={{
-                          padding: "16px 20px",
-                          borderTop: "1px solid var(--border-light)",
-                        }}
-                      >
-                        <QuickAssignmentPanel
-                          requisition={req}
-                          onAssign={handleAssignToTA}
-                          availableTAs={availableTAs.filter(
-                            (ta) => ta !== currentTA,
-                          )}
-                        />
-                      </td>
-                    </tr>
-                  )}
                 </React.Fragment>
               );
             })}

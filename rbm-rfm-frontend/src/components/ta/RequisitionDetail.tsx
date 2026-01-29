@@ -410,12 +410,12 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
               </button>
             </>
           )}
-          <button className="action-button">
+          {/* <button className="action-button">
             <Download size={16} />
           </button>
           <button className="action-button">
             <Printer size={16} />
-          </button>
+          </button> */}
         </div>
       </div>
 
@@ -512,10 +512,10 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
               color: "var(--text-tertiary)",
             }}
           >
-            <span>✅ {completionStats.fulfilled} Fulfilled</span>
-            <span>⏳ {completionStats.pending} Pending</span>
-            <span>❌ {completionStats.cancelled} Cancelled</span>
-            <span>📋 {completionStats.totalItems} Total Positions</span>
+            <span> {completionStats.fulfilled} Fulfilled</span>
+            <span> {completionStats.pending} Pending</span>
+            <span> {completionStats.cancelled} Cancelled</span>
+            <span> {completionStats.totalItems} Total Positions</span>
           </div>
         </div>
       </div>
@@ -627,7 +627,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                         justifyContent: "space-between",
                       }}
                     >
-                      <span style={{ color: "var(--text-secondary)" }}>
+                      {/* <span style={{ color: "var(--text-secondary)" }}>
                         Project Code:
                       </span>
                       <span style={{ fontFamily: "monospace" }}>
@@ -639,7 +639,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                         display: "flex",
                         justifyContent: "space-between",
                       }}
-                    >
+                    > */}
                       <span style={{ color: "var(--text-secondary)" }}>
                         Client:
                       </span>
@@ -901,7 +901,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
             <div className="audit-log-viewer">
               <div className="viewer-header">
                 <h2>Quick Actions</h2>
-                <p className="subtitle">Common HR/TA operations</p>
+                <p className="subtitle">TA operations</p>
               </div>
 
               <div
@@ -912,22 +912,22 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   marginTop: "16px",
                 }}
               >
-                <button
+                {/* <button
                   className="action-button"
                   style={{ justifyContent: "flex-start", textAlign: "left" }}
                   onClick={() => setActiveTab("employees")}
                 >
                   <Users size={16} />
                   View Available Employees
-                </button>
-                <button
+                </button> */}
+                {/* <button
                   className="action-button"
                   style={{ justifyContent: "flex-start", textAlign: "left" }}
                   onClick={() => setActiveTab("items")}
                 >
                   <Briefcase size={16} />
                   Manage Requisition Items
-                </button>
+                </button> */}
                 <button
                   className="action-button"
                   style={{ justifyContent: "flex-start", textAlign: "left" }}
@@ -935,13 +935,13 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   <MessageSquare size={16} />
                   Add Internal Note
                 </button>
-                <button
+                {/* <button
                   className="action-button primary"
                   style={{ justifyContent: "center" }}
                 >
                   <ExternalLink size={16} />
                   Generate Onboarding Plan
-                </button>
+                </button> */}
               </div>
             </div>
           </div>
@@ -2192,7 +2192,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         <div style={{ display: "flex", gap: "12px" }}>
           {ticket.overallStatus !== "Closed" && (
             <>
-              <button
+              {/* <button
                 className="action-button"
                 onClick={() => {
                   setTicket((prev) => ({ ...prev, priority: "High" }));
@@ -2207,7 +2207,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
               >
                 <AlertCircle size={14} />
                 Mark as Urgent
-              </button>
+              </button> */}
 
               <button
                 className="action-button primary"
@@ -2234,7 +2234,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
             </>
           )}
 
-          <button
+          {/* <button
             className="action-button"
             onClick={() => window.print()}
             style={{
@@ -2247,7 +2247,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
           >
             <Printer size={14} />
             Print Summary
-          </button>
+          </button> */}
         </div>
       </div>
 
@@ -2262,7 +2262,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
           justifyContent: "space-between",
         }}
       >
-        <div
+        {/* <div
           style={{
             display: "flex",
             alignItems: "center",
@@ -2279,31 +2279,30 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
             <Clock size={14} />
             <span>Last updated: Today, 14:30</span>
           </div>
-        </div>
+        </div> */}
 
-        <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+        {/* <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             <Target size={14} />
             <span>Requisition ID: {ticket.ticketId}</span>
           </div>
-        </div>
+        </div> */}
       </div>
 
       {/* Help Section */}
       <div
-        style={{
-          marginTop: "16px",
-          padding: "12px",
-          backgroundColor: "var(--bg-secondary)",
-          borderRadius: "8px",
-          border: "1px solid var(--border-subtle)",
-          fontSize: "11px",
-          color: "var(--text-tertiary)",
-          textAlign: "center",
-        }}
+      // style={{
+      //   marginTop: "16px",
+      //   padding: "12px",
+      //   backgroundColor: "var(--bg-secondary)",
+      //   borderRadius: "8px",
+      //   border: "1px solid var(--border-subtle)",
+      //   fontSize: "11px",
+      //   color: "var(--text-tertiary)",
+      //   textAlign: "center",
+      // }}
       >
-        <strong>Need help?</strong> Contact the Talent Acquisition team at
-        ta-support@company.com or call extension 4567
+        <strong></strong>
       </div>
     </div>
   );
