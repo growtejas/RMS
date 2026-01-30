@@ -137,3 +137,32 @@ def require_any_role(*required_roles: str):
         return current_user
     
     return role_checker
+
+
+def validate_status_transition(current_status: str, new_status: str) -> None:
+    """
+    Validate requisition status transitions.
+
+    Allowed transitions:
+    Draft -> Pending Budget or Approved
+    Pending Budget -> Approved
+    Approved -> Active
+    Active -> Closed or Expired
+    """
+    allowed_transitions = {
+        "Draft": {"Pending Budget", "Approved"},
+        "Pending Budget": {"Approved"},
+        "Approved": {"Active"},
+        "Active": {"Closed", "Expired"},
+    }
+
+    if current_status == new_status:
+        return
+
+    if new_status not in allowed_transitions.get(current_status, set()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Invalid status transition: {current_status} -> {new_status}"
+            ),
+        )

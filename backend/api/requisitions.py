@@ -1,15 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import selectinload
+from typing import Optional
 
 from db.session import get_db
 from db.models.auth import User
-from utils.dependencies import require_any_role
+from utils.dependencies import require_any_role, validate_status_transition
 from db.models.requisition import Requisition
+from db.models.requisition_item import RequisitionItem
 from schemas.requisition import (
     RequisitionCreate,
     RequisitionUpdate,
     RequisitionStatusUpdate,
+    RequisitionResponse,
 )
+from schemas.requisition_item import RequisitionItemResponse
 
 router = APIRouter(
     prefix="/requisitions",
@@ -17,7 +22,7 @@ router = APIRouter(
 )
 
 
-@router.post("/")
+@router.post("/", response_model=RequisitionResponse)
 def create_requisition(
     payload: RequisitionCreate,
     db: Session = Depends(get_db),
@@ -36,27 +41,49 @@ def create_requisition(
         budget_amount=payload.budget_amount,
         required_by_date=payload.required_by_date,
         date_closed=payload.date_closed,
-        raised_by=current_user.user_id,
-        overall_status="Pending Budget",
+        raised_by=1,
+        overall_status="Draft",
     )
 
     db.add(requisition)
     db.commit()
     db.refresh(requisition)
 
-    return {
-        "message": "Requisition created",
-        "req_id": requisition.req_id
-    }
+    if payload.items:
+        for item in payload.items:
+            db_item = RequisitionItem(
+                req_id=requisition.req_id,
+                role_position=item.role_position,
+                job_description=item.job_description,
+                skill_level=item.skill_level,
+                experience_years=item.experience_years,
+                education_requirement=item.education_requirement,
+                requirements=item.requirements,
+                item_status="Pending",
+            )
+            db.add(db_item)
+        db.commit()
+        db.refresh(requisition)
+    return requisition
 
-@router.get("/")
+@router.get("/", response_model=list[RequisitionResponse])
 def list_requisitions(
+    status: Optional[str] = None,
+    raised_by: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee"))
 ):
-    return db.query(Requisition).all()
+    query = db.query(Requisition).options(selectinload(Requisition.items))
 
-@router.get("/{req_id}")
+    if status:
+        query = query.filter(Requisition.overall_status == status)
+
+    if raised_by is not None:
+        query = query.filter(Requisition.raised_by == raised_by)
+
+    return query.all()
+
+@router.get("/{req_id}", response_model=RequisitionResponse)
 def get_requisition(
     req_id: int,
     db: Session = Depends(get_db),
@@ -100,9 +127,9 @@ def update_requisition_status(
     current_user: User = Depends(require_any_role("Manager", "Admin", "HR"))
 ):
     if payload.overall_status not in (
+        "Draft",
         "Pending Budget",
-        "Pending HR",
-        "Approved & Unassigned",
+        "Approved",
         "Active",
         "Closed",
         "Expired",
@@ -121,7 +148,7 @@ def update_requisition_status(
 
     return {"message": "Status updated"}
 
-@router.post("/{req_id}/approve-budget")
+@router.patch("/{req_id}/approve-budget")
 def approve_budget(
     req_id: int,
     db: Session = Depends(get_db),
@@ -134,9 +161,9 @@ def approve_budget(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    requisition.budget_approved_by = current_user.user_id
-    if requisition.overall_status == "Pending Budget":
-        requisition.overall_status = "Pending HR"
+    validate_status_transition(requisition.overall_status, "Approved")
+    requisition.budget_approved_by = 2
+    requisition.overall_status = "Approved"
     db.commit()
 
     return {"message": "Budget approved"}

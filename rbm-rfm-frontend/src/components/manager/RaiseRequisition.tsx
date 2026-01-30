@@ -84,6 +84,8 @@ const RaiseRequisition: React.FC = () => {
   const [secondarySkillPick, setSecondarySkillPick] = useState<
     Record<number, number | "">
   >({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchSkills = async () => {
@@ -134,28 +136,119 @@ const RaiseRequisition: React.FC = () => {
     if (activeStep > 0) setActiveStep(activeStep - 1);
   };
 
-  const handleSubmit = () => {
-    console.log("Submitting requisition:", formData);
-    alert("Requisition submitted successfully!");
-    // Reset form
-    setFormData({
-      projectName: "",
-      clientName: "",
-      officeLocation: "",
-      workMode: "Hybrid",
-      requiredBy: "",
-      dateClosed: "",
-      justification: "",
-      priority: "Medium",
-      items: [],
-      budget: "",
-      projectDuration: "",
-      isReplacement: false,
-      additionalNotes: "",
-      approvedBy: null,
-      budgetApprovedBy: null,
+  const handleSubmit = async () => {
+    if (!validateStep(2)) {
+      setSubmitError("Please complete all required fields.");
+      return;
+    }
+
+    const invalidItem = formData.items.find((item) => {
+      const roleText = item.role.trim();
+      const descriptionText = item.description.trim();
+      return (
+        roleText.length < 2 ||
+        descriptionText.length < 5 ||
+        item.primarySkillId === ""
+      );
     });
-    setActiveStep(0);
+
+    if (invalidItem) {
+      setSubmitError(
+        "Each role needs a title (min 2 chars), primary skill, and description (min 5 chars).",
+      );
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+
+    try {
+      const itemsPayload = formData.items.flatMap((item) => {
+        const roleText = item.role.trim();
+        const descriptionText = item.description.trim();
+        const primarySkill = getSkillName(item.primarySkillId);
+        const secondarySkills = item.secondarySkillIds
+          .map((skillId) => getSkillName(skillId))
+          .filter(Boolean);
+        const requirementParts = [
+          primarySkill ? `Primary Skill: ${primarySkill}` : "",
+          secondarySkills.length
+            ? `Secondary Skills: ${secondarySkills.join(", ")}`
+            : "",
+        ].filter(Boolean);
+
+        const requirementsText = requirementParts.join(" | ") || undefined;
+
+        const payloadItem = {
+          role_position: roleText,
+          job_description: descriptionText,
+          skill_level: item.level,
+          experience_years: item.experience,
+          education_requirement: item.education.trim() || undefined,
+          requirements: requirementsText,
+        };
+
+        const quantity = Math.max(item.quantity || 1, 1);
+        return Array.from({ length: quantity }, () => payloadItem);
+      });
+
+      const workModePayload =
+        formData.workMode === "Remote" ? "WFH" : formData.workMode;
+
+      await apiClient.post("/requisitions/", {
+        project_name: formData.projectName || undefined,
+        client_name: formData.clientName || undefined,
+        office_location: formData.officeLocation || undefined,
+        work_mode: workModePayload || undefined,
+        required_by_date: formData.requiredBy || undefined,
+        priority: formData.priority || undefined,
+        justification: formData.justification || undefined,
+        budget_amount: formData.budget ? Number(formData.budget) : undefined,
+        duration: formData.projectDuration || undefined,
+        is_replacement: formData.isReplacement,
+        manager_notes: formData.additionalNotes || undefined,
+        date_closed: formData.dateClosed || undefined,
+        items: itemsPayload,
+      });
+
+      alert("Requisition submitted successfully!");
+      setFormData({
+        projectName: "",
+        clientName: "",
+        officeLocation: "",
+        workMode: "Hybrid",
+        requiredBy: "",
+        dateClosed: "",
+        justification: "",
+        priority: "Medium",
+        items: [],
+        budget: "",
+        projectDuration: "",
+        isReplacement: false,
+        additionalNotes: "",
+        approvedBy: null,
+        budgetApprovedBy: null,
+      });
+      setSkillSearch({});
+      setSecondarySkillPick({});
+      setActiveStep(0);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to submit requisition";
+      const apiMessage =
+        typeof error === "object" &&
+        error !== null &&
+        "response" in error &&
+        (error as { response?: { data?: { detail?: string } } }).response?.data
+          ?.detail
+          ? (error as { response?: { data?: { detail?: string } } }).response
+              ?.data?.detail
+          : null;
+
+      setSubmitError(apiMessage ?? errorMessage);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // ================= ITEM HANDLERS =================
@@ -1381,7 +1474,7 @@ const RaiseRequisition: React.FC = () => {
             <button
               className="action-button primary"
               onClick={handleSubmit}
-              disabled={!canProceed}
+              disabled={!canProceed || isSubmitting}
               style={{
                 minWidth: "180px",
                 background: canProceed
@@ -1390,11 +1483,27 @@ const RaiseRequisition: React.FC = () => {
               }}
             >
               <CheckCircle size={16} style={{ marginRight: "8px" }} />
-              Submit Requisition
+              {isSubmitting ? "Submitting..." : "Submit Requisition"}
             </button>
           )}
         </div>
       </div>
+
+      {submitError && (
+        <div
+          style={{
+            marginTop: "16px",
+            padding: "12px 16px",
+            borderRadius: "10px",
+            background: "rgba(239, 68, 68, 0.08)",
+            color: "var(--error)",
+            fontSize: "13px",
+            border: "1px solid rgba(239, 68, 68, 0.2)",
+          }}
+        >
+          {submitError}
+        </div>
+      )}
 
       {/* Workflow Legend */}
       <div

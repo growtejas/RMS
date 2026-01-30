@@ -6,6 +6,7 @@ from sqlalchemy import (
     ForeignKey,
     CheckConstraint
 )
+from sqlalchemy.orm import relationship
 from db.base import Base
 
 
@@ -25,6 +26,11 @@ class RequisitionItem(Base):
         ForeignKey("requisitions.req_id", ondelete="CASCADE"),
         nullable=False
     )
+
+    # --------------------
+    # Relationships
+    # --------------------
+    requisition = relationship("Requisition", back_populates="items")
 
     # --------------------
     # Position Details

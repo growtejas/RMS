@@ -21,9 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Upgrade schema."""
 
-    # ------------------------------------
     # 1. FIX assigned_emp_id (VARCHAR FK)
-    # ------------------------------------
 
     # Add FK constraint safely (type already matches)
     op.execute("""
@@ -39,9 +37,7 @@ def upgrade() -> None:
         ['emp_id']
     )
 
-    # ------------------------------------
     # 2. UPDATE item_status WORKFLOW
-    # ------------------------------------
     op.execute("""
         ALTER TABLE requisition_items
         DROP CONSTRAINT IF EXISTS chk_requisition_item_status;

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -11,6 +13,7 @@ from schemas.requisition_item import (
     RequisitionItemCreate,
     AssignEmployeeRequest,
     UpdateItemStatusRequest,
+    RequisitionItemResponse,
 )
 
 router = APIRouter(
@@ -21,7 +24,7 @@ router = APIRouter(
 # --------------------------------------------------
 # CREATE REQUISITION ITEM
 # --------------------------------------------------
-@router.post("/{req_id}/items")
+@router.post("/{req_id}/items", response_model=RequisitionItemResponse)
 def create_requisition_item(
     req_id: int,
     payload: RequisitionItemCreate,
@@ -50,15 +53,12 @@ def create_requisition_item(
     db.commit()
     db.refresh(item)
 
-    return {
-        "message": "Requisition item created",
-        "item_id": item.item_id,
-    }
+    return item
 
 # --------------------------------------------------
 # LIST ITEMS FOR A REQUISITION
 # --------------------------------------------------
-@router.get("/{req_id}/items")
+@router.get("/{req_id}/items", response_model=list[RequisitionItemResponse])
 def list_requisition_items(
     req_id: int,
     db: Session = Depends(get_db),
@@ -72,7 +72,7 @@ def list_requisition_items(
 # --------------------------------------------------
 # ASSIGN EMPLOYEE TO ITEM
 # --------------------------------------------------
-@router.post("/items/{item_id}/assign")
+@router.patch("/items/{item_id}/assign")
 def assign_employee_to_item(
     item_id: int,
     payload: AssignEmployeeRequest,
@@ -98,8 +98,51 @@ def assign_employee_to_item(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
+    existing_assignment = (
+        db.query(RequisitionItem)
+        .filter(
+            RequisitionItem.assigned_emp_id == payload.emp_id,
+            RequisitionItem.item_status == "Fulfilled",
+            RequisitionItem.item_id != item_id,
+        )
+        .first()
+    )
+
+    if existing_assignment:
+        raise HTTPException(
+            status_code=400,
+            detail="Employee already assigned to another fulfilled item"
+        )
+
     item.assigned_emp_id = payload.emp_id
     item.item_status = "Fulfilled"
+
+    requisition = db.query(Requisition).filter(
+        Requisition.req_id == item.req_id
+    ).first()
+
+    if requisition:
+        fulfilled_count = (
+            db.query(RequisitionItem)
+            .filter(
+                RequisitionItem.req_id == requisition.req_id,
+                RequisitionItem.item_status == "Fulfilled",
+            )
+            .count()
+        )
+
+        total_count = (
+            db.query(RequisitionItem)
+            .filter(RequisitionItem.req_id == requisition.req_id)
+            .count()
+        )
+
+        if fulfilled_count > 0:
+            requisition.overall_status = "Active"
+
+        if total_count > 0 and fulfilled_count == total_count:
+            requisition.overall_status = "Closed"
+            requisition.date_closed = datetime.utcnow()
 
     db.commit()
 

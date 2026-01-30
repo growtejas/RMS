@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey
 )
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from db.base import Base
 
 
@@ -73,10 +74,19 @@ class Requisition(Base):
     overall_status = Column(
         String(30),
         nullable=False,
-        default="Pending Budget"
+        default="Draft"
     )
 
     date_closed = Column(TIMESTAMP, nullable=True)
+
+    # --------------------
+    # Relationships
+    # --------------------
+    items = relationship(
+        "RequisitionItem",
+        back_populates="requisition",
+        cascade="all, delete-orphan",
+    )
 
     # --------------------
     # Audit
@@ -98,9 +108,9 @@ class Requisition(Base):
         CheckConstraint(
             """
             overall_status IN (
+                'Draft',
                 'Pending Budget',
-                'Pending HR',
-                'Approved & Unassigned',
+                'Approved',
                 'Active',
                 'Closed',
                 'Expired'
