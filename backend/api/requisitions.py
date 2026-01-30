@@ -24,13 +24,20 @@ def create_requisition(
     current_user: User = Depends(require_any_role("Manager", "Admin", "HR"))
 ):
     requisition = Requisition(
+        project_name=payload.project_name,
         client_name=payload.client_name,
         justification=payload.justification,
+        manager_notes=payload.manager_notes,
         priority=payload.priority,
-        budget=payload.budget,
-        required_by=payload.required_by,
-        status="Open",
-        budget_approved=False,
+        is_replacement=payload.is_replacement or False,
+        duration=payload.duration,
+        work_mode=payload.work_mode,
+        office_location=payload.office_location,
+        budget_amount=payload.budget_amount,
+        required_by_date=payload.required_by_date,
+        date_closed=payload.date_closed,
+        raised_by=current_user.user_id,
+        overall_status="Pending Budget",
     )
 
     db.add(requisition)
@@ -92,7 +99,14 @@ def update_requisition_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("Manager", "Admin", "HR"))
 ):
-    if payload.status not in ("Open", "In Progress", "Closed", "Cancelled"):
+    if payload.overall_status not in (
+        "Pending Budget",
+        "Pending HR",
+        "Approved & Unassigned",
+        "Active",
+        "Closed",
+        "Expired",
+    ):
         raise HTTPException(status_code=400, detail="Invalid status")
 
     requisition = db.query(Requisition).filter(
@@ -102,7 +116,7 @@ def update_requisition_status(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    requisition.status = payload.status
+    requisition.overall_status = payload.overall_status
     db.commit()
 
     return {"message": "Status updated"}
@@ -120,7 +134,9 @@ def approve_budget(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    requisition.budget_approved = True
+    requisition.budget_approved_by = current_user.user_id
+    if requisition.overall_status == "Pending Budget":
+        requisition.overall_status = "Pending HR"
     db.commit()
 
     return {"message": "Budget approved"}
@@ -139,7 +155,7 @@ def cancel_requisition(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    requisition.status = "Cancelled"
+    requisition.overall_status = "Closed"
     db.commit()
 
     return {"message": "Requisition cancelled"}

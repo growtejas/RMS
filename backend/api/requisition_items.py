@@ -37,9 +37,12 @@ def create_requisition_item(
 
     item = RequisitionItem(
         req_id=req_id,
-        skill_id=payload.skill_id,
-        required_level=payload.required_level,
+        role_position=payload.role_position,
+        job_description=payload.job_description,
+        skill_level=payload.skill_level,
+        experience_years=payload.experience_years,
         education_requirement=payload.education_requirement,
+        requirements=payload.requirements,
         item_status="Pending",
     )
 
@@ -111,7 +114,13 @@ def update_item_status(
     payload: UpdateItemStatusRequest,
     db: Session = Depends(get_db),
 ):
-    if payload.status not in ("Pending", "Fulfilled", "Cancelled"):
+    if payload.status not in (
+        "Pending",
+        "Sourcing",
+        "Shortlisted",
+        "Fulfilled",
+        "Cancelled",
+    ):
         raise HTTPException(status_code=400, detail="Invalid status")
 
     item = db.query(RequisitionItem).filter(
