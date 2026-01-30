@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Users,
   Target,
@@ -11,17 +11,19 @@ import {
   BarChart3,
   Briefcase,
 } from "lucide-react";
+import { apiClient } from "../../api/client";
 
 /* ======================================================
    Types
    ====================================================== */
 
 interface Requisition {
+  reqId: number;
   id: string;
   project: string;
   client: string;
-  priority: "High" | "Medium" | "Low";
-  overallStatus: "Open" | "In Progress" | "Closed";
+  priority: string;
+  overallStatus: string;
   dateCreated: string;
   requiredBy: string;
   raisedBy: string;
@@ -33,9 +35,9 @@ interface RequisitionItem {
   id: string;
   skill: string;
   level: string;
-  experience: number;
+  experience?: number;
   education: string;
-  itemStatus: "Pending" | "Fulfilled" | "Cancelled";
+  itemStatus: string;
   assignedEmployeeId?: string;
   assignedEmployeeName?: string;
 }
@@ -45,143 +47,81 @@ interface EmployeeMatch {
   name: string;
   skill: string;
   level: string;
-  experience: number;
+  experience?: number;
   location: string;
-  availability: "Available" | "On Project" | "On Notice";
-  matchScore: number;
+  availability: string;
+  matchScore?: number;
   department: string;
 }
 
+interface BackendRequisitionItem {
+  item_id: number;
+  req_id: number;
+  role_position: string;
+  skill_level?: string | null;
+  experience_years?: number | null;
+  education_requirement?: string | null;
+  job_description: string;
+  requirements?: string | null;
+  item_status: string;
+}
+
+interface BackendRequisition {
+  req_id: number;
+  project_name?: string | null;
+  client_name?: string | null;
+  overall_status: string;
+  required_by_date?: string | null;
+  priority?: string | null;
+  created_at?: string | null;
+  raised_by?: number | null;
+  items: BackendRequisitionItem[];
+}
+
+interface BackendEmployee {
+  emp_id: string;
+  full_name: string;
+  user_id?: number | null;
+}
+
 /* ======================================================
-   Mock Data
+   Data helpers
    ====================================================== */
 
-const mockRequisitions: Requisition[] = [
-  {
-    id: "REQ-2001",
-    project: "Client Modernization",
-    client: "FinTech Corp",
-    priority: "High",
-    overallStatus: "Open",
-    dateCreated: "2024-03-10",
-    requiredBy: "2024-04-15",
-    raisedBy: "Rajesh Kumar",
-    items: [
-      {
-        id: "ITEM-001",
-        skill: "Java Developer",
-        level: "Senior",
-        experience: 7,
-        education: "B.Tech",
-        itemStatus: "Pending",
-      },
-      {
-        id: "ITEM-002",
-        skill: "React Developer",
-        level: "Mid",
-        experience: 4,
-        education: "B.E",
-        itemStatus: "Pending",
-      },
-    ],
-  },
-  {
-    id: "REQ-2007",
-    project: "Core Banking Upgrade",
-    client: "Global Bank",
-    priority: "Medium",
-    overallStatus: "In Progress",
-    dateCreated: "2024-03-01",
-    requiredBy: "2024-05-20",
-    raisedBy: "Priya Sharma",
-    assignedTA: "Anita Sharma",
-    items: [
-      {
-        id: "ITEM-004",
-        skill: ".NET Developer",
-        level: "Senior",
-        experience: 8,
-        education: "M.Tech",
-        itemStatus: "Fulfilled",
-        assignedEmployeeId: "EMP-045",
-        assignedEmployeeName: "Vikram Singh",
-      },
-      {
-        id: "ITEM-005",
-        skill: "Database Architect",
-        level: "Senior",
-        experience: 10,
-        education: "M.Sc",
-        itemStatus: "Pending",
-      },
-    ],
-  },
-  {
-    id: "REQ-2010",
-    project: "Analytics Pipeline",
-    client: "Data Insights Inc",
-    priority: "Low",
-    overallStatus: "In Progress",
-    dateCreated: "2024-02-28",
-    requiredBy: "2024-06-30",
-    raisedBy: "Amit Patel",
-    assignedTA: "Current User",
-    items: [
-      {
-        id: "ITEM-006",
-        skill: "Data Scientist",
-        level: "Senior",
-        experience: 6,
-        education: "Ph.D",
-        itemStatus: "Pending",
-      },
-      {
-        id: "ITEM-007",
-        skill: "ML Engineer",
-        level: "Mid",
-        experience: 4,
-        education: "M.Tech",
-        itemStatus: "Cancelled",
-      },
-    ],
-  },
-];
+const mapRequisitions = (data: BackendRequisition[]): Requisition[] =>
+  data.map((req) => ({
+    reqId: req.req_id,
+    id: `REQ-${req.req_id}`,
+    project: req.project_name ?? "—",
+    client: req.client_name ?? "—",
+    priority: req.priority ?? "—",
+    overallStatus: req.overall_status ?? "—",
+    dateCreated: req.created_at ?? "",
+    requiredBy: req.required_by_date ?? "",
+    raisedBy: req.raised_by ? `User #${req.raised_by}` : "—",
+    items:
+      req.items?.map((item) => ({
+        id: `ITEM-${item.item_id}`,
+        skill: item.role_position,
+        level: item.skill_level ?? "—",
+        experience: item.experience_years ?? undefined,
+        education: item.education_requirement ?? "—",
+        itemStatus: item.item_status,
+      })) ?? [],
+  }));
 
-const mockEmployees: EmployeeMatch[] = [
-  {
-    id: "EMP-078",
-    name: "Arun Verma",
-    skill: "Java Developer",
-    level: "Senior",
-    experience: 8,
-    location: "Bengaluru",
-    availability: "Available",
-    matchScore: 92,
-    department: "Engineering",
-  },
-  {
-    id: "EMP-112",
-    name: "Neha Sharma",
-    skill: "React Developer",
-    level: "Mid",
-    experience: 5,
-    location: "Mumbai",
-    availability: "Available",
-    matchScore: 88,
-    department: "Frontend",
-  },
-  {
-    id: "EMP-045",
-    name: "Vikram Singh",
-    skill: ".NET Developer",
-    level: "Senior",
-    experience: 8,
-    location: "Delhi",
-    availability: "On Project",
-    matchScore: 95,
-    department: "Backend",
-  },
-];
+const mapEmployees = (data: BackendEmployee[]): EmployeeMatch[] =>
+  data.map((emp) => ({
+    id: emp.emp_id,
+    name: emp.full_name,
+    skill: "—",
+    level: "—",
+    experience: undefined,
+    location: "—",
+    availability: "Unknown",
+    matchScore: undefined,
+    department: "—",
+  }));
 
 /* ======================================================
    Props
@@ -226,12 +166,22 @@ const getPriorityClass = (priority: Requisition["priority"]) => {
 
 const getStatusClass = (status: Requisition["overallStatus"]) => {
   switch (status) {
+    case "Draft":
+      return "ticket-status open";
+    case "Pending Budget":
+      return "ticket-status in-progress";
+    case "Approved":
+      return "ticket-status in-progress";
+    case "Active":
+      return "ticket-status in-progress";
+    case "Closed":
+      return "ticket-status closed";
+    case "Expired":
+      return "ticket-status closed";
     case "Open":
       return "ticket-status open";
     case "In Progress":
       return "ticket-status in-progress";
-    case "Closed":
-      return "ticket-status closed";
     default:
       return "";
   }
@@ -618,11 +568,15 @@ const MatchmakingPanel: React.FC<MatchmakingPanelProps> = ({
                     background:
                       employee.availability === "Available"
                         ? "rgba(16, 185, 129, 0.1)"
-                        : "rgba(245, 158, 11, 0.1)",
+                        : employee.availability === "Unknown"
+                          ? "rgba(148, 163, 184, 0.2)"
+                          : "rgba(245, 158, 11, 0.1)",
                     color:
                       employee.availability === "Available"
                         ? "var(--success)"
-                        : "var(--warning)",
+                        : employee.availability === "Unknown"
+                          ? "var(--text-tertiary)"
+                          : "var(--warning)",
                   }}
                 >
                   {employee.availability}
@@ -640,10 +594,10 @@ const MatchmakingPanel: React.FC<MatchmakingPanelProps> = ({
                 }}
               >
                 <div>📍 {employee.location}</div>
-                <div>📊 {employee.experience} years exp</div>
+                <div>📊 {employee.experience ?? "—"} years exp</div>
                 <div style={{ textAlign: "right" }}>
                   <strong style={{ color: "var(--primary-accent)" }}>
-                    {employee.matchScore}% match
+                    {employee.matchScore ?? "—"}% match
                   </strong>
                 </div>
               </div>
@@ -728,15 +682,61 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
   onAssignEmployee,
   onViewRequisition,
 }) => {
-  const [requisitions, setRequisitions] =
-    useState<Requisition[]>(mockRequisitions);
-  const [employees] = useState<EmployeeMatch[]>(mockEmployees);
+  const [requisitions, setRequisitions] = useState<Requisition[]>([]);
+  const [employees, setEmployees] = useState<EmployeeMatch[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedRequisition, setSelectedRequisition] =
     useState<Requisition | null>(null);
   const [activeFilter, setActiveFilter] = useState<
     "all" | "assigned" | "unassigned" | "my"
   >("all");
   const [searchQuery, setSearchQuery] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchRequisitions = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const response =
+          await apiClient.get<BackendRequisition[]>("/requisitions");
+        if (isMounted) {
+          setRequisitions(mapRequisitions(response.data));
+        }
+      } catch (err) {
+        if (!isMounted) return;
+        const message =
+          err instanceof Error ? err.message : "Failed to load requisitions";
+        setError(message);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    const fetchEmployees = async () => {
+      try {
+        const response = await apiClient.get<BackendEmployee[]>(
+          "/employees/employees",
+        );
+        if (isMounted) {
+          setEmployees(mapEmployees(response.data));
+        }
+      } catch {
+        if (isMounted) {
+          setEmployees([]);
+        }
+      }
+    };
+
+    fetchRequisitions();
+    fetchEmployees();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Filter requisitions based on active filter
   const filteredRequisitions = requisitions
@@ -946,187 +946,212 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
               </thead>
 
               <tbody>
-                {filteredRequisitions.map((req) => {
-                  const agingDays = getAgingDays(req.dateCreated);
-                  const completion = calculateCompletion(req.items);
-                  const isAssignedToMe = req.assignedTA === currentUser;
+                {isLoading && (
+                  <tr>
+                    <td colSpan={8}>
+                      <div className="tickets-empty-state">
+                        Loading requisitions…
+                      </div>
+                    </td>
+                  </tr>
+                )}
 
-                  return (
-                    <tr
-                      key={req.id}
-                      style={{
-                        background:
-                          selectedRequisition?.id === req.id
-                            ? "rgba(59, 130, 246, 0.05)"
-                            : "inherit",
-                        cursor: "pointer",
-                      }}
-                      onClick={() => {
-                        setSelectedRequisition(req);
-                        handleViewRequisition(req.id);
-                      }}
-                    >
-                      <td>
-                        <strong>{req.id}</strong>
-                      </td>
+                {!isLoading && error && (
+                  <tr>
+                    <td colSpan={8}>
+                      <div
+                        className="tickets-empty-state"
+                        style={{ color: "var(--error)" }}
+                      >
+                        {error}
+                      </div>
+                    </td>
+                  </tr>
+                )}
 
-                      <td>
-                        <div
-                          style={{ display: "flex", flexDirection: "column" }}
-                        >
-                          <strong>{req.project}</strong>
-                          <span
-                            style={{
-                              fontSize: "12px",
-                              color: "var(--text-tertiary)",
-                            }}
+                {!isLoading &&
+                  !error &&
+                  filteredRequisitions.map((req) => {
+                    const agingDays = getAgingDays(req.dateCreated);
+                    const completion = calculateCompletion(req.items);
+                    const isAssignedToMe = req.assignedTA === currentUser;
+
+                    return (
+                      <tr
+                        key={req.id}
+                        style={{
+                          background:
+                            selectedRequisition?.id === req.id
+                              ? "rgba(59, 130, 246, 0.05)"
+                              : "inherit",
+                          cursor: "pointer",
+                        }}
+                        onClick={() => {
+                          setSelectedRequisition(req);
+                          handleViewRequisition(req.id);
+                        }}
+                      >
+                        <td>
+                          <strong>{req.id}</strong>
+                        </td>
+
+                        <td>
+                          <div
+                            style={{ display: "flex", flexDirection: "column" }}
                           >
-                            {req.client}
-                          </span>
-                        </div>
-                      </td>
+                            <strong>{req.project}</strong>
+                            <span
+                              style={{
+                                fontSize: "12px",
+                                color: "var(--text-tertiary)",
+                              }}
+                            >
+                              {req.client}
+                            </span>
+                          </div>
+                        </td>
 
-                      <td>
-                        <div
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "4px",
-                          }}
-                        >
+                        <td>
                           <div
                             style={{
                               display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
+                              flexDirection: "column",
+                              gap: "4px",
                             }}
                           >
-                            <span
-                              className={`status-badge ${completion.pending > 0 ? "inactive" : "active"}`}
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                              }}
                             >
-                              {completion.pending} pending
+                              <span
+                                className={`status-badge ${completion.pending > 0 ? "inactive" : "active"}`}
+                              >
+                                {completion.pending} pending
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  color: "var(--text-tertiary)",
+                                }}
+                              >
+                                ({completion.fulfilled}/{completion.total})
+                              </span>
+                            </div>
+                            <div
+                              style={{
+                                height: "3px",
+                                background: "var(--border-subtle)",
+                                borderRadius: "2px",
+                                overflow: "hidden",
+                                width: "80px",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: `${completion.progress}%`,
+                                  height: "100%",
+                                  background:
+                                    completion.progress === 100
+                                      ? "var(--success)"
+                                      : "var(--primary-accent)",
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </td>
+
+                        <td>
+                          <span className={getStatusClass(req.overallStatus)}>
+                            {req.overallStatus}
+                          </span>
+                        </td>
+
+                        <td>
+                          <span
+                            className={`priority-indicator ${getPriorityClass(req.priority)}`}
+                          >
+                            {req.priority}
+                          </span>
+                        </td>
+
+                        <td>
+                          <span
+                            className={`aging-indicator ${getAgingClass(agingDays)}`}
+                          >
+                            {agingDays} days
+                          </span>
+                        </td>
+
+                        <td>
+                          {req.assignedTA ? (
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: "8px",
+                                  height: "8px",
+                                  borderRadius: "50%",
+                                  background: isAssignedToMe
+                                    ? "var(--success)"
+                                    : "var(--warning)",
+                                }}
+                              />
+                              {req.assignedTA}
+                            </div>
+                          ) : (
+                            <span className="status-badge inactive">
+                              Unassigned
                             </span>
+                          )}
+                        </td>
+
+                        <td>
+                          {!req.assignedTA ? (
+                            <button
+                              className="action-button primary"
+                              style={{ fontSize: "11px", padding: "6px 12px" }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleAssignRequisition(req.id);
+                              }}
+                            >
+                              Assign to TA
+                            </button>
+                          ) : isAssignedToMe ? (
+                            <button
+                              className="action-button"
+                              style={{ fontSize: "11px", padding: "6px 12px" }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedRequisition(req);
+                              }}
+                            >
+                              Manage
+                            </button>
+                          ) : (
                             <span
                               style={{
                                 fontSize: "11px",
                                 color: "var(--text-tertiary)",
                               }}
                             >
-                              ({completion.fulfilled}/{completion.total})
+                              Assigned
                             </span>
-                          </div>
-                          <div
-                            style={{
-                              height: "3px",
-                              background: "var(--border-subtle)",
-                              borderRadius: "2px",
-                              overflow: "hidden",
-                              width: "80px",
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: `${completion.progress}%`,
-                                height: "100%",
-                                background:
-                                  completion.progress === 100
-                                    ? "var(--success)"
-                                    : "var(--primary-accent)",
-                              }}
-                            />
-                          </div>
-                        </div>
-                      </td>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
 
-                      <td>
-                        <span className={getStatusClass(req.overallStatus)}>
-                          {req.overallStatus}
-                        </span>
-                      </td>
-
-                      <td>
-                        <span
-                          className={`priority-indicator ${getPriorityClass(req.priority)}`}
-                        >
-                          {req.priority}
-                        </span>
-                      </td>
-
-                      <td>
-                        <span
-                          className={`aging-indicator ${getAgingClass(agingDays)}`}
-                        >
-                          {agingDays} days
-                        </span>
-                      </td>
-
-                      <td>
-                        {req.assignedTA ? (
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: "8px",
-                                height: "8px",
-                                borderRadius: "50%",
-                                background: isAssignedToMe
-                                  ? "var(--success)"
-                                  : "var(--warning)",
-                              }}
-                            />
-                            {req.assignedTA}
-                          </div>
-                        ) : (
-                          <span className="status-badge inactive">
-                            Unassigned
-                          </span>
-                        )}
-                      </td>
-
-                      <td>
-                        {!req.assignedTA ? (
-                          <button
-                            className="action-button primary"
-                            style={{ fontSize: "11px", padding: "6px 12px" }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAssignRequisition(req.id);
-                            }}
-                          >
-                            Assign to TA
-                          </button>
-                        ) : isAssignedToMe ? (
-                          <button
-                            className="action-button"
-                            style={{ fontSize: "11px", padding: "6px 12px" }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedRequisition(req);
-                            }}
-                          >
-                            Manage
-                          </button>
-                        ) : (
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "var(--text-tertiary)",
-                            }}
-                          >
-                            Assigned
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-
-                {filteredRequisitions.length === 0 && (
+                {!isLoading && !error && filteredRequisitions.length === 0 && (
                   <tr>
                     <td colSpan={8}>
                       <div className="tickets-empty-state">

@@ -1,5 +1,5 @@
 // components/hr/TicketDetail.tsx
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ArrowLeft,
   Calendar,
@@ -29,6 +29,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
+import { apiClient } from "../../api/client";
 
 interface TicketDetailsProps {
   ticketId?: string | null;
@@ -54,11 +55,77 @@ interface RequisitionItem {
   level: string;
   experience: number;
   education: string;
-  itemStatus: "Pending" | "Fulfilled" | "Cancelled";
+  itemStatus: string;
   assignedEmployeeId?: string;
   assignedEmployeeName?: string;
   assignedDate?: string;
   description: string;
+}
+
+interface TimelineEvent {
+  date: string;
+  event: string;
+  user: string;
+}
+
+interface NoteEntry {
+  date: string;
+  user: string;
+  text: string;
+}
+
+interface TicketData {
+  id: string;
+  ticketId: string;
+  projectName: string;
+  projectCode: string;
+  client: string;
+  projectManager: string;
+  requiredBy: string;
+  workMode: string;
+  location: string;
+  priority: string;
+  overallStatus: string;
+  justification: string;
+  dateCreated: string;
+  assignedTA: string;
+  daysOpen: number;
+  slaHours: number;
+  budget: string;
+  projectDuration: string;
+  items: RequisitionItem[];
+  availableEmployees: Employee[];
+  timeline: TimelineEvent[];
+  notes: NoteEntry[];
+}
+
+interface BackendRequisitionItem {
+  item_id: number;
+  req_id: number;
+  role_position: string;
+  skill_level?: string | null;
+  experience_years?: number | null;
+  education_requirement?: string | null;
+  job_description: string;
+  requirements?: string | null;
+  item_status: string;
+}
+
+interface BackendRequisition {
+  req_id: number;
+  project_name?: string | null;
+  client_name?: string | null;
+  overall_status: string;
+  required_by_date?: string | null;
+  priority?: string | null;
+  budget_amount?: number | null;
+  created_at?: string | null;
+  work_mode?: string | null;
+  office_location?: string | null;
+  justification?: string | null;
+  duration?: string | null;
+  raised_by?: number | null;
+  items: BackendRequisitionItem[];
 }
 
 const TicketDetail: React.FC<TicketDetailsProps> = ({
@@ -80,137 +147,119 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
     string | null
   >(null);
   const [newNote, setNewNote] = useState("");
+  const [ticket, setTicket] = useState<TicketData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mock ticket data with requisition items
-  const [ticket, setTicket] = useState({
-    id: effectiveTicketId || "REQ-2024-001",
-    ticketId: effectiveTicketId || "REQ-2024-001",
-    projectName: "E-Commerce Platform",
-    projectCode: "ECOM-2024",
-    client: "Retail Giant Inc",
-    projectManager: "Rajesh Kumar",
-    requiredBy: "2024-04-15",
-    workMode: "Hybrid",
-    location: "Bengaluru",
-    priority: "High" as "High" | "Medium" | "Low",
-    overallStatus: "In Progress" as "Open" | "In Progress" | "Closed",
-    justification: `Need 2 Senior Python developers with Django/Flask experience for our new E-commerce platform migration project. Must have experience with microservices architecture and AWS services. Project duration: 6 months with possible extension.`,
+  const parseReqId = (value?: string | null) => {
+    if (!value) return null;
+    const match = value.match(/\d+/);
+    return match ? Number(match[0]) : null;
+  };
 
-    // Detailed information
-    dateCreated: "2024-01-01",
-    assignedTA: "Anita Sharma",
-    daysOpen: 15,
-    slaHours: 72,
-    budget: "₹15,00,000",
-    projectDuration: "6 months",
+  const buildTicket = (req: BackendRequisition): TicketData => {
+    const createdAt = req.created_at ? new Date(req.created_at) : null;
+    const now = new Date();
+    const daysOpen = createdAt
+      ? Math.max(0, Math.ceil((now.getTime() - createdAt.getTime()) / 86400000))
+      : 0;
+    const budget = req.budget_amount
+      ? new Intl.NumberFormat("en-IN", {
+          style: "currency",
+          currency: "INR",
+          maximumFractionDigits: 0,
+        }).format(req.budget_amount)
+      : "—";
 
-    // Requisition Items
-    items: [
-      {
-        id: "ITEM-001",
-        skill: "Python Developer",
-        level: "Senior",
-        experience: 7,
-        education: "B.Tech/M.Tech",
-        itemStatus: "Pending" as "Pending" | "Fulfilled" | "Cancelled",
-        description:
-          "Lead backend development with Python/Django, AWS services, microservices architecture",
-      },
-      {
-        id: "ITEM-002",
-        skill: "React Developer",
-        level: "Mid",
-        experience: 4,
-        education: "B.E",
-        itemStatus: "Pending" as "Pending" | "Fulfilled" | "Cancelled",
-        description: "Frontend development with React, Redux, TypeScript",
-      },
-      {
-        id: "ITEM-003",
-        skill: "DevOps Engineer",
-        level: "Senior",
-        experience: 6,
-        education: "B.Tech",
-        itemStatus: "Fulfilled" as "Pending" | "Fulfilled" | "Cancelled",
-        assignedEmployeeId: "EMP-112",
-        assignedEmployeeName: "Neha Verma",
-        assignedDate: "2024-01-10",
-        description: "CI/CD pipeline, AWS infrastructure, Docker, Kubernetes",
-      },
-    ] as RequisitionItem[],
+    return {
+      id: `REQ-${req.req_id}`,
+      ticketId: `REQ-${req.req_id}`,
+      projectName: req.project_name ?? "—",
+      projectCode: `REQ-${req.req_id}`,
+      client: req.client_name ?? "—",
+      projectManager: req.raised_by ? `User #${req.raised_by}` : "—",
+      requiredBy: req.required_by_date ?? "",
+      workMode: req.work_mode ?? "—",
+      location: req.office_location ?? "—",
+      priority: req.priority ?? "—",
+      overallStatus: req.overall_status ?? "—",
+      justification: req.justification ?? "—",
+      dateCreated: req.created_at ?? "",
+      assignedTA: "Unassigned",
+      daysOpen,
+      slaHours: 72,
+      budget,
+      projectDuration: req.duration ?? "—",
+      items:
+        req.items?.map((item) => ({
+          id: `ITEM-${item.item_id}`,
+          skill: item.role_position,
+          level: item.skill_level ?? "—",
+          experience: item.experience_years ?? 0,
+          education: item.education_requirement ?? "—",
+          itemStatus: item.item_status,
+          description: item.job_description,
+        })) ?? [],
+      availableEmployees: [],
+      timeline: [],
+      notes: [],
+    };
+  };
 
-    // Available employees for assignment
-    availableEmployees: [
-      {
-        id: "EMP-078",
-        name: "Arun Verma",
-        skill: "Python Developer",
-        level: "Senior",
-        experience: 8,
-        location: "Bengaluru",
-        availability: "Available" as const,
-        matchScore: 92,
-        department: "Engineering",
-      },
-      {
-        id: "EMP-045",
-        name: "Vikram Singh",
-        skill: "Python Developer",
-        level: "Senior",
-        experience: 8,
-        location: "Delhi",
-        availability: "On Project" as const,
-        matchScore: 85,
-        department: "Backend",
-      },
-      {
-        id: "EMP-112",
-        name: "Neha Sharma",
-        skill: "React Developer",
-        level: "Mid",
-        experience: 5,
-        location: "Mumbai",
-        availability: "Available" as const,
-        matchScore: 88,
-        department: "Frontend",
-      },
-    ] as Employee[],
+  useEffect(() => {
+    let isMounted = true;
+    const reqId = parseReqId(effectiveTicketId);
 
-    // Activity timeline
-    timeline: [
-      { date: "2024-01-01", event: "Requisition Created", user: "System" },
-      { date: "2024-01-03", event: "Assigned to TA Team", user: "HR Manager" },
-      {
-        date: "2024-01-05",
-        event: "Skills Analysis Completed",
-        user: "HR Analytics",
-      },
-      {
-        date: "2024-01-10",
-        event: "DevOps Position Fulfilled",
-        user: "Anita Sharma",
-      },
-    ],
+    if (!reqId) {
+      setError("Invalid requisition id");
+      setIsLoading(false);
+      return;
+    }
 
-    // Notes & Comments
-    notes: [
-      {
-        date: "2024-01-02",
-        user: "HR Manager",
-        text: "Bench analysis shows 3 available resources with matching skills",
-      },
-      {
-        date: "2024-01-04",
-        user: "TA Lead",
-        text: "External sourcing initiated for backup candidates",
-      },
-      {
-        date: "2024-01-11",
-        user: "Anita Sharma",
-        text: "Assigned Neha Verma to DevOps position. Two positions remaining.",
-      },
-    ],
-  });
+    const fetchRequisition = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const response = await apiClient.get<BackendRequisition>(
+          `/requisitions/${reqId}`,
+        );
+        if (isMounted) {
+          setTicket(buildTicket(response.data));
+        }
+      } catch (err) {
+        if (!isMounted) return;
+        const message =
+          err instanceof Error ? err.message : "Failed to load requisition";
+        setError(message);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    fetchRequisition();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [effectiveTicketId]);
+
+  if (isLoading) {
+    return (
+      <div className="data-table-container">
+        <div className="tickets-empty-state">Loading requisition…</div>
+      </div>
+    );
+  }
+
+  if (error || !ticket) {
+    return (
+      <div className="data-table-container">
+        <div className="tickets-empty-state" style={{ color: "var(--error)" }}>
+          {error ?? "Requisition not found"}
+        </div>
+      </div>
+    );
+  }
 
   // Calculate completion stats
   const completionStats = {
@@ -221,14 +270,18 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       .length,
     cancelled: ticket.items.filter((item) => item.itemStatus === "Cancelled")
       .length,
-    progress: Math.round(
-      (ticket.items.filter(
-        (item) =>
-          item.itemStatus === "Fulfilled" || item.itemStatus === "Cancelled",
-      ).length /
-        ticket.items.length) *
-        100,
-    ),
+    progress:
+      ticket.items.length > 0
+        ? Math.round(
+            (ticket.items.filter(
+              (item) =>
+                item.itemStatus === "Fulfilled" ||
+                item.itemStatus === "Cancelled",
+            ).length /
+              ticket.items.length) *
+              100,
+          )
+        : 0,
   };
 
   // Handle item status change
@@ -236,6 +289,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
     itemId: string,
     newStatus: RequisitionItem["itemStatus"],
   ) => {
+    if (!ticket) return;
     const updatedItems = ticket.items.map((item) =>
       item.id === itemId ? { ...item, itemStatus: newStatus } : item,
     );
@@ -247,12 +301,13 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
         item.itemStatus === "Fulfilled" || item.itemStatus === "Cancelled",
     );
     if (allItemsDone) {
-      setTicket((prev) => ({ ...prev, overallStatus: "Closed" }));
+      setTicket((prev) => (prev ? { ...prev, overallStatus: "Closed" } : prev));
     }
   };
 
   // Handle employee assignment
   const handleAssignEmployee = (itemId: string, employeeId: string) => {
+    if (!ticket) return;
     const employee = ticket.availableEmployees.find(
       (emp) => emp.id === employeeId,
     );
@@ -274,17 +329,20 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
     setSelectedItemForAssignment(null);
 
     // Add to timeline
-    setTicket((prev) => ({
-      ...prev,
-      timeline: [
-        ...prev.timeline,
-        {
-          date: getTodayDate(),
-          event: `Assigned ${employee.name} to ${prev.items.find((i) => i.id === itemId)?.skill ?? "resource"}`,
-          user: "Current User",
-        },
-      ],
-    }));
+    setTicket((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        timeline: [
+          ...prev.timeline,
+          {
+            date: getTodayDate(),
+            event: `Assigned ${employee.name} to ${prev.items.find((i) => i.id === itemId)?.skill ?? "resource"}`,
+            user: "Current User",
+          },
+        ],
+      };
+    });
 
     if (onUpdate) {
       onUpdate({ ...ticket, items: updatedItems });
@@ -323,10 +381,9 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       text: newNote,
     };
 
-    setTicket((prev) => ({
-      ...prev,
-      notes: [...prev.notes, newNoteObj],
-    }));
+    setTicket((prev) =>
+      prev ? { ...prev, notes: [...prev.notes, newNoteObj] } : prev,
+    );
     setNewNote("");
   };
 
@@ -2218,7 +2275,9 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                       "Are you sure you want to close this requisition? This action cannot be undone.",
                     )
                   ) {
-                    setTicket((prev) => ({ ...prev, overallStatus: "Closed" }));
+                    setTicket((prev) =>
+                      prev ? { ...prev, overallStatus: "Closed" } : prev,
+                    );
                   }
                 }}
                 style={{

@@ -28,43 +28,47 @@ def create_requisition(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("Manager", "Admin", "HR"))
 ):
-    requisition = Requisition(
-        project_name=payload.project_name,
-        client_name=payload.client_name,
-        justification=payload.justification,
-        manager_notes=payload.manager_notes,
-        priority=payload.priority,
-        is_replacement=payload.is_replacement or False,
-        duration=payload.duration,
-        work_mode=payload.work_mode,
-        office_location=payload.office_location,
-        budget_amount=payload.budget_amount,
-        required_by_date=payload.required_by_date,
-        date_closed=payload.date_closed,
-        raised_by=1,
-        overall_status="Draft",
-    )
+    try:
+        requisition = Requisition(
+            project_name=payload.project_name,
+            client_name=payload.client_name,
+            justification=payload.justification,
+            manager_notes=payload.manager_notes,
+            priority=payload.priority,
+            is_replacement=payload.is_replacement or False,
+            duration=payload.duration,
+            work_mode=payload.work_mode,
+            office_location=payload.office_location,
+            budget_amount=payload.budget_amount,
+            required_by_date=payload.required_by_date,
+            date_closed=payload.date_closed,
+            raised_by=current_user.user_id,
+            overall_status="Draft",
+        )
 
-    db.add(requisition)
-    db.commit()
-    db.refresh(requisition)
+        db.add(requisition)
+        db.flush()
 
-    if payload.items:
-        for item in payload.items:
-            db_item = RequisitionItem(
-                req_id=requisition.req_id,
-                role_position=item.role_position,
-                job_description=item.job_description,
-                skill_level=item.skill_level,
-                experience_years=item.experience_years,
-                education_requirement=item.education_requirement,
-                requirements=item.requirements,
-                item_status="Pending",
-            )
-            db.add(db_item)
+        if payload.items:
+            for item in payload.items:
+                db_item = RequisitionItem(
+                    req_id=requisition.req_id,
+                    role_position=item.role_position,
+                    job_description=item.job_description,
+                    skill_level=item.skill_level,
+                    experience_years=item.experience_years,
+                    education_requirement=item.education_requirement,
+                    requirements=item.requirements,
+                    item_status="Pending",
+                )
+                db.add(db_item)
+
         db.commit()
         db.refresh(requisition)
-    return requisition
+        return requisition
+    except Exception:
+        db.rollback()
+        raise
 
 @router.get("/", response_model=list[RequisitionResponse])
 def list_requisitions(
@@ -82,6 +86,19 @@ def list_requisitions(
         query = query.filter(Requisition.raised_by == raised_by)
 
     return query.all()
+
+
+@router.get("/my", response_model=list[RequisitionResponse])
+def list_my_requisitions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee"))
+):
+    return (
+        db.query(Requisition)
+        .options(selectinload(Requisition.items))
+        .filter(Requisition.raised_by == current_user.user_id)
+        .all()
+    )
 
 @router.get("/{req_id}", response_model=RequisitionResponse)
 def get_requisition(

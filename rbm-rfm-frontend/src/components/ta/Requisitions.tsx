@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Filter,
   Search,
@@ -12,21 +12,23 @@ import {
   ChevronRight,
   UserPlus,
 } from "lucide-react";
+import { apiClient } from "../../api/client";
 
 /* ======================================================
    Types
    ====================================================== */
 
 interface Requisition {
+  reqId: number;
   id: string;
   project: string;
   client?: string;
-  priority: "High" | "Medium" | "Low";
+  priority: string;
   requiredBy: string;
-  overallStatus: "Open" | "In Progress" | "Closed";
+  overallStatus: string;
   dateCreated: string;
   dateClosed?: string;
-  raisedBy: string;
+  raisedBy?: string;
   assignedTA?: string;
   items: RequisitionItem[];
   workMode?: "Remote" | "Hybrid" | "WFO";
@@ -40,7 +42,7 @@ interface RequisitionItem {
   skill: string;
   level: string;
   education: string;
-  itemStatus: "Pending" | "Fulfilled" | "Cancelled";
+  itemStatus: string;
   assignedEmployeeId?: string;
   assignedEmployeeName?: string;
   assignedDate?: string;
@@ -48,170 +50,64 @@ interface RequisitionItem {
   description?: string;
 }
 
+interface BackendRequisitionItem {
+  item_id: number;
+  req_id: number;
+  role_position: string;
+  skill_level?: string | null;
+  experience_years?: number | null;
+  education_requirement?: string | null;
+  job_description: string;
+  requirements?: string | null;
+  item_status: string;
+}
+
+interface BackendRequisition {
+  req_id: number;
+  project_name?: string | null;
+  client_name?: string | null;
+  overall_status: string;
+  required_by_date?: string | null;
+  priority?: string | null;
+  budget_amount?: number | null;
+  created_at?: string | null;
+  work_mode?: string | null;
+  office_location?: string | null;
+  justification?: string | null;
+  raised_by?: number | null;
+  items: BackendRequisitionItem[];
+}
+
 /* ======================================================
-   Mock Data
+   Data helpers
    ====================================================== */
 
-const mockRequisitions: Requisition[] = [
-  {
-    id: "REQ-2001",
-    project: "Client Modernization",
-    client: "FinTech Corp",
-    priority: "High",
-    requiredBy: "2024-04-15",
-    overallStatus: "Open",
-    dateCreated: "2024-03-10",
-    raisedBy: "Rajesh Kumar",
-    workMode: "Hybrid",
-    location: "Bengaluru",
-    justification: "Need to modernize legacy systems before Q2",
-    items: [
-      {
-        id: "ITEM-001",
-        requisitionId: "REQ-2001",
-        skill: "Java Developer",
-        level: "Senior",
-        education: "B.Tech",
-        itemStatus: "Pending",
-        experience: 7,
-        description: "Lead backend development with microservices",
-      },
-      {
-        id: "ITEM-002",
-        requisitionId: "REQ-2001",
-        skill: "React Developer",
-        level: "Mid",
-        education: "B.E",
-        itemStatus: "Pending",
-        experience: 4,
-        description: "Frontend development with modern React stack",
-      },
-      {
-        id: "ITEM-003",
-        requisitionId: "REQ-2001",
-        skill: "QA Engineer",
-        level: "Junior",
-        education: "B.Sc",
-        itemStatus: "Pending",
-        experience: 2,
-        description: "Manual and automated testing",
-      },
-    ],
-  },
-  {
-    id: "REQ-2007",
-    project: "Core Banking Upgrade",
-    client: "Global Bank",
-    priority: "Medium",
-    requiredBy: "2024-05-20",
-    overallStatus: "In Progress",
-    dateCreated: "2024-03-01",
-    raisedBy: "Priya Sharma",
-    assignedTA: "Anita Sharma",
-    workMode: "WFO",
-    location: "Mumbai",
-    justification: "Critical upgrade for compliance requirements",
-    items: [
-      {
-        id: "ITEM-004",
-        requisitionId: "REQ-2007",
-        skill: ".NET Developer",
-        level: "Senior",
-        education: "M.Tech",
-        itemStatus: "Fulfilled",
-        assignedEmployeeId: "EMP-045",
-        assignedEmployeeName: "Vikram Singh",
-        assignedDate: "2024-03-05",
-        experience: 8,
-        description: "Core banking system development",
-      },
-      {
-        id: "ITEM-005",
-        requisitionId: "REQ-2007",
-        skill: "Database Architect",
-        level: "Senior",
-        education: "M.Sc",
-        itemStatus: "Pending",
-        experience: 10,
-        description: "Database design and optimization",
-      },
-    ],
-  },
-  {
-    id: "REQ-2010",
-    project: "Analytics Pipeline",
-    client: "Data Insights Inc",
-    priority: "Low",
-    requiredBy: "2024-06-30",
-    overallStatus: "In Progress",
-    dateCreated: "2024-02-28",
-    raisedBy: "Amit Patel",
-    assignedTA: "Rahul Mehta",
-    workMode: "Remote",
-    location: "Pune",
-    justification: "New analytics platform for client reporting",
-    items: [
-      {
-        id: "ITEM-006",
-        requisitionId: "REQ-2010",
-        skill: "Data Scientist",
-        level: "Senior",
-        education: "Ph.D",
-        itemStatus: "Fulfilled",
-        assignedEmployeeId: "EMP-112",
-        assignedEmployeeName: "Neha Verma",
-        assignedDate: "2024-03-07",
-        experience: 6,
-        description: "Machine learning model development",
-      },
-      {
-        id: "ITEM-007",
-        requisitionId: "REQ-2010",
-        skill: "ML Engineer",
-        level: "Mid",
-        education: "M.Tech",
-        itemStatus: "Cancelled",
-        experience: 4,
-        description: "ML pipeline implementation",
-      },
-    ],
-  },
-  {
-    id: "REQ-2015",
-    project: "Mobile App Redesign",
-    client: "Retail Tech",
-    priority: "High",
-    requiredBy: "2024-04-30",
-    overallStatus: "Open",
-    dateCreated: "2024-03-12",
-    raisedBy: "Sneha Desai",
-    workMode: "Hybrid",
-    location: "Delhi",
-    justification: "Complete mobile app overhaul for better UX",
-    items: [
-      {
-        id: "ITEM-008",
-        requisitionId: "REQ-2015",
-        skill: "Flutter Developer",
-        level: "Mid",
-        education: "B.Tech",
-        itemStatus: "Pending",
-        experience: 3,
-        description: "Cross-platform mobile development",
-      },
-      {
-        id: "ITEM-009",
-        requisitionId: "REQ-2015",
-        skill: "UI/UX Designer",
-        level: "Senior",
-        education: "B.Des",
-        itemStatus: "Pending",
-        experience: 5,
-        description: "User interface and experience design",
-      },
-    ],
-  },
-];
+const mapRequisitions = (data: BackendRequisition[]): Requisition[] =>
+  data.map((req) => ({
+    reqId: req.req_id,
+    id: `REQ-${req.req_id}`,
+    project: req.project_name ?? "—",
+    client: req.client_name ?? "—",
+    priority: req.priority ?? "—",
+    requiredBy: req.required_by_date ?? "",
+    overallStatus: req.overall_status ?? "—",
+    dateCreated: req.created_at ?? "",
+    raisedBy: req.raised_by ? `User #${req.raised_by}` : "—",
+    workMode: (req.work_mode as Requisition["workMode"]) ?? undefined,
+    location: req.office_location ?? undefined,
+    justification: req.justification ?? undefined,
+    items:
+      req.items?.map((item) => ({
+        id: `ITEM-${item.item_id}`,
+        requisitionId: `REQ-${item.req_id}`,
+        skill: item.role_position,
+        level: item.skill_level ?? "—",
+        education: item.education_requirement ?? "—",
+        itemStatus: item.item_status,
+        experience: item.experience_years ?? undefined,
+        description: item.job_description,
+      })) ?? [],
+  }));
 
 /* ======================================================
    Props
@@ -237,12 +133,22 @@ const getAgingClass = (days: number) => {
 
 const getStatusClass = (status: Requisition["overallStatus"]) => {
   switch (status) {
+    case "Draft":
+      return "open";
+    case "Pending Budget":
+      return "in-progress";
+    case "Approved":
+      return "in-progress";
+    case "Active":
+      return "in-progress";
+    case "Closed":
+      return "closed";
+    case "Expired":
+      return "closed";
     case "Open":
       return "open";
     case "In Progress":
       return "in-progress";
-    case "Closed":
-      return "closed";
     default:
       return "";
   }
@@ -490,12 +396,42 @@ const Requisitions: React.FC<RequisitionsProps> = ({
   onSelfAssign,
   onManageItems,
 }) => {
-  const [requisitions, setRequisitions] =
-    useState<Requisition[]>(mockRequisitions);
+  const [requisitions, setRequisitions] = useState<Requisition[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<
     "all" | "my" | "unassigned" | "high" | "overdue"
   >("all");
   const [searchQuery, setSearchQuery] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchRequisitions = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const response =
+          await apiClient.get<BackendRequisition[]>("/requisitions");
+        if (isMounted) {
+          setRequisitions(mapRequisitions(response.data));
+        }
+      } catch (err) {
+        if (!isMounted) return;
+        const message =
+          err instanceof Error ? err.message : "Failed to load requisitions";
+        setError(message);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    fetchRequisitions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Filter requisitions
   const filteredRequisitions = requisitions.filter((req) => {
@@ -513,7 +449,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
         req.id.toLowerCase().includes(query) ||
         req.project.toLowerCase().includes(query) ||
         req.client?.toLowerCase().includes(query) ||
-        req.raisedBy.toLowerCase().includes(query)
+        req.raisedBy?.toLowerCase().includes(query)
       );
     }
 
@@ -814,241 +750,281 @@ const Requisitions: React.FC<RequisitionsProps> = ({
           </thead>
 
           <tbody>
-            {filteredRequisitions.map((req) => {
-              const agingDays = calculateAgingDays(req.dateCreated);
-              const completion = calculateCompletion(req.items);
-              const isAssignedToMe = req.assignedTA === currentTA;
-              const isUnassigned = !req.assignedTA;
+            {isLoading && (
+              <tr>
+                <td colSpan={9}>
+                  <div className="tickets-empty-state">
+                    Loading requisitions…
+                  </div>
+                </td>
+              </tr>
+            )}
 
-              return (
-                <React.Fragment key={req.id}>
-                  <tr>
-                    <td>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                        }}
-                      >
-                        <strong>{req.id}</strong>
-                        {isAssignedToMe && (
-                          <div
-                            style={{
-                              width: "6px",
-                              height: "6px",
-                              borderRadius: "50%",
-                              backgroundColor: "var(--success)",
-                            }}
-                          />
-                        )}
-                      </div>
-                    </td>
+            {!isLoading && error && (
+              <tr>
+                <td colSpan={9}>
+                  <div
+                    className="tickets-empty-state"
+                    style={{ color: "var(--error)" }}
+                  >
+                    {error}
+                  </div>
+                </td>
+              </tr>
+            )}
 
-                    <td>
-                      <div style={{ display: "flex", flexDirection: "column" }}>
-                        <strong style={{ fontSize: "14px" }}>
-                          {req.project}
-                        </strong>
+            {!isLoading &&
+              !error &&
+              filteredRequisitions.map((req) => {
+                const agingDays = calculateAgingDays(req.dateCreated);
+                const completion = calculateCompletion(req.items);
+                const isAssignedToMe = req.assignedTA === currentTA;
+                const isUnassigned = !req.assignedTA;
+
+                return (
+                  <React.Fragment key={req.id}>
+                    <tr>
+                      <td>
                         <div
                           style={{
                             display: "flex",
                             alignItems: "center",
                             gap: "8px",
-                            marginTop: "4px",
                           }}
                         >
-                          <span
-                            style={{
-                              fontSize: "12px",
-                              color: "var(--text-tertiary)",
-                            }}
-                          >
-                            {req.client || "Internal"}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "var(--text-quaternary)",
-                            }}
-                          >
-                            • {req.workMode || "Hybrid"} • {req.location}
-                          </span>
+                          <strong>{req.id}</strong>
+                          {isAssignedToMe && (
+                            <div
+                              style={{
+                                width: "6px",
+                                height: "6px",
+                                borderRadius: "50%",
+                                backgroundColor: "var(--success)",
+                              }}
+                            />
+                          )}
                         </div>
-                      </div>
-                    </td>
+                      </td>
 
-                    <td>
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "6px",
-                        }}
-                      >
+                      <td>
+                        <div
+                          style={{ display: "flex", flexDirection: "column" }}
+                        >
+                          <strong style={{ fontSize: "14px" }}>
+                            {req.project}
+                          </strong>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              marginTop: "4px",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: "12px",
+                                color: "var(--text-tertiary)",
+                              }}
+                            >
+                              {req.client || "Internal"}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                color: "var(--text-quaternary)",
+                              }}
+                            >
+                              • {req.workMode || "Hybrid"} • {req.location}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td>
                         <div
                           style={{
                             display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
+                            flexDirection: "column",
+                            gap: "6px",
                           }}
                         >
                           <div
                             style={{
-                              width: "60px",
-                              height: "4px",
-                              backgroundColor: "var(--border-subtle)",
-                              borderRadius: "2px",
-                              overflow: "hidden",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
                             }}
                           >
                             <div
                               style={{
-                                width: `${completion.progress}%`,
-                                height: "100%",
-                                backgroundColor:
-                                  completion.progress === 100
-                                    ? "var(--success)"
-                                    : "var(--primary-accent)",
-                                transition: "width 0.3s ease",
+                                width: "60px",
+                                height: "4px",
+                                backgroundColor: "var(--border-subtle)",
+                                borderRadius: "2px",
+                                overflow: "hidden",
                               }}
-                            />
+                            >
+                              <div
+                                style={{
+                                  width: `${completion.progress}%`,
+                                  height: "100%",
+                                  backgroundColor:
+                                    completion.progress === 100
+                                      ? "var(--success)"
+                                      : "var(--primary-accent)",
+                                  transition: "width 0.3s ease",
+                                }}
+                              />
+                            </div>
+                            <span
+                              style={{
+                                fontSize: "12px",
+                                color: "var(--text-secondary)",
+                              }}
+                            >
+                              {completion.pending} pending
+                            </span>
                           </div>
-                          <span
-                            style={{
-                              fontSize: "12px",
-                              color: "var(--text-secondary)",
-                            }}
-                          >
-                            {completion.pending} pending
-                          </span>
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "11px",
-                            color: "var(--text-tertiary)",
-                          }}
-                        >
-                          {completion.fulfilled}/{completion.total} filled
-                        </div>
-                      </div>
-                    </td>
-
-                    <td>
-                      <span
-                        className={`priority-indicator ${getPriorityClass(req.priority)}`}
-                      >
-                        {req.priority}
-                      </span>
-                    </td>
-
-                    <td>
-                      <span
-                        className={`ticket-status ${getStatusClass(req.overallStatus)}`}
-                      >
-                        {req.overallStatus}
-                      </span>
-                    </td>
-
-                    <td>
-                      <div style={{ display: "flex", flexDirection: "column" }}>
-                        <span style={{ fontSize: "13px" }}>{req.raisedBy}</span>
-                        <span
-                          style={{
-                            fontSize: "11px",
-                            color: "var(--text-tertiary)",
-                          }}
-                        >
-                          {formatDate(req.dateCreated)}
-                        </span>
-                      </div>
-                    </td>
-
-                    <td>
-                      <span
-                        className={`aging-indicator ${getAgingClass(agingDays)}`}
-                      >
-                        {agingDays}d
-                      </span>
-                    </td>
-
-                    <td>
-                      {req.assignedTA ? (
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                          }}
-                        >
                           <div
                             style={{
-                              width: "8px",
-                              height: "8px",
-                              borderRadius: "50%",
-                              backgroundColor: isAssignedToMe
-                                ? "var(--success)"
-                                : "var(--warning)",
-                            }}
-                          />
-                          <span style={{ fontSize: "13px" }}>
-                            {req.assignedTA}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="status-badge inactive">
-                          Unassigned
-                        </span>
-                      )}
-                    </td>
-
-                    <td>
-                      <div style={{ display: "flex", gap: "8px" }}>
-                        {isUnassigned ? (
-                          <>
-                            <button
-                              className="action-button primary"
-                              onClick={() => handleSelfAssign(req.id)}
-                              style={{ fontSize: "12px", padding: "6px 12px" }}
-                            >
-                              Self Assign
-                            </button>
-                          </>
-                        ) : isAssignedToMe ? (
-                          <>
-                            <button
-                              className="action-button primary"
-                              onClick={() => onManageItems?.(req.id)}
-                              style={{ fontSize: "12px", padding: "6px 12px" }}
-                            >
-                              Manage Items
-                            </button>
-                            <button
-                              className="action-button"
-                              onClick={() => onViewRequisition?.(req.id)}
-                              style={{ fontSize: "12px", padding: "6px 12px" }}
-                            >
-                              View
-                            </button>
-                          </>
-                        ) : (
-                          <span
-                            style={{
-                              fontSize: "12px",
+                              fontSize: "11px",
                               color: "var(--text-tertiary)",
                             }}
                           >
-                            Assigned to another TA
+                            {completion.fulfilled}/{completion.total} filled
+                          </div>
+                        </div>
+                      </td>
+
+                      <td>
+                        <span
+                          className={`priority-indicator ${getPriorityClass(req.priority)}`}
+                        >
+                          {req.priority}
+                        </span>
+                      </td>
+
+                      <td>
+                        <span
+                          className={`ticket-status ${getStatusClass(req.overallStatus)}`}
+                        >
+                          {req.overallStatus}
+                        </span>
+                      </td>
+
+                      <td>
+                        <div
+                          style={{ display: "flex", flexDirection: "column" }}
+                        >
+                          <span style={{ fontSize: "13px" }}>
+                            {req.raisedBy}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: "11px",
+                              color: "var(--text-tertiary)",
+                            }}
+                          >
+                            {formatDate(req.dateCreated)}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td>
+                        <span
+                          className={`aging-indicator ${getAgingClass(agingDays)}`}
+                        >
+                          {agingDays}d
+                        </span>
+                      </td>
+
+                      <td>
+                        {req.assignedTA ? (
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: "8px",
+                                height: "8px",
+                                borderRadius: "50%",
+                                backgroundColor: isAssignedToMe
+                                  ? "var(--success)"
+                                  : "var(--warning)",
+                              }}
+                            />
+                            <span style={{ fontSize: "13px" }}>
+                              {req.assignedTA}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="status-badge inactive">
+                            Unassigned
                           </span>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                </React.Fragment>
-              );
-            })}
+                      </td>
 
-            {filteredRequisitions.length === 0 && (
+                      <td>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          {isUnassigned ? (
+                            <>
+                              <button
+                                className="action-button primary"
+                                onClick={() => handleSelfAssign(req.id)}
+                                style={{
+                                  fontSize: "12px",
+                                  padding: "6px 12px",
+                                }}
+                              >
+                                Self Assign
+                              </button>
+                            </>
+                          ) : isAssignedToMe ? (
+                            <>
+                              <button
+                                className="action-button primary"
+                                onClick={() => onManageItems?.(req.id)}
+                                style={{
+                                  fontSize: "12px",
+                                  padding: "6px 12px",
+                                }}
+                              >
+                                Manage Items
+                              </button>
+                              <button
+                                className="action-button"
+                                onClick={() => onViewRequisition?.(req.id)}
+                                style={{
+                                  fontSize: "12px",
+                                  padding: "6px 12px",
+                                }}
+                              >
+                                View
+                              </button>
+                            </>
+                          ) : (
+                            <span
+                              style={{
+                                fontSize: "12px",
+                                color: "var(--text-tertiary)",
+                              }}
+                            >
+                              Assigned to another TA
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  </React.Fragment>
+                );
+              })}
+
+            {!isLoading && !error && filteredRequisitions.length === 0 && (
               <tr>
                 <td colSpan={9}>
                   <div className="tickets-empty-state">

@@ -1,47 +1,72 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Eye } from "lucide-react";
+import { apiClient } from "../../api/client";
 
-interface RequisitionItem {
-  skill: string;
-  status: "Pending" | "Fulfilled" | "Cancelled";
-  employee?: string;
+interface Requisition {
+  req_id: number;
+  project_name: string;
+  client_name: string;
+  overall_status: string;
+  required_by_date: string;
+  priority: string;
+  budget_amount: number;
+  created_at: string;
 }
-
-interface MyRequisition {
-  id: string;
-  project: string;
-  status: "Open" | "In Progress" | "Fulfilled" | "Closed";
-  assignedTA: string;
-  lastUpdated: string;
-  items: RequisitionItem[];
-}
-
-const myRequisitions: MyRequisition[] = [
-  {
-    id: "REQ-3001",
-    project: "Web Revamp",
-    status: "Open",
-    assignedTA: "—",
-    lastUpdated: "2024-01-18",
-    items: [
-      { skill: "React", status: "Pending" },
-      { skill: "UI/UX", status: "Pending" },
-    ],
-  },
-  {
-    id: "REQ-3005",
-    project: "Data Warehouse",
-    status: "In Progress",
-    assignedTA: "Anita HR",
-    lastUpdated: "2024-01-21",
-    items: [
-      { skill: "ETL Engineer", status: "Fulfilled", employee: "RBM-023" },
-      { skill: "Data Analyst", status: "Pending" },
-    ],
-  },
-];
 
 const MyRequisitions: React.FC = () => {
+  const [requisitions, setRequisitions] = useState<Requisition[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchRequisitions = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const response = await apiClient.get<Requisition[]>("/requisitions/my");
+        if (isMounted) {
+          setRequisitions(response.data);
+        }
+      } catch (err) {
+        if (!isMounted) return;
+        const message =
+          err instanceof Error ? err.message : "Failed to load requisitions";
+        setError(message);
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    fetchRequisitions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const formatDate = (value: string) => {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  const formatCurrency = (value: number) => {
+    if (Number.isNaN(value)) return "—";
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0,
+    }).format(value);
+  };
   return (
     <>
       {/* Page Header */}
@@ -59,52 +84,68 @@ const MyRequisitions: React.FC = () => {
             <tr>
               <th>Req ID</th>
               <th>Project</th>
+              <th>Client</th>
               <th>Status</th>
-              <th>Pending Items</th>
-              <th>Assigned TA</th>
-              <th>Last Updated</th>
+              <th>Priority</th>
+              <th>Required By</th>
+              <th>Budget</th>
+              <th>Created</th>
               <th>Action</th>
             </tr>
           </thead>
 
           <tbody>
-            {myRequisitions.map((req) => {
-              const pendingCount = req.items.filter(
-                (i) => i.status === "Pending",
-              ).length;
+            {isLoading && (
+              <tr>
+                <td colSpan={9}>
+                  <div className="empty-state">Loading requisitions…</div>
+                </td>
+              </tr>
+            )}
 
-              return (
-                <tr key={req.id}>
+            {!isLoading && error && (
+              <tr>
+                <td colSpan={9}>
+                  <div
+                    className="empty-state"
+                    style={{ color: "var(--error)" }}
+                  >
+                    {error}
+                  </div>
+                </td>
+              </tr>
+            )}
+
+            {!isLoading && !error && requisitions.length === 0 && (
+              <tr>
+                <td colSpan={9}>
+                  <div className="empty-state">No requisitions found.</div>
+                </td>
+              </tr>
+            )}
+
+            {!isLoading &&
+              !error &&
+              requisitions.map((req) => (
+                <tr key={req.req_id}>
                   <td>
-                    <strong>{req.id}</strong>
+                    <strong>REQ-{req.req_id}</strong>
                   </td>
-                  <td>{req.project}</td>
+                  <td>{req.project_name || "—"}</td>
+                  <td>{req.client_name || "—"}</td>
                   <td>
                     <span
-                      className={`status-badge ${req.status
+                      className={`status-badge ${req.overall_status
                         .toLowerCase()
-                        .replace(" ", "-")}`}
+                        .replace(/\s+/g, "-")}`}
                     >
-                      {req.status}
+                      {req.overall_status}
                     </span>
                   </td>
-                  <td>
-                    {pendingCount > 0 ? (
-                      <span className="text-amber-600 font-medium">
-                        {pendingCount} open
-                      </span>
-                    ) : (
-                      <span className="text-green-600">0</span>
-                    )}
-                  </td>
-                  <td>
-                    {req.assignedTA === "—" ? (
-                      <span className="text-slate-400">Unassigned</span>
-                    ) : (
-                      req.assignedTA
-                    )}
-                  </td>
-                  <td>{req.lastUpdated}</td>
+                  <td>{req.priority || "—"}</td>
+                  <td>{formatDate(req.required_by_date)}</td>
+                  <td>{formatCurrency(req.budget_amount)}</td>
+                  <td>{formatDate(req.created_at)}</td>
                   <td>
                     <button className="action-button text-sm">
                       <Eye size={14} />
@@ -112,16 +153,7 @@ const MyRequisitions: React.FC = () => {
                     </button>
                   </td>
                 </tr>
-              );
-            })}
-
-            {myRequisitions.length === 0 && (
-              <tr>
-                <td colSpan={7}>
-                  <div className="empty-state">No requisitions found.</div>
-                </td>
-              </tr>
-            )}
+              ))}
           </tbody>
         </table>
       </div>

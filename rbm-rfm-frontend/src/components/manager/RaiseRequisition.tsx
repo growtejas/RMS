@@ -163,6 +163,17 @@ const RaiseRequisition: React.FC = () => {
     setSubmitError(null);
 
     try {
+      const trimmedBudget = formData.budget.replace(/,/g, "").trim();
+      const budgetValue = trimmedBudget ? Number(trimmedBudget) : undefined;
+
+      if (
+        trimmedBudget &&
+        (budgetValue === undefined || !Number.isFinite(budgetValue))
+      ) {
+        setSubmitError("Budget must be a valid number.");
+        return;
+      }
+
       const itemsPayload = formData.items.flatMap((item) => {
         const roleText = item.role.trim();
         const descriptionText = item.description.trim();
@@ -203,11 +214,13 @@ const RaiseRequisition: React.FC = () => {
         required_by_date: formData.requiredBy || undefined,
         priority: formData.priority || undefined,
         justification: formData.justification || undefined,
-        budget_amount: formData.budget ? Number(formData.budget) : undefined,
+        budget_amount: budgetValue,
         duration: formData.projectDuration || undefined,
         is_replacement: formData.isReplacement,
         manager_notes: formData.additionalNotes || undefined,
-        date_closed: formData.dateClosed || undefined,
+        date_closed: formData.dateClosed
+          ? new Date(`${formData.dateClosed}T00:00:00`).toISOString()
+          : undefined,
         items: itemsPayload,
       });
 
