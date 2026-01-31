@@ -60,6 +60,7 @@ interface RequisitionItem {
   assignedEmployeeName?: string;
   assignedDate?: string;
   description: string;
+  requirements?: string;
 }
 
 interface TimelineEvent {
@@ -199,11 +200,22 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
           education: item.education_requirement ?? "—",
           itemStatus: item.item_status,
           description: item.job_description,
+          requirements: item.requirements ?? undefined,
         })) ?? [],
       availableEmployees: [],
       timeline: [],
       notes: [],
     };
+  };
+
+  const parseSecondarySkills = (requirements?: string) => {
+    if (!requirements) return [] as string[];
+    const match = requirements.match(/Secondary Skills:\s*([^|]+)/i);
+    if (!match) return [] as string[];
+    return match[1]
+      .split(",")
+      .map((skill) => skill.trim())
+      .filter(Boolean);
   };
 
   useEffect(() => {
@@ -1020,6 +1032,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
           >
             {ticket.items.map((item) => {
               const isExpanded = expandedItems.includes(item.id);
+              const secondarySkills = parseSecondarySkills(item.requirements);
               const matchedEmployees = ticket.availableEmployees
                 .filter(
                   (emp) =>
@@ -1177,6 +1190,84 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                         borderTop: "1px solid var(--border-subtle)",
                       }}
                     >
+                      <div
+                        style={{
+                          padding: "16px",
+                          borderRadius: "10px",
+                          backgroundColor: "var(--bg-secondary)",
+                          border: "1px solid var(--border-subtle)",
+                          marginBottom: "12px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: "13px",
+                            fontWeight: 600,
+                            marginBottom: "10px",
+                          }}
+                        >
+                          Skill Profile
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "8px",
+                            fontSize: "12px",
+                          }}
+                        >
+                          <div>
+                            <span
+                              className="priority-indicator priority-high"
+                              style={{ marginRight: "8px" }}
+                            >
+                              {item.skill}
+                            </span>
+                            <span style={{ color: "var(--text-tertiary)" }}>
+                              Level: {item.level} • Experience:{" "}
+                              {item.experience} yrs
+                            </span>
+                          </div>
+                          <div>
+                            <span style={{ color: "var(--text-tertiary)" }}>
+                              Secondary Skills
+                            </span>
+                            <div
+                              style={{
+                                display: "flex",
+                                flexWrap: "wrap",
+                                gap: "8px",
+                                marginTop: "6px",
+                              }}
+                            >
+                              {secondarySkills.length > 0 ? (
+                                secondarySkills.map((skill) => (
+                                  <span
+                                    key={skill}
+                                    className="filter-chip"
+                                    style={{ padding: "6px 10px" }}
+                                  >
+                                    {skill}
+                                  </span>
+                                ))
+                              ) : (
+                                <span style={{ color: "var(--text-tertiary)" }}>
+                                  No secondary skills specified.
+                                </span>
+                              )}
+                            </div>
+                            <div
+                              style={{
+                                marginTop: "6px",
+                                color: "var(--text-tertiary)",
+                              }}
+                            >
+                              Level: {item.level} • Experience:{" "}
+                              {item.experience} yrs
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                       <div
                         style={{
                           fontSize: "13px",

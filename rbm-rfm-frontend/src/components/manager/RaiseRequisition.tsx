@@ -94,6 +94,7 @@ const RaiseRequisition: React.FC = () => {
   const [secondarySkillPick, setSecondarySkillPick] = useState<
     Record<number, number | "">
   >({});
+  const [activeSkillField, setActiveSkillField] = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -725,45 +726,106 @@ const RaiseRequisition: React.FC = () => {
 
                 <div className="form-field">
                   <label>Primary Skill *</label>
-                  <input
-                    placeholder="Search skills"
-                    value={skillSearch[item.id] ?? ""}
-                    onChange={(e) =>
-                      setSkillSearch({
-                        ...skillSearch,
-                        [item.id]: e.target.value,
-                      })
-                    }
-                    style={{ width: "100%" }}
-                  />
-                  <select
-                    value={item.primarySkillId}
-                    onChange={(e) =>
-                      updateItem(
-                        item.id,
-                        "primarySkillId",
-                        e.target.value ? Number(e.target.value) : "",
-                      )
-                    }
-                    style={{
-                      width: "100%",
-                      marginTop: "8px",
-                      background: "var(--bg-tertiary)",
-                    }}
-                  >
-                    <option value="">Select primary skill</option>
-                    {skills
-                      .filter((skill) =>
-                        skill.name
-                          .toLowerCase()
-                          .includes((skillSearch[item.id] ?? "").toLowerCase()),
-                      )
-                      .map((skill) => (
-                        <option key={skill.id} value={skill.id}>
-                          {skill.name}
-                        </option>
-                      ))}
-                  </select>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      placeholder="Search skills"
+                      value={skillSearch[item.id] ?? ""}
+                      onChange={(e) => {
+                        setSkillSearch({
+                          ...skillSearch,
+                          [item.id]: e.target.value,
+                        });
+                        setActiveSkillField(item.id);
+                        if (!e.target.value) {
+                          updateItem(item.id, "primarySkillId", "");
+                        }
+                      }}
+                      onFocus={() => setActiveSkillField(item.id)}
+                      onBlur={() =>
+                        setTimeout(
+                          () =>
+                            setActiveSkillField((prev) =>
+                              prev === item.id ? null : prev,
+                            ),
+                          150,
+                        )
+                      }
+                      style={{ width: "100%" }}
+                    />
+                    {activeSkillField === item.id && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "calc(100% + 6px)",
+                          left: 0,
+                          right: 0,
+                          background: "var(--bg-primary)",
+                          border: "1px solid var(--border-subtle)",
+                          borderRadius: "10px",
+                          boxShadow: "var(--shadow-md)",
+                          maxHeight: "220px",
+                          overflowY: "auto",
+                          zIndex: 5,
+                        }}
+                      >
+                        {skills
+                          .filter((skill) =>
+                            skill.name
+                              .toLowerCase()
+                              .includes(
+                                (skillSearch[item.id] ?? "").toLowerCase(),
+                              ),
+                          )
+                          .map((skill) => (
+                            <button
+                              key={skill.id}
+                              type="button"
+                              className="action-button"
+                              style={{
+                                width: "100%",
+                                justifyContent: "flex-start",
+                                borderRadius: 0,
+                                border: "none",
+                                background:
+                                  item.primarySkillId === skill.id
+                                    ? "rgba(59, 130, 246, 0.12)"
+                                    : "transparent",
+                                color: "var(--text-primary)",
+                                padding: "10px 12px",
+                              }}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                updateItem(item.id, "primarySkillId", skill.id);
+                                setSkillSearch({
+                                  ...skillSearch,
+                                  [item.id]: skill.name,
+                                });
+                                setActiveSkillField(null);
+                              }}
+                            >
+                              {skill.name}
+                            </button>
+                          ))}
+                        {skills.filter((skill) =>
+                          skill.name
+                            .toLowerCase()
+                            .includes(
+                              (skillSearch[item.id] ?? "").toLowerCase(),
+                            ),
+                        ).length === 0 && (
+                          <div
+                            style={{
+                              padding: "10px 12px",
+                              fontSize: "12px",
+                              color: "var(--text-tertiary)",
+                            }}
+                          >
+                            No skills found.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   {skillLoadError && (
                     <div
                       style={{
