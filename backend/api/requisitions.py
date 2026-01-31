@@ -15,6 +15,7 @@ from utils.dependencies import (
 )
 from db.models.requisition import Requisition
 from db.models.requisition_item import RequisitionItem
+from db.models.requisition_status_history import RequisitionStatusHistory
 from db.models.audit_log import AuditLog
 from schemas.requisition import (
     RequisitionCreate,
@@ -29,6 +30,24 @@ router = APIRouter(
     prefix="/requisitions",
     tags=["Requisitions"]
 )
+
+
+def _record_status_history(
+    db: Session,
+    req_id: int,
+    old_status: str | None,
+    new_status: str | None,
+    changed_by: int | None,
+) -> None:
+    if not new_status or new_status == old_status:
+        return
+    history = RequisitionStatusHistory(
+        req_id=req_id,
+        old_status=old_status,
+        new_status=new_status,
+        changed_by=changed_by,
+    )
+    db.add(history)
 
 
 @router.post("/", response_model=RequisitionResponse)
@@ -171,8 +190,22 @@ def update_requisition(
     ):
         raise HTTPException(status_code=400, detail="Invalid status")
 
+    old_status = requisition.overall_status
+
     for field, value in updates.items():
         setattr(requisition, field, value)
+
+    if updates.get("overall_status") == "Closed" and requisition.date_closed is None:
+        requisition.date_closed = datetime.utcnow()
+
+    if "overall_status" in updates:
+        _record_status_history(
+            db,
+            requisition.req_id,
+            old_status,
+            updates.get("overall_status"),
+            current_user.user_id,
+        )
 
     if "budget_amount" in updates and updates.get("budget_amount") != old_budget:
         audit = AuditLog(
@@ -216,7 +249,17 @@ def update_requisition_status(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
+    old_status = requisition.overall_status
     requisition.overall_status = payload.overall_status
+    if payload.overall_status == "Closed" and requisition.date_closed is None:
+        requisition.date_closed = datetime.utcnow()
+    _record_status_history(
+        db,
+        requisition.req_id,
+        old_status,
+        payload.overall_status,
+        current_user.user_id,
+    )
     db.commit()
 
     return {"message": "Status updated"}
@@ -235,8 +278,16 @@ def approve_budget(
         raise HTTPException(status_code=404, detail="Requisition not found")
 
     validate_status_transition(requisition.overall_status, "Pending HR Approval")
+    old_status = requisition.overall_status
     requisition.budget_approved_by = current_user.user_id
     requisition.overall_status = "Pending HR Approval"
+    _record_status_history(
+        db,
+        requisition.req_id,
+        old_status,
+        requisition.overall_status,
+        current_user.user_id,
+    )
     db.commit()
 
     return {"message": "Budget approved"}
@@ -256,9 +307,17 @@ def approve_and_release(
         raise HTTPException(status_code=404, detail="Requisition not found")
 
     validate_status_transition(requisition.overall_status, "Approved & Unassigned")
+    old_status = requisition.overall_status
     requisition.approved_by = current_user.user_id
     requisition.approval_history = datetime.utcnow()
     requisition.overall_status = "Approved & Unassigned"
+    _record_status_history(
+        db,
+        requisition.req_id,
+        old_status,
+        requisition.overall_status,
+        current_user.user_id,
+    )
     db.commit()
 
     return {"message": "Requisition approved and released"}
@@ -291,9 +350,18 @@ def assign_ta(
         )
 
     validate_status_transition(requisition.overall_status, "Active")
+    old_status = requisition.overall_status
     requisition.assigned_ta = payload.ta_user_id
     requisition.assigned_at = datetime.utcnow()
     requisition.overall_status = "Active"
+
+    _record_status_history(
+        db,
+        requisition.req_id,
+        old_status,
+        requisition.overall_status,
+        current_user.user_id,
+    )
 
     audit = AuditLog(
         entity_name="requisition",

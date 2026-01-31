@@ -30,6 +30,7 @@ import {
 import { useParams, useNavigate } from "react-router-dom";
 import { apiClient } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
+import "../../styles/hr/hr-dashboard.css";
 
 interface RequisitionDetailsProps {
   requisitionId?: string | null;
@@ -90,6 +91,13 @@ interface TicketData {
   dateCreated: string;
   assignedTA: string;
   assignedTAId?: number | null;
+  raisedById?: number | null;
+  approvedBy?: number | null;
+  budgetApprovedBy?: number | null;
+  approvalHistory?: string | null;
+  assignedAt?: string | null;
+  dateClosed?: string | null;
+  createdAt?: string | null;
   daysOpen: number;
   slaHours: number;
   budget: string;
@@ -127,7 +135,40 @@ interface BackendRequisition {
   duration?: string | null;
   raised_by?: number | null;
   assigned_ta?: number | null;
+  budget_approved_by?: number | null;
+  approved_by?: number | null;
+  approval_history?: string | null;
+  assigned_at?: string | null;
+  date_closed?: string | null;
   items: BackendRequisitionItem[];
+}
+
+interface StatusHistoryEntry {
+  history_id: number;
+  req_id: number;
+  old_status?: string | null;
+  new_status?: string | null;
+  changed_by?: number | null;
+  changed_at: string;
+}
+
+interface AuditLogEntry {
+  audit_id: number;
+  entity_name: string;
+  entity_id?: string | null;
+  action: string;
+  performed_by?: number | null;
+  performed_by_username?: string | null;
+  performed_by_full_name?: string | null;
+  old_value?: string | null;
+  new_value?: string | null;
+  performed_at: string;
+}
+
+interface UserDirectoryEntry {
+  user_id: number;
+  username: string;
+  roles?: string[];
 }
 
 const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
@@ -151,6 +192,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   >(null);
   const [newNote, setNewNote] = useState("");
   const [ticket, setTicket] = useState<TicketData | null>(null);
+  const [statusHistory, setStatusHistory] = useState<StatusHistoryEntry[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+  const [usersById, setUsersById] = useState<Record<number, string>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const currentUserId = user?.user_id ?? null;
@@ -164,6 +208,43 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     if (!value) return null;
     const match = value.match(/\d+/);
     return match ? Number(match[0]) : null;
+  };
+
+  const formatRelativeTime = (dateValue?: string | null) => {
+    if (!dateValue) return "—";
+    const date = new Date(dateValue);
+    const diffMs = Date.now() - date.getTime();
+    if (Number.isNaN(diffMs)) return "—";
+    const diffMinutes = Math.floor(diffMs / 60000);
+    if (diffMinutes < 1) return "just now";
+    if (diffMinutes < 60) return `${diffMinutes} min ago`;
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24)
+      return `${diffHours} hr${diffHours === 1 ? "" : "s"} ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
+  };
+
+  const resolveUserName = (userId?: number | null) => {
+    if (!userId) return "System";
+    return usersById[userId] ?? `User #${userId}`;
+  };
+
+  const parseBudgetNote = () => {
+    const budgetLog = auditLogs.find((log) => log.action === "BUDGET_UPDATE");
+    if (!budgetLog?.new_value) return undefined;
+    try {
+      const newValue = JSON.parse(budgetLog.new_value);
+      const oldValue = budgetLog.old_value
+        ? JSON.parse(budgetLog.old_value)
+        : {};
+      if (newValue?.budget_amount !== undefined) {
+        return `Budget updated from ${oldValue?.budget_amount ?? "—"} to ${newValue.budget_amount}.`;
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
   };
 
   const buildTicket = (req: BackendRequisition): TicketData => {
@@ -197,6 +278,13 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       dateCreated: req.created_at ?? "",
       assignedTA: assignedTAId ? `User #${assignedTAId}` : "Unassigned",
       assignedTAId,
+      raisedById: req.raised_by ?? null,
+      approvedBy: req.approved_by ?? null,
+      budgetApprovedBy: req.budget_approved_by ?? null,
+      approvalHistory: req.approval_history ?? null,
+      assignedAt: req.assigned_at ?? null,
+      dateClosed: req.date_closed ?? null,
+      createdAt: req.created_at ?? null,
       daysOpen,
       slaHours: 72,
       budget,
@@ -253,7 +341,50 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       }
     };
 
+    const fetchStatusHistory = async () => {
+      try {
+        const response = await apiClient.get<StatusHistoryEntry[]>(
+          `/requisitions/${reqId}/status-history`,
+        );
+        if (isMounted) {
+          setStatusHistory(response.data ?? []);
+        }
+      } catch {
+        if (isMounted) setStatusHistory([]);
+      }
+    };
+
+    const fetchAuditLogs = async () => {
+      try {
+        const response = await apiClient.get<AuditLogEntry[]>(
+          `/audit-logs?entity_name=requisition&entity_id=${reqId}`,
+        );
+        if (isMounted) {
+          setAuditLogs(response.data ?? []);
+        }
+      } catch {
+        if (isMounted) setAuditLogs([]);
+      }
+    };
+
+    const fetchUsers = async () => {
+      try {
+        const response = await apiClient.get<UserDirectoryEntry[]>("/users");
+        if (!isMounted) return;
+        const map: Record<number, string> = {};
+        response.data.forEach((userEntry) => {
+          map[userEntry.user_id] = userEntry.username;
+        });
+        setUsersById(map);
+      } catch {
+        if (isMounted) setUsersById({});
+      }
+    };
+
     fetchRequisition();
+    fetchStatusHistory();
+    fetchAuditLogs();
+    fetchUsers();
 
     return () => {
       isMounted = false;
@@ -278,7 +409,123 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     );
   }
 
-  // Calculate completion stats
+  const statusHistoryByStatus = statusHistory.reduce(
+    (acc, entry) => {
+      if (entry.new_status) {
+        acc[entry.new_status] = entry;
+      }
+      return acc;
+    },
+    {} as Record<string, StatusHistoryEntry>,
+  );
+
+  const budgetNote = parseBudgetNote();
+
+  const milestones = (() => {
+    const steps: {
+      id: string;
+      title: string;
+      actor: string;
+      time?: string | null;
+      note?: string;
+      forceCompleted?: boolean;
+    }[] = [];
+
+    steps.push({
+      id: "raised",
+      title: "Requisition Raised",
+      actor: resolveUserName(ticket.raisedById),
+      time: ticket.createdAt ?? ticket.dateCreated,
+    });
+
+    if (ticket.budgetApprovedBy) {
+      const budgetLog = auditLogs.find((log) => log.action === "BUDGET_UPDATE");
+      const budgetTime =
+        statusHistoryByStatus["Pending HR Approval"]?.changed_at ??
+        budgetLog?.performed_at ??
+        ticket.createdAt ??
+        null;
+      steps.push({
+        id: "budget",
+        title: "Budget Cleared",
+        actor: resolveUserName(ticket.budgetApprovedBy),
+        time: budgetTime,
+        note: budgetNote,
+      });
+    }
+
+    if (ticket.approvedBy) {
+      steps.push({
+        id: "hr",
+        title: "Validated by HR Admin",
+        actor: resolveUserName(ticket.approvedBy),
+        time: ticket.approvalHistory ?? null,
+      });
+    }
+
+    if (ticket.assignedTAId) {
+      const taAssignLog = auditLogs.find((log) => log.action === "TA_ASSIGN");
+      steps.push({
+        id: "ta",
+        title: `Assigned to ${resolveUserName(ticket.assignedTAId)}`,
+        actor:
+          taAssignLog?.performed_by_full_name ||
+          taAssignLog?.performed_by_username ||
+          resolveUserName(taAssignLog?.performed_by),
+        time: ticket.assignedAt ?? taAssignLog?.performed_at ?? null,
+      });
+    }
+
+    const fulfilledItems = ticket.items.filter(
+      (item) => item.itemStatus === "Fulfilled",
+    );
+    fulfilledItems.forEach((item) => {
+      steps.push({
+        id: `fulfilled-${item.id}`,
+        title: `Position Fulfilled: ${item.skill}`,
+        actor: item.assignedEmployeeName ?? "Assigned employee",
+        time: null,
+        note: "Fulfillment time not available in current data.",
+        forceCompleted: true,
+      });
+    });
+
+    if (ticket.overallStatus === "Closed" || ticket.dateClosed) {
+      steps.push({
+        id: "closed",
+        title: "Requisition Closed",
+        actor: resolveUserName(statusHistoryByStatus["Closed"]?.changed_by),
+        time: statusHistoryByStatus["Closed"]?.changed_at ?? ticket.dateClosed,
+      });
+    }
+
+    return steps;
+  })();
+
+  const firstPendingIndex = milestones.findIndex(
+    (step) => !step.time && !step.forceCompleted,
+  );
+  const timelineWithStatus = milestones.map((step, index) => {
+    const previous = milestones[index - 1];
+    const timeValue = step.time ? new Date(step.time).getTime() : null;
+    const previousTime = previous?.time
+      ? new Date(previous.time).getTime()
+      : null;
+    const isDelayed =
+      timeValue !== null &&
+      previousTime !== null &&
+      timeValue - previousTime > 48 * 60 * 60 * 1000;
+    return {
+      ...step,
+      isDelayed,
+      isCompleted:
+        step.forceCompleted ||
+        (firstPendingIndex === -1 ? true : index < firstPendingIndex),
+      isCurrent: firstPendingIndex !== -1 && index === firstPendingIndex,
+      isUpcoming: firstPendingIndex !== -1 && index > firstPendingIndex,
+    };
+  });
+
   const completionStats = {
     totalItems: ticket.items.length,
     fulfilled: ticket.items.filter((item) => item.itemStatus === "Fulfilled")
@@ -940,7 +1187,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                     Match Rate
                   </span>
                   <span style={{ color: "var(--success)", fontWeight: 600 }}>
-                    85%
+                    {completionStats.progress}%
                   </span>
                 </div>
                 <div
@@ -954,20 +1201,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                     Bench Availability
                   </span>
                   <span style={{ color: "var(--success)", fontWeight: 600 }}>
-                    3 resources
+                    {completionStats.pending} open positions
                   </span>
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <span style={{ color: "var(--text-secondary)" }}>
-                    Avg. Time to Fill
-                  </span>
-                  <span>18 days</span>
                 </div>
               </div>
             </div>
@@ -1673,94 +1908,60 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
             </p>
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "16px",
-              marginTop: "24px",
-            }}
-          >
-            {ticket.timeline.map((item, idx) => (
-              <div key={idx} style={{ display: "flex", gap: "16px" }}>
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: "32px",
-                      height: "32px",
-                      borderRadius: "50%",
-                      background: "var(--bg-tertiary)",
-                      border: "2px solid var(--border-subtle)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <History size={14} />
-                  </div>
-                  {idx !== ticket.timeline.length - 1 && (
-                    <div
-                      style={{
-                        width: "2px",
-                        height: "100%",
-                        background: "var(--border-subtle)",
-                        marginTop: "8px",
-                      }}
-                    ></div>
-                  )}
-                </div>
-                <div
-                  style={{
-                    flex: 1,
-                    paddingBottom:
-                      idx !== ticket.timeline.length - 1 ? "24px" : "0",
-                  }}
-                >
-                  <div
-                    style={{
-                      padding: "16px",
-                      backgroundColor: "var(--bg-secondary)",
-                      borderRadius: "12px",
-                      border: "1px solid var(--border-subtle)",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "flex-start",
-                        marginBottom: "8px",
-                      }}
-                    >
-                      <div style={{ fontWeight: 600 }}>{item.event}</div>
-                      <div
-                        style={{
-                          fontSize: "12px",
-                          color: "var(--text-tertiary)",
-                        }}
-                      >
-                        {item.date}
+          {timelineWithStatus.length === 0 ? (
+            <div className="tickets-empty-state">No timeline activity yet.</div>
+          ) : (
+            <div className="milestone-timeline">
+              {timelineWithStatus.map((item, idx) => {
+                const statusClass = item.isCompleted
+                  ? item.isDelayed
+                    ? "milestone-node error"
+                    : "milestone-node completed"
+                  : item.isCurrent
+                    ? "milestone-node current"
+                    : "milestone-node upcoming";
+                const timeLabel = item.time
+                  ? formatRelativeTime(item.time)
+                  : item.isUpcoming
+                    ? "Upcoming"
+                    : "Pending";
+                return (
+                  <div key={item.id} className="milestone-row">
+                    <div className="milestone-track">
+                      <div className={`milestone-node ${statusClass}`}>
+                        {item.isCompleted ? <CheckCircle size={14} /> : idx + 1}
                       </div>
+                      {idx < timelineWithStatus.length - 1 && (
+                        <div
+                          className={`milestone-line ${statusClass} ${item.isCurrent ? "active" : ""}`}
+                        />
+                      )}
                     </div>
-                    <div
-                      style={{
-                        fontSize: "13px",
-                        color: "var(--text-secondary)",
-                      }}
-                    >
-                      Updated by <strong>{item.user}</strong>
+                    <div className="milestone-card">
+                      <div className="milestone-title">{item.title}</div>
+                      <div className="milestone-meta">
+                        <div className="milestone-avatar">
+                          {item.actor
+                            .split(" ")
+                            .filter(Boolean)
+                            .slice(0, 2)
+                            .map((part) => part[0]?.toUpperCase())
+                            .join("")}
+                        </div>
+                        <div>
+                          <div className="milestone-actor">{item.actor}</div>
+                          <div className="milestone-time">{timeLabel}</div>
+                        </div>
+                      </div>
+                      {item.note && (
+                        <div className="milestone-note">Note: {item.note}</div>
+                      )}
                     </div>
                   </div>
-                </div>
-              </div>
-            ))}
-          </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Add New Event (if editing) */}
           {isEditing && (
