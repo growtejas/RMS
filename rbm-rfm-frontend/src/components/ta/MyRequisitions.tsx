@@ -1,4 +1,6 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { apiClient } from "../../api/client";
+import { useAuth } from "../../contexts/AuthContext";
 
 /* ======================================================
    Types
@@ -8,33 +10,28 @@ interface MyRequisition {
   id: string;
   project: string;
   role: string;
-  status: "Open" | "In Progress" | "Fulfilled" | "Closed";
-  priority: "High" | "Medium" | "Low";
+  status: string;
+  priority: string;
   slaDaysRemaining: number;
 }
 
-/* ======================================================
-   Mock Data (Replace with API later)
-   ====================================================== */
+interface BackendRequisitionItem {
+  item_id: number;
+  role_position: string;
+  item_status: string;
+}
 
-const myRequisitions: MyRequisition[] = [
-  {
-    id: "REQ-1998",
-    project: "Talent Portal",
-    role: "UI Engineer",
-    status: "Open",
-    priority: "High",
-    slaDaysRemaining: 2,
-  },
-  {
-    id: "REQ-2003",
-    project: "API Gateway",
-    role: "Backend Engineer",
-    status: "In Progress",
-    priority: "Medium",
-    slaDaysRemaining: 9,
-  },
-];
+interface BackendRequisition {
+  req_id: number;
+  project_name?: string | null;
+  overall_status: string;
+  priority?: string | null;
+  created_at?: string | null;
+  assigned_ta?: number | null;
+  items: BackendRequisitionItem[];
+}
+
+const SLA_HOURS = 72;
 
 /* ======================================================
    Props
@@ -50,12 +47,12 @@ interface MyRequisitionsProps {
 
 const getStatusClass = (status: MyRequisition["status"]) => {
   switch (status) {
-    case "Open":
+    case "Approved & Unassigned":
       return "open";
-    case "In Progress":
+    case "Active":
+    case "Pending HR Approval":
+    case "Pending Budget Approval":
       return "in-progress";
-    case "Fulfilled":
-      return "fulfilled";
     case "Closed":
       return "closed";
     default:
@@ -82,6 +79,14 @@ const getSlaClass = (days: number) => {
   return "";
 };
 
+const getSlaDaysRemaining = (dateValue?: string | null) => {
+  if (!dateValue) return 0;
+  const created = new Date(dateValue);
+  const diffMs = Date.now() - created.getTime();
+  const diffHours = Math.max(0, diffMs / 3600000);
+  return Math.ceil((SLA_HOURS - diffHours) / 24);
+};
+
 /* ======================================================
    Component
    ====================================================== */
@@ -89,6 +94,61 @@ const getSlaClass = (days: number) => {
 const MyRequisitions: React.FC<MyRequisitionsProps> = ({
   onViewRequisition,
 }) => {
+  const { user } = useAuth();
+  const currentUserId = user?.user_id ?? null;
+  const [requisitions, setRequisitions] = useState<MyRequisition[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchRequisitions = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const response = await apiClient.get<BackendRequisition[]>(
+          "/requisitions?my_assignments=true",
+        );
+        if (!isMounted) return;
+        const mapped = (response.data ?? [])
+          .filter((req) =>
+            currentUserId ? req.assigned_ta === currentUserId : true,
+          )
+          .map((req) => {
+            const primaryRole = req.items?.[0]?.role_position ?? "—";
+            return {
+              id: `REQ-${req.req_id}`,
+              project: req.project_name ?? "—",
+              role: primaryRole,
+              status: req.overall_status ?? "—",
+              priority: req.priority ?? "—",
+              slaDaysRemaining: Math.max(
+                0,
+                getSlaDaysRemaining(req.created_at),
+              ),
+            };
+          });
+        setRequisitions(mapped);
+      } catch (err) {
+        if (!isMounted) return;
+        const message =
+          err instanceof Error ? err.message : "Failed to load requisitions";
+        setError(message);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    fetchRequisitions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUserId]);
+
+  const visibleRequisitions = useMemo(() => requisitions, [requisitions]);
+
   return (
     <>
       {/* Header */}
@@ -113,7 +173,7 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
           </thead>
 
           <tbody>
-            {myRequisitions.map((req) => (
+            {visibleRequisitions.map((req) => (
               <tr key={req.id}>
                 <td>
                   <strong>{req.id}</strong>
@@ -160,7 +220,30 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
               </tr>
             ))}
 
-            {myRequisitions.length === 0 && (
+            {isLoading && (
+              <tr>
+                <td colSpan={7}>
+                  <div className="tickets-empty-state">
+                    Loading requisitions…
+                  </div>
+                </td>
+              </tr>
+            )}
+
+            {!isLoading && error && (
+              <tr>
+                <td colSpan={7}>
+                  <div
+                    className="tickets-empty-state"
+                    style={{ color: "var(--error)" }}
+                  >
+                    {error}
+                  </div>
+                </td>
+              </tr>
+            )}
+
+            {!isLoading && !error && visibleRequisitions.length === 0 && (
               <tr>
                 <td colSpan={7}>
                   <div className="tickets-empty-state">
