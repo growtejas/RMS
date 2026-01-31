@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   User,
   Phone,
@@ -11,6 +11,7 @@ import {
   Search,
   ArrowLeft,
 } from "lucide-react";
+import { apiClient } from "../../api/client";
 
 type ProfileTab =
   | "overview"
@@ -30,33 +31,30 @@ interface Employee {
   doj: string;
 }
 
-/* ================= MOCK EMPLOYEES ================= */
-const EMPLOYEES: Employee[] = [
-  {
-    empId: "RBM-001",
-    fullName: "John Doe",
-    email: "john.doe@rbm.com",
-    status: "Onboarding",
-    department: "Engineering",
-    doj: "2023-01-15",
-  },
-  {
-    empId: "RBM-002",
-    fullName: "Priya Sharma",
-    email: "priya.sharma@rbm.com",
-    status: "Active",
-    department: "Marketing",
-    doj: "2022-11-03",
-  },
-  {
-    empId: "RBM-003",
-    fullName: "Amit Patel",
-    email: "amit.patel@rbm.com",
-    status: "Bench",
-    department: "Engineering",
-    doj: "2021-06-21",
-  },
-];
+interface EmployeeListEntry {
+  emp_id: string;
+  full_name: string;
+}
+
+interface EmployeeDetail {
+  emp_id: string;
+  full_name: string;
+  rbm_email: string;
+  emp_status: string;
+  doj?: string | null;
+}
+
+interface AssignmentEntry {
+  assignment_id: number;
+  department_id: number;
+  start_date: string;
+  end_date?: string | null;
+}
+
+interface DepartmentEntry {
+  department_id: number;
+  department_name: string;
+}
 
 const EmployeeProfile: React.FC = () => {
   /* ================= STATE ================= */
@@ -65,16 +63,88 @@ const EmployeeProfile: React.FC = () => {
     null,
   );
   const [activeTab, setActiveTab] = useState<ProfileTab>("overview");
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchEmployees = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+
+        const [employeesResponse, departmentsResponse] = await Promise.all([
+          apiClient.get<EmployeeListEntry[]>("/employees/employees"),
+          apiClient.get<DepartmentEntry[]>("/departments/"),
+        ]);
+
+        const departmentsById = new Map(
+          (departmentsResponse.data ?? []).map((dept) => [
+            dept.department_id,
+            dept.department_name,
+          ]),
+        );
+
+        const list = employeesResponse.data ?? [];
+
+        const rows = await Promise.all(
+          list.map(async (emp) => {
+            const [detailResponse, assignmentsResponse] = await Promise.all([
+              apiClient.get<EmployeeDetail>(`/employees/${emp.emp_id}`),
+              apiClient.get<AssignmentEntry[]>(
+                `/employees/${emp.emp_id}/assignments`,
+              ),
+            ]);
+
+            const detail = detailResponse.data;
+            const assignments = assignmentsResponse.data ?? [];
+            const latestAssignment = assignments[0];
+            const departmentName = latestAssignment?.department_id
+              ? (departmentsById.get(latestAssignment.department_id) ?? "—")
+              : "—";
+
+            return {
+              empId: detail.emp_id,
+              fullName: detail.full_name,
+              email: detail.rbm_email,
+              status: detail.emp_status ?? "—",
+              department: departmentName,
+              doj: detail.doj ?? "—",
+            } as Employee;
+          }),
+        );
+
+        if (isMounted) {
+          setEmployees(rows);
+        }
+      } catch (err) {
+        if (!isMounted) return;
+        const message =
+          err instanceof Error ? err.message : "Failed to load employees";
+        setError(message);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    fetchEmployees();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   /* ================= FILTER ================= */
   const filteredEmployees = useMemo(() => {
-    return EMPLOYEES.filter(
+    return employees.filter(
       (e) =>
         e.fullName.toLowerCase().includes(search.toLowerCase()) ||
         e.empId.toLowerCase().includes(search.toLowerCase()) ||
         e.email.toLowerCase().includes(search.toLowerCase()),
     );
-  }, [search]);
+  }, [employees, search]);
 
   /* ================= TABS ================= */
   const tabs: { id: ProfileTab; label: string; icon: React.ReactNode }[] = [
@@ -119,31 +189,41 @@ const EmployeeProfile: React.FC = () => {
             marginTop: "24px",
           }}
         >
-          {filteredEmployees.map((emp) => (
-            <div
-              key={emp.empId}
-              className="stat-card"
-              style={{ cursor: "pointer" }}
-              onClick={() => {
-                setSelectedEmployee(emp);
-                setActiveTab("overview");
-              }}
-            >
-              <div style={{ fontWeight: 600 }}>{emp.fullName}</div>
-              <div className="text-xs text-slate-500">{emp.empId}</div>
+          {isLoading && <div className="empty-state">Loading employees…</div>}
 
-              <div style={{ marginTop: "12px", fontSize: "13px" }}>
-                <div>
-                  <strong>Status:</strong> {emp.status}
-                </div>
-                <div>
-                  <strong>Dept:</strong> {emp.department}
+          {!isLoading && error && (
+            <div className="empty-state" style={{ color: "var(--error)" }}>
+              {error}
+            </div>
+          )}
+
+          {!isLoading &&
+            !error &&
+            filteredEmployees.map((emp) => (
+              <div
+                key={emp.empId}
+                className="stat-card"
+                style={{ cursor: "pointer" }}
+                onClick={() => {
+                  setSelectedEmployee(emp);
+                  setActiveTab("overview");
+                }}
+              >
+                <div style={{ fontWeight: 600 }}>{emp.fullName}</div>
+                <div className="text-xs text-slate-500">{emp.empId}</div>
+
+                <div style={{ marginTop: "12px", fontSize: "13px" }}>
+                  <div>
+                    <strong>Status:</strong> {emp.status}
+                  </div>
+                  <div>
+                    <strong>Dept:</strong> {emp.department}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))}
 
-          {filteredEmployees.length === 0 && (
+          {!isLoading && !error && filteredEmployees.length === 0 && (
             <div className="empty-state">No employees match your search.</div>
           )}
         </div>
@@ -173,7 +253,7 @@ const EmployeeProfile: React.FC = () => {
               </div>
 
               <div className="stat-card">
-                <span className="stat-number">70%</span>
+                <span className="stat-number">—</span>
                 <span className="stat-label">Profile Complete</span>
               </div>
 

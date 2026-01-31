@@ -9,12 +9,19 @@ from utils.dependencies import require_any_role
 
 from db.models.employee import Employee
 from db.models.employee_skill import EmployeeSkill
+from db.models.employee_contact import EmployeeContact
+from db.models.employee_education import EmployeeEducation
+from db.models.employee_availability import EmployeeAvailability
+from db.models.employee_finance import EmployeeFinance
+from db.models.skill import Skill
 from schemas.employee import (
     EmployeeCreate,
     EmployeeUpdate,
     EmployeeStatusUpdate,
     EmployeeResponse
 )
+from schemas.employee_onboard import EmployeeOnboard, EmployeeOnboardResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 router = APIRouter(prefix="/employees", tags=["Employees"])
 # API 1 — Create Employee
@@ -66,6 +73,148 @@ def list_employees(
         })
 
     return response
+
+# API 2b — Validate employee identifiers
+@router.get("/validate")
+def validate_employee(
+    emp_id: str | None = None,
+    work_email: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin"))
+):
+    emp_exists = False
+    email_exists = False
+
+    if emp_id:
+        emp_exists = (
+            db.query(Employee)
+            .filter(Employee.emp_id == emp_id)
+            .first()
+            is not None
+        )
+
+    if work_email:
+        email_exists = (
+            db.query(EmployeeContact)
+            .filter(EmployeeContact.email == work_email)
+            .first()
+            is not None
+        )
+
+    return {
+        "emp_id_exists": emp_exists,
+        "work_email_exists": email_exists,
+    }
+
+# API 2c — Multi-table onboarding
+@router.post("/onboard", response_model=EmployeeOnboardResponse)
+def onboard_employee(
+    payload: EmployeeOnboard,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin"))
+):
+    existing = db.query(Employee).filter(Employee.emp_id == payload.emp_id).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Employee ID already exists")
+
+    email_exists = (
+        db.query(EmployeeContact)
+        .filter(EmployeeContact.email == payload.rbm_email)
+        .first()
+    )
+    if email_exists:
+        raise HTTPException(status_code=400, detail="Work email already exists")
+
+    if payload.skills:
+        skill_ids = [skill.skill_id for skill in payload.skills]
+        existing_ids = {
+            skill_id
+            for (skill_id,) in db.query(Skill.skill_id)
+            .filter(Skill.skill_id.in_(skill_ids))
+            .all()
+        }
+        missing = [str(skill_id) for skill_id in set(skill_ids) if skill_id not in existing_ids]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid skill_id(s): {', '.join(missing)}",
+            )
+
+    try:
+        with db.begin():
+            employee = Employee(
+                emp_id=payload.emp_id,
+                full_name=payload.full_name,
+                rbm_email=payload.rbm_email,
+                dob=payload.dob,
+                gender=payload.gender,
+                doj=payload.doj,
+                emp_status="Onboarding",
+            )
+            db.add(employee)
+
+            for contact in payload.contacts:
+                contact_type = contact.type.title()
+                db.add(
+                    EmployeeContact(
+                        emp_id=payload.emp_id,
+                        contact_type=contact_type,
+                        email=contact.email,
+                        phone=contact.phone,
+                        address=contact.address,
+                    )
+                )
+
+            for skill in payload.skills:
+                db.add(
+                    EmployeeSkill(
+                        emp_id=payload.emp_id,
+                        skill_id=skill.skill_id,
+                        proficiency_level=skill.proficiency_level,
+                        years_experience=skill.years_experience,
+                    )
+                )
+
+            for edu in payload.education:
+                db.add(
+                    EmployeeEducation(
+                        emp_id=payload.emp_id,
+                        qualification=edu.qualification,
+                        specialization=edu.specialization,
+                        institution=edu.institution,
+                        year_completed=edu.year_completed,
+                    )
+                )
+
+            if payload.availability:
+                db.add(
+                    EmployeeAvailability(
+                        emp_id=payload.emp_id,
+                        availability_pct=payload.availability.availability_pct,
+                        effective_from=payload.availability.effective_from,
+                    )
+                )
+
+            if payload.finance and (
+                payload.finance.bank_details or payload.finance.tax_id
+            ):
+                db.add(
+                    EmployeeFinance(
+                        emp_id=payload.emp_id,
+                        bank_details=payload.finance.bank_details,
+                        tax_id=payload.finance.tax_id,
+                    )
+                )
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to onboard employee. Please verify the data.",
+        ) from exc
+
+    return EmployeeOnboardResponse(
+        emp_id=payload.emp_id,
+        message="Employee onboarded successfully",
+    )
 
 # API 3 — Get Employee by ID
 @router.get("/{emp_id}", response_model=EmployeeResponse)
