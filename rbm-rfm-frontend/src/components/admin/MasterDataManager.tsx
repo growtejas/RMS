@@ -313,19 +313,19 @@ const MasterDataManager: React.FC = () => {
       {/* Tabs */}
       <div className="data-tabs">
         <button
-          className={`tab-button ${activeTab === "skills" ? "active" : ""}`}
+          className={`tab-button ${activeTab === "skills" ? "" : ""}`}
           onClick={() => setActiveTab("skills")}
         >
           Skills ({skills.length})
         </button>
         <button
-          className={`tab-button ${activeTab === "locations" ? "active" : ""}`}
+          className={`tab-button ${activeTab === "locations" ? "" : ""}`}
           onClick={() => setActiveTab("locations")}
         >
           Locations ({locations.length})
         </button>
         <button
-          className={`tab-button ${activeTab === "departments" ? "active" : ""}`}
+          className={`tab-button ${activeTab === "departments" ? "" : ""}`}
           onClick={() => setActiveTab("departments")}
         >
           Departments ({departments.length})

@@ -75,7 +75,7 @@ def list_requisitions(
     status: Optional[str] = None,
     raised_by: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee"))
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee", "TA"))
 ):
     query = db.query(Requisition).options(selectinload(Requisition.items))
 
@@ -91,7 +91,7 @@ def list_requisitions(
 @router.get("/my", response_model=list[RequisitionResponse])
 def list_my_requisitions(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee"))
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee", "TA"))
 ):
     return (
         db.query(Requisition)
@@ -104,7 +104,7 @@ def list_my_requisitions(
 def get_requisition(
     req_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee"))
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee", "TA"))
 ):
     requisition = db.query(Requisition).filter(
         Requisition.req_id == req_id

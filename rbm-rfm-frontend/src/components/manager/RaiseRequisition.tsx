@@ -59,6 +59,12 @@ type SkillResponse = {
   skill_name: string;
 };
 
+type LocationResponse = {
+  location_id: number;
+  city?: string | null;
+  country?: string | null;
+};
+
 const RaiseRequisition: React.FC = () => {
   const [activeStep, setActiveStep] = useState(0);
   const [formData, setFormData] = useState<RequisitionFormData>({
@@ -80,6 +86,10 @@ const RaiseRequisition: React.FC = () => {
   });
   const [skills, setSkills] = useState<SkillOption[]>([]);
   const [skillLoadError, setSkillLoadError] = useState<string | null>(null);
+  const [locations, setLocations] = useState<LocationResponse[]>([]);
+  const [locationLoadError, setLocationLoadError] = useState<string | null>(
+    null,
+  );
   const [skillSearch, setSkillSearch] = useState<Record<number, string>>({});
   const [secondarySkillPick, setSecondarySkillPick] = useState<
     Record<number, number | "">
@@ -104,7 +114,20 @@ const RaiseRequisition: React.FC = () => {
       }
     };
 
+    const fetchLocations = async () => {
+      try {
+        const response = await apiClient.get<LocationResponse[]>("/locations/");
+        setLocations(response.data);
+        setLocationLoadError(null);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to load locations";
+        setLocationLoadError(message);
+      }
+    };
+
     fetchSkills();
+    fetchLocations();
   }, []);
 
   const getSkillName = (skillId: number | "") => {
@@ -393,12 +416,28 @@ const RaiseRequisition: React.FC = () => {
             style={{ width: "100%", padding: "12px 16px" }}
           >
             <option value="">Select location</option>
-            <option value="Mumbai">Mumbai HQ</option>
-            <option value="Bengaluru">Bengaluru Office</option>
-            <option value="Delhi">Delhi Office</option>
-            <option value="Pune">Pune Development Center</option>
-            <option value="Remote">Remote</option>
+            {locations.map((location) => {
+              const label = [location.city, location.country]
+                .filter(Boolean)
+                .join(", ");
+              return (
+                <option key={location.location_id} value={label}>
+                  {label || `Location ${location.location_id}`}
+                </option>
+              );
+            })}
           </select>
+          {locationLoadError && (
+            <div
+              style={{
+                marginTop: "6px",
+                fontSize: "12px",
+                color: "var(--error)",
+              }}
+            >
+              {locationLoadError}
+            </div>
+          )}
         </div>
 
         <div className="form-field">
