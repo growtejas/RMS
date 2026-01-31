@@ -35,10 +35,18 @@ class RequisitionUpdate(BaseModel):
     date_closed: Optional[datetime] = None
     assigned_ta: Optional[int] = None
     budget_approved_by: Optional[int] = None
+    approved_by: Optional[int] = None
+    approval_history: Optional[datetime] = None
+    assigned_at: Optional[datetime] = None
+    overall_status: Optional[str] = None
 
 
 class RequisitionStatusUpdate(BaseModel):
     overall_status: str
+
+
+class RequisitionAssign(BaseModel):
+    ta_user_id: int
 
 
 class RequisitionResponse(BaseModel):
@@ -56,6 +64,12 @@ class RequisitionResponse(BaseModel):
     manager_notes: Optional[str] = None
     overall_status: str
     raised_by: int
+    assigned_ta: Optional[int] = None
+    budget_approved_by: Optional[int] = None
+    approved_by: Optional[int] = None
+    approval_history: Optional[datetime] = None
+    assigned_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
     items: List[RequisitionItemResponse] = Field(default_factory=list)
 
     class Config:

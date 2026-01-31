@@ -144,16 +144,16 @@ def validate_status_transition(current_status: str, new_status: str) -> None:
     Validate requisition status transitions.
 
     Allowed transitions:
-    Draft -> Pending Budget or Approved
-    Pending Budget -> Approved
-    Approved -> Active
-    Active -> Closed or Expired
+    Pending Budget Approval -> Pending HR Approval or Rejected
+    Pending HR Approval -> Approved & Unassigned or Rejected
+    Approved & Unassigned -> Active
+    Active -> Closed
     """
     allowed_transitions = {
-        "Draft": {"Pending Budget", "Approved"},
-        "Pending Budget": {"Approved"},
-        "Approved": {"Active"},
-        "Active": {"Closed", "Expired"},
+        "Pending Budget Approval": {"Pending HR Approval", "Rejected"},
+        "Pending HR Approval": {"Approved & Unassigned", "Rejected"},
+        "Approved & Unassigned": {"Active"},
+        "Active": {"Closed"},
     }
 
     if current_status == new_status:

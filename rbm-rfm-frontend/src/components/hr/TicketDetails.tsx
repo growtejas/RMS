@@ -218,6 +218,12 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       .filter(Boolean);
   };
 
+  const parsePrimarySkill = (requirements?: string) => {
+    if (!requirements) return null;
+    const match = requirements.match(/Primary Skill:\s*([^|]+)/i);
+    return match ? match[1].trim() : null;
+  };
+
   useEffect(() => {
     let isMounted = true;
     const reqId = parseReqId(effectiveTicketId);
@@ -1033,6 +1039,8 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
             {ticket.items.map((item) => {
               const isExpanded = expandedItems.includes(item.id);
               const secondarySkills = parseSecondarySkills(item.requirements);
+              const primarySkill =
+                parsePrimarySkill(item.requirements) ?? item.skill;
               const matchedEmployees = ticket.availableEmployees
                 .filter(
                   (emp) =>

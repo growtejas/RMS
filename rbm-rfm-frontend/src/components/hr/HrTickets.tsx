@@ -12,6 +12,7 @@ import {
   Briefcase,
 } from "lucide-react";
 import { apiClient } from "../../api/client";
+import { useAuth } from "../../contexts/AuthContext";
 
 /* ======================================================
    Types
@@ -28,6 +29,12 @@ interface Requisition {
   requiredBy: string;
   raisedBy: string;
   assignedTA?: string;
+  assignedTAId?: number | null;
+  assignedAt?: string | null;
+  budgetAmount?: number;
+  budgetApprovedBy?: number | null;
+  approvedBy?: number | null;
+  approvalHistory?: string | null;
   items: RequisitionItem[];
 }
 
@@ -75,7 +82,19 @@ interface BackendRequisition {
   priority?: string | null;
   created_at?: string | null;
   raised_by?: number | null;
+  assigned_ta?: number | null;
+  assigned_at?: string | null;
+  budget_amount?: number | null;
+  budget_approved_by?: number | null;
+  approved_by?: number | null;
+  approval_history?: string | null;
   items: BackendRequisitionItem[];
+}
+
+interface BackendUser {
+  user_id: number;
+  username: string;
+  roles?: string[];
 }
 
 interface BackendEmployee {
@@ -99,6 +118,13 @@ const mapRequisitions = (data: BackendRequisition[]): Requisition[] =>
     dateCreated: req.created_at ?? "",
     requiredBy: req.required_by_date ?? "",
     raisedBy: req.raised_by ? `User #${req.raised_by}` : "—",
+    assignedTAId: req.assigned_ta ?? null,
+    assignedAt: req.assigned_at ?? null,
+    assignedTA: req.assigned_ta ? `User #${req.assigned_ta}` : undefined,
+    budgetAmount: req.budget_amount ?? undefined,
+    budgetApprovedBy: req.budget_approved_by ?? null,
+    approvedBy: req.approved_by ?? null,
+    approvalHistory: req.approval_history ?? null,
     items:
       req.items?.map((item) => ({
         id: `ITEM-${item.item_id}`,
@@ -166,17 +192,17 @@ const getPriorityClass = (priority: Requisition["priority"]) => {
 
 const getStatusClass = (status: Requisition["overallStatus"]) => {
   switch (status) {
-    case "Draft":
+    case "Pending Budget Approval":
       return "ticket-status open";
-    case "Pending Budget":
+    case "Pending HR Approval":
       return "ticket-status in-progress";
-    case "Approved":
+    case "Approved & Unassigned":
       return "ticket-status in-progress";
-    case "Active":
+    case "In-Progress":
       return "ticket-status in-progress";
     case "Closed":
       return "ticket-status closed";
-    case "Expired":
+    case "Rejected":
       return "ticket-status closed";
     case "Open":
       return "ticket-status open";
@@ -226,9 +252,8 @@ const HrKpiCards: React.FC<{ requisitions: Requisition[] }> = ({
     totalOpen: requisitions.filter((r) => r.overallStatus === "Open").length,
     inProgress: requisitions.filter((r) => r.overallStatus === "In Progress")
       .length,
-    unassigned: requisitions.filter((r) => !r.assignedTA).length,
-    myAssignments: requisitions.filter((r) => r.assignedTA === "Current User")
-      .length,
+    unassigned: requisitions.filter((r) => !r.assignedTAId).length,
+    myAssignments: requisitions.filter((r) => r.assignedTAId !== null).length,
     totalPositions: requisitions.reduce(
       (sum, req) => sum + req.items.length,
       0,
@@ -682,16 +707,61 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
   onAssignEmployee,
   onViewRequisition,
 }) => {
+  const { user } = useAuth();
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [employees, setEmployees] = useState<EmployeeMatch[]>([]);
+  const [taUsers, setTaUsers] = useState<BackendUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [budgetDrafts, setBudgetDrafts] = useState<Record<number, string>>({});
+  const [approverDrafts, setApproverDrafts] = useState<Record<number, string>>(
+    {},
+  );
+  const [editingBudget, setEditingBudget] = useState<Record<number, boolean>>(
+    {},
+  );
+  const [assignmentDrafts, setAssignmentDrafts] = useState<
+    Record<number, string>
+  >({});
+  const [assignmentLoading, setAssignmentLoading] = useState<
+    Record<number, boolean>
+  >({});
+  const [assignmentToast, setAssignmentToast] = useState<string | null>(null);
+  const [approvalLoading, setApprovalLoading] = useState<
+    Record<number, boolean>
+  >({});
+  const [approvalError, setApprovalError] = useState<string | null>(null);
   const [selectedRequisition, setSelectedRequisition] =
     useState<Requisition | null>(null);
   const [activeFilter, setActiveFilter] = useState<
-    "all" | "assigned" | "unassigned" | "my"
+    "all" | "assigned" | "unassigned" | "my" | "approvals"
   >("all");
   const [searchQuery, setSearchQuery] = useState("");
+
+  const formatCurrency = (value?: number) => {
+    if (value === undefined || Number.isNaN(value)) return "—";
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0,
+    }).format(value);
+  };
+
+  const getInitials = (label?: string) => {
+    if (!label) return "?";
+    return label
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("");
+  };
+
+  const getTaLabel = (userId?: number | null) => {
+    if (!userId) return "Unassigned";
+    const match = taUsers.find((user) => user.user_id === userId);
+    return match?.username ?? `User #${userId}`;
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -730,20 +800,80 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
       }
     };
 
+    const fetchTaUsers = async () => {
+      try {
+        const response = await apiClient.get<BackendUser[]>("/users");
+        if (!isMounted) return;
+        const filtered = response.data.filter((user) => {
+          const roles = user.roles ?? [];
+          return roles.some(
+            (role) =>
+              role === "TA" || role.toLowerCase() === "talent acquisition",
+          );
+        });
+        setTaUsers(filtered);
+      } catch {
+        if (isMounted) {
+          setTaUsers([]);
+        }
+      }
+    };
+
     fetchRequisitions();
     fetchEmployees();
+    fetchTaUsers();
 
     return () => {
       isMounted = false;
     };
   }, []);
 
+  useEffect(() => {
+    setBudgetDrafts((prev) => {
+      const next = { ...prev };
+      requisitions.forEach((req) => {
+        if (next[req.reqId] === undefined) {
+          next[req.reqId] =
+            req.budgetAmount !== undefined ? String(req.budgetAmount) : "";
+        }
+      });
+      return next;
+    });
+
+    setApproverDrafts((prev) => {
+      const next = { ...prev };
+      requisitions.forEach((req) => {
+        if (next[req.reqId] === undefined) {
+          next[req.reqId] = req.budgetApprovedBy
+            ? String(req.budgetApprovedBy)
+            : "";
+        }
+      });
+      return next;
+    });
+  }, [requisitions]);
+
+  const approvalStatuses = ["Pending Budget Approval", "Pending HR Approval"];
+
+  const pendingApprovals = requisitions.filter((req) =>
+    approvalStatuses.includes(req.overallStatus),
+  );
+
+  const unassignedPool = requisitions.filter(
+    (req) => req.overallStatus === "Approved & Unassigned" && !req.assignedTAId,
+  );
+
   // Filter requisitions based on active filter
   const filteredRequisitions = requisitions
     .filter((req) => {
-      if (activeFilter === "assigned") return req.assignedTA;
-      if (activeFilter === "unassigned") return !req.assignedTA;
+      if (activeFilter === "assigned") return req.assignedTAId;
+      if (activeFilter === "unassigned")
+        return (
+          req.overallStatus === "Approved & Unassigned" && !req.assignedTAId
+        );
       if (activeFilter === "my") return req.assignedTA === currentUser;
+      if (activeFilter === "approvals")
+        return approvalStatuses.includes(req.overallStatus);
       return true;
     })
     .filter(
@@ -752,16 +882,6 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
         req.project.toLowerCase().includes(searchQuery.toLowerCase()) ||
         req.client.toLowerCase().includes(searchQuery.toLowerCase()),
     );
-
-  const handleAssignRequisition = (reqId: string) => {
-    // In a real app, this would show a modal or dropdown to select TA
-    setRequisitions((prev) =>
-      prev.map((req) =>
-        req.id === reqId ? { ...req, assignedTA: currentUser } : req,
-      ),
-    );
-    onAssignRequisition?.(reqId, currentUser);
-  };
 
   const handleAssignEmployee = (itemId: string, empId: string) => {
     const employee = employees.find((emp) => emp.id === empId);
@@ -819,6 +939,125 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
     onViewRequisition?.(reqId);
   };
 
+  const updateRequisitionState = (
+    reqId: number,
+    updates: Partial<Requisition>,
+  ) => {
+    setRequisitions((prev) =>
+      prev.map((req) => (req.reqId === reqId ? { ...req, ...updates } : req)),
+    );
+  };
+
+  const handleSaveBudget = async (reqId: number) => {
+    const raw = budgetDrafts[reqId] ?? "";
+    const normalized = raw.replace(/,/g, "").trim();
+    const budgetValue = normalized ? Number(normalized) : undefined;
+
+    if (
+      normalized &&
+      (budgetValue === undefined ||
+        !Number.isFinite(budgetValue) ||
+        budgetValue < 0)
+    ) {
+      setApprovalError("Enter a valid budget amount.");
+      return;
+    }
+
+    try {
+      setApprovalError(null);
+      await apiClient.patch(`/requisitions/${reqId}`, {
+        budget_amount: budgetValue,
+      });
+      updateRequisitionState(reqId, { budgetAmount: budgetValue });
+      setEditingBudget((prev) => ({ ...prev, [reqId]: false }));
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to update budget";
+      setApprovalError(message);
+    }
+  };
+
+  const handleApproveRelease = async (req: Requisition) => {
+    const approverRaw = approverDrafts[req.reqId]?.trim();
+    const approverId = approverRaw ? Number(approverRaw) : user?.user_id;
+    const budgetRaw = budgetDrafts[req.reqId] ?? "";
+    const budgetNormalized = budgetRaw.replace(/,/g, "").trim();
+    const budgetValue = budgetNormalized ? Number(budgetNormalized) : undefined;
+
+    if (!approverId || !Number.isFinite(approverId)) {
+      setApprovalError("Unable to resolve Budget Approved By user id.");
+      return;
+    }
+
+    if (
+      budgetNormalized &&
+      (budgetValue === undefined ||
+        !Number.isFinite(budgetValue) ||
+        budgetValue < 0)
+    ) {
+      setApprovalError("Enter a valid budget amount.");
+      return;
+    }
+
+    setApprovalLoading((prev) => ({ ...prev, [req.reqId]: true }));
+    setApprovalError(null);
+
+    try {
+      await apiClient.patch(`/requisitions/${req.reqId}`, {
+        budget_amount: budgetValue,
+      });
+
+      await apiClient.patch(`/requisitions/${req.reqId}/approve-budget`);
+      await apiClient.patch(`/requisitions/${req.reqId}/approve-release`);
+
+      updateRequisitionState(req.reqId, {
+        budgetApprovedBy: approverId,
+        budgetAmount: budgetValue,
+        overallStatus: "Approved & Unassigned",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Approval failed";
+      setApprovalError(message);
+    } finally {
+      setApprovalLoading((prev) => ({ ...prev, [req.reqId]: false }));
+    }
+  };
+
+  const handleConfirmAssignment = async (req: Requisition) => {
+    const raw = assignmentDrafts[req.reqId]?.trim();
+    const selectedId = raw ? Number(raw) : NaN;
+
+    if (!Number.isFinite(selectedId)) {
+      setAssignmentToast("Select a valid TA before confirming assignment.");
+      return;
+    }
+
+    setAssignmentLoading((prev) => ({ ...prev, [req.reqId]: true }));
+    setAssignmentToast(null);
+
+    try {
+      await apiClient.patch(`/requisitions/${req.reqId}/assign-ta`, {
+        ta_user_id: selectedId,
+      });
+
+      const label = getTaLabel(selectedId);
+      updateRequisitionState(req.reqId, {
+        assignedTAId: selectedId,
+        assignedTA: label,
+        overallStatus: "Active",
+        assignedAt: new Date().toISOString(),
+      });
+      setAssignmentToast(`Assigned ${label} to ${req.id}.`);
+      setAssignmentDrafts((prev) => ({ ...prev, [req.reqId]: "" }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Assignment failed";
+      setAssignmentToast(message);
+    } finally {
+      setAssignmentLoading((prev) => ({ ...prev, [req.reqId]: false }));
+      setTimeout(() => setAssignmentToast(null), 3000);
+    }
+  };
+
   return (
     <>
       {/* Header */}
@@ -831,6 +1070,27 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
 
       {/* KPI Cards */}
       <HrKpiCards requisitions={requisitions} />
+
+      {assignmentToast && (
+        <div
+          style={{
+            marginBottom: "16px",
+            padding: "10px 14px",
+            borderRadius: "10px",
+            backgroundColor: "rgba(16, 185, 129, 0.12)",
+            border: "1px solid rgba(16, 185, 129, 0.3)",
+            color: "var(--success)",
+            fontSize: "13px",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            animation: "fadeIn 0.2s ease",
+          }}
+        >
+          <CheckCircle size={14} />
+          {assignmentToast}
+        </div>
+      )}
 
       {/* Filter Chips */}
       <div className="filter-chips" style={{ marginBottom: "24px" }}>
@@ -846,22 +1106,28 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
           onClick={() => setActiveFilter("unassigned")}
         >
           <AlertCircle size={12} style={{ marginRight: "6px" }} />
-          Unassigned ({requisitions.filter((r) => !r.assignedTA).length})
+          Unassigned ({requisitions.filter((r) => !r.assignedTAId).length})
         </button>
         <button
           className={`filter-chip ${activeFilter === "assigned" ? "active" : ""}`}
           onClick={() => setActiveFilter("assigned")}
         >
           <CheckCircle size={12} style={{ marginRight: "6px" }} />
-          Assigned Tickets ({requisitions.filter((r) => r.assignedTA).length})
+          Assigned Tickets ({requisitions.filter((r) => r.assignedTAId).length})
         </button>
         <button
           className={`filter-chip ${activeFilter === "my" ? "active" : ""}`}
           onClick={() => setActiveFilter("my")}
         >
           <Users size={12} style={{ marginRight: "6px" }} />
-          My Assignments (
-          {requisitions.filter((r) => r.assignedTA === currentUser).length})
+          My Assignments ({requisitions.filter((r) => r.assignedTAId).length})
+        </button>
+        <button
+          className={`filter-chip ${activeFilter === "approvals" ? "active" : ""}`}
+          onClick={() => setActiveFilter("approvals")}
+        >
+          <Target size={12} style={{ marginRight: "6px" }} />
+          Pending Approvals ({pendingApprovals.length})
         </button>
       </div>
 
@@ -920,349 +1186,713 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
         </div>
       </div>
 
-      {/* Main Content Area */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: selectedRequisition ? "1fr 1.5fr" : "1fr",
-          gap: "24px",
-        }}
-      >
-        {/* Requisitions Table */}
-        <div>
-          <div className="ticket-table-container">
-            <table className="ticket-table">
-              <thead>
-                <tr>
-                  <th>Req ID</th>
-                  <th>Project / Client</th>
-                  <th>Items</th>
-                  <th>Status</th>
-                  <th>Priority</th>
-                  <th>Days Open</th>
-                  <th>Assigned TA</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
+      {activeFilter === "approvals" && (
+        <div style={{ marginBottom: "24px" }}>
+          <div className="data-manager-header">
+            <h2>Approval Control Center</h2>
+            <p className="subtitle">
+              Review pending requisitions and release them to TA after approval
+            </p>
+          </div>
 
-              <tbody>
-                {isLoading && (
-                  <tr>
-                    <td colSpan={8}>
-                      <div className="tickets-empty-state">
-                        Loading requisitions…
-                      </div>
-                    </td>
-                  </tr>
-                )}
+          {approvalError && (
+            <div
+              className="empty-state"
+              style={{ color: "var(--error)", marginBottom: "12px" }}
+            >
+              {approvalError}
+            </div>
+          )}
 
-                {!isLoading && error && (
-                  <tr>
-                    <td colSpan={8}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+              gap: "16px",
+            }}
+          >
+            {pendingApprovals.map((req) => (
+              <div
+                key={req.reqId}
+                className="stat-card"
+                style={{ padding: "16px" }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: "12px",
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: "var(--text-tertiary)",
+                      }}
+                    >
+                      {req.id}
+                    </div>
+                    <div style={{ fontSize: "15px", fontWeight: 600 }}>
+                      {req.project}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: "var(--text-tertiary)",
+                      }}
+                    >
+                      {req.client}
+                    </div>
+                  </div>
+                  <span className={getStatusClass(req.overallStatus)}>
+                    {req.overallStatus}
+                  </span>
+                </div>
+
+                <div className="form-field" style={{ marginBottom: "12px" }}>
+                  <label>Budget Approved By</label>
+                  <input
+                    value={
+                      approverDrafts[req.reqId] ?? String(user?.user_id ?? "")
+                    }
+                    onChange={(e) =>
+                      setApproverDrafts((prev) => ({
+                        ...prev,
+                        [req.reqId]: e.target.value,
+                      }))
+                    }
+                    placeholder="Auto-filled"
+                  />
+                </div>
+
+                <div className="form-field" style={{ marginBottom: "12px" }}>
+                  <label>Budget Amount</label>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      alignItems: "center",
+                    }}
+                  >
+                    <input
+                      value={budgetDrafts[req.reqId] ?? ""}
+                      onChange={(e) =>
+                        setBudgetDrafts((prev) => ({
+                          ...prev,
+                          [req.reqId]: e.target.value,
+                        }))
+                      }
+                      disabled={!editingBudget[req.reqId]}
+                    />
+                    {editingBudget[req.reqId] ? (
+                      <>
+                        <button
+                          className="action-button"
+                          type="button"
+                          onClick={() => handleSaveBudget(req.reqId)}
+                        >
+                          Save
+                        </button>
+                        <button
+                          className="action-button"
+                          type="button"
+                          onClick={() =>
+                            setEditingBudget((prev) => ({
+                              ...prev,
+                              [req.reqId]: false,
+                            }))
+                          }
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className="action-button"
+                        type="button"
+                        onClick={() =>
+                          setEditingBudget((prev) => ({
+                            ...prev,
+                            [req.reqId]: true,
+                          }))
+                        }
+                      >
+                        Edit Budget
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <div
+                    style={{ fontSize: "12px", color: "var(--text-tertiary)" }}
+                  >
+                    Current Budget: {formatCurrency(req.budgetAmount)}
+                  </div>
+                  <button
+                    className="action-button primary"
+                    style={{
+                      background:
+                        "linear-gradient(135deg, var(--primary-accent), var(--primary-accent-dark))",
+                    }}
+                    type="button"
+                    disabled={approvalLoading[req.reqId]}
+                    onClick={() => handleApproveRelease(req)}
+                  >
+                    {approvalLoading[req.reqId]
+                      ? "Approving..."
+                      : "Approve & Release to TA"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activeFilter === "unassigned" && (
+        <div style={{ marginBottom: "24px" }}>
+          <div className="data-manager-header">
+            <h2>Assignment & Handover</h2>
+            <p className="subtitle">
+              Move approved requisitions into active recruitment by assigning a
+              TA
+            </p>
+          </div>
+
+          {unassignedPool.length === 0 ? (
+            <div className="tickets-empty-state">
+              <BarChart3 size={48} style={{ marginBottom: "12px" }} />
+              <h3>No approved requisitions awaiting assignment</h3>
+              <p>All approved requisitions are already assigned.</p>
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                gap: "16px",
+              }}
+            >
+              {unassignedPool.map((req) => (
+                <div
+                  key={req.reqId}
+                  className="stat-card"
+                  style={{ padding: "16px" }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    <div>
                       <div
-                        className="tickets-empty-state"
-                        style={{ color: "var(--error)" }}
-                      >
-                        {error}
-                      </div>
-                    </td>
-                  </tr>
-                )}
-
-                {!isLoading &&
-                  !error &&
-                  filteredRequisitions.map((req) => {
-                    const agingDays = getAgingDays(req.dateCreated);
-                    const completion = calculateCompletion(req.items);
-                    const isAssignedToMe = req.assignedTA === currentUser;
-
-                    return (
-                      <tr
-                        key={req.id}
                         style={{
-                          background:
-                            selectedRequisition?.id === req.id
-                              ? "rgba(59, 130, 246, 0.05)"
-                              : "inherit",
-                          cursor: "pointer",
-                        }}
-                        onClick={() => {
-                          setSelectedRequisition(req);
-                          handleViewRequisition(req.id);
+                          fontSize: "12px",
+                          color: "var(--text-tertiary)",
                         }}
                       >
-                        <td>
-                          <strong>{req.id}</strong>
-                        </td>
+                        {req.id}
+                      </div>
+                      <div style={{ fontSize: "15px", fontWeight: 600 }}>
+                        {req.project}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          color: "var(--text-tertiary)",
+                        }}
+                      >
+                        {req.client}
+                      </div>
+                    </div>
+                    <span className={getStatusClass(req.overallStatus)}>
+                      {req.overallStatus}
+                    </span>
+                  </div>
 
-                        <td>
-                          <div
-                            style={{ display: "flex", flexDirection: "column" }}
-                          >
-                            <strong>{req.project}</strong>
-                            <span
-                              style={{
-                                fontSize: "12px",
-                                color: "var(--text-tertiary)",
-                              }}
-                            >
-                              {req.client}
-                            </span>
-                          </div>
-                        </td>
+                  <div className="form-field" style={{ marginBottom: "12px" }}>
+                    <label>Assign Talent Acquisition Specialist</label>
+                    <input
+                      list={`ta-options-${req.reqId}`}
+                      placeholder="Search TA by name or ID"
+                      value={assignmentDrafts[req.reqId] ?? ""}
+                      onChange={(e) =>
+                        setAssignmentDrafts((prev) => ({
+                          ...prev,
+                          [req.reqId]: e.target.value,
+                        }))
+                      }
+                    />
+                    <datalist id={`ta-options-${req.reqId}`}>
+                      {taUsers.map((user) => (
+                        <option key={user.user_id} value={user.user_id}>
+                          {user.username} (#{user.user_id})
+                        </option>
+                      ))}
+                    </datalist>
+                  </div>
 
-                        <td>
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: "4px",
-                            }}
-                          >
+                  <button
+                    className="action-button primary"
+                    type="button"
+                    disabled={assignmentLoading[req.reqId]}
+                    onClick={() => handleConfirmAssignment(req)}
+                    style={{ width: "100%" }}
+                  >
+                    {assignmentLoading[req.reqId]
+                      ? "Assigning..."
+                      : "Confirm Assignment"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Main Content Area */}
+      {activeFilter !== "approvals" && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: selectedRequisition ? "1fr 1.5fr" : "1fr",
+            gap: "24px",
+          }}
+        >
+          {/* Requisitions Table */}
+          <div>
+            <div className="ticket-table-container">
+              <table className="ticket-table">
+                <thead>
+                  <tr>
+                    <th>Req ID</th>
+                    <th>Project / Client</th>
+                    <th>Items</th>
+                    <th>Status</th>
+                    <th>Priority</th>
+                    <th>Days Open</th>
+                    <th>Assigned TA</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {isLoading && (
+                    <tr>
+                      <td colSpan={8}>
+                        <div className="tickets-empty-state">
+                          Loading requisitions…
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+
+                  {!isLoading && error && (
+                    <tr>
+                      <td colSpan={8}>
+                        <div
+                          className="tickets-empty-state"
+                          style={{ color: "var(--error)" }}
+                        >
+                          {error}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+
+                  {!isLoading &&
+                    !error &&
+                    filteredRequisitions.map((req) => {
+                      const agingDays = getAgingDays(req.dateCreated);
+                      const completion = calculateCompletion(req.items);
+                      const isAssignedToMe = req.assignedTA === currentUser;
+
+                      return (
+                        <tr
+                          key={req.id}
+                          style={{
+                            background:
+                              selectedRequisition?.id === req.id
+                                ? "rgba(59, 130, 246, 0.05)"
+                                : "inherit",
+                            cursor: "pointer",
+                          }}
+                          onClick={() => {
+                            setSelectedRequisition(req);
+                            handleViewRequisition(req.id);
+                          }}
+                        >
+                          <td>
+                            <strong>{req.id}</strong>
+                          </td>
+
+                          <td>
                             <div
                               style={{
                                 display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
+                                flexDirection: "column",
                               }}
                             >
+                              <strong>{req.project}</strong>
                               <span
-                                className={`status-badge ${completion.pending > 0 ? "inactive" : "active"}`}
+                                style={{
+                                  fontSize: "12px",
+                                  color: "var(--text-tertiary)",
+                                }}
                               >
-                                {completion.pending} pending
+                                {req.client}
                               </span>
+                            </div>
+                          </td>
+
+                          <td>
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "4px",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                }}
+                              >
+                                <span
+                                  className={`status-badge ${completion.pending > 0 ? "inactive" : "active"}`}
+                                >
+                                  {completion.pending} pending
+                                </span>
+                                <span
+                                  style={{
+                                    fontSize: "11px",
+                                    color: "var(--text-tertiary)",
+                                  }}
+                                >
+                                  ({completion.fulfilled}/{completion.total})
+                                </span>
+                              </div>
+                              <div
+                                style={{
+                                  height: "3px",
+                                  background: "var(--border-subtle)",
+                                  borderRadius: "2px",
+                                  overflow: "hidden",
+                                  width: "80px",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    width: `${completion.progress}%`,
+                                    height: "100%",
+                                    background:
+                                      completion.progress === 100
+                                        ? "var(--success)"
+                                        : "var(--primary-accent)",
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </td>
+
+                          <td>
+                            <span className={getStatusClass(req.overallStatus)}>
+                              {req.overallStatus}
+                            </span>
+                          </td>
+
+                          <td>
+                            <span
+                              className={`priority-indicator ${getPriorityClass(req.priority)}`}
+                            >
+                              {req.priority}
+                            </span>
+                          </td>
+
+                          <td>
+                            <span
+                              className={`aging-indicator ${getAgingClass(agingDays)}`}
+                            >
+                              {agingDays} days
+                            </span>
+                          </td>
+
+                          <td>
+                            {req.assignedTAId ? (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    width: "28px",
+                                    height: "28px",
+                                    borderRadius: "50%",
+                                    background:
+                                      "linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.35))",
+                                    color: "var(--primary-accent)",
+                                    fontSize: "12px",
+                                    fontWeight: 600,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                  }}
+                                >
+                                  {getInitials(getTaLabel(req.assignedTAId))}
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: "13px" }}>
+                                    {getTaLabel(req.assignedTAId)}
+                                  </div>
+                                  <div
+                                    style={{
+                                      fontSize: "11px",
+                                      color: "var(--text-tertiary)",
+                                    }}
+                                  >
+                                    Assigned TA
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="status-badge inactive">
+                                Unassigned
+                              </span>
+                            )}
+                          </td>
+
+                          <td>
+                            {!req.assignedTAId &&
+                            req.overallStatus === "Approved & Unassigned" ? (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: "6px",
+                                  alignItems: "center",
+                                }}
+                              >
+                                <input
+                                  list={`ta-inline-${req.reqId}`}
+                                  placeholder="Assign TA"
+                                  value={assignmentDrafts[req.reqId] ?? ""}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    setAssignmentDrafts((prev) => ({
+                                      ...prev,
+                                      [req.reqId]: e.target.value,
+                                    }));
+                                  }}
+                                  style={{
+                                    minWidth: "120px",
+                                    padding: "6px 8px",
+                                    borderRadius: "8px",
+                                    border: "1px solid var(--border-subtle)",
+                                    fontSize: "11px",
+                                  }}
+                                />
+                                <datalist id={`ta-inline-${req.reqId}`}>
+                                  {taUsers.map((user) => (
+                                    <option
+                                      key={user.user_id}
+                                      value={user.user_id}
+                                    >
+                                      {user.username} (#{user.user_id})
+                                    </option>
+                                  ))}
+                                </datalist>
+                                <button
+                                  className="action-button primary"
+                                  style={{
+                                    fontSize: "11px",
+                                    padding: "6px 10px",
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleConfirmAssignment(req);
+                                  }}
+                                  disabled={assignmentLoading[req.reqId]}
+                                >
+                                  {assignmentLoading[req.reqId]
+                                    ? "Assigning"
+                                    : "Assign"}
+                                </button>
+                              </div>
+                            ) : !req.assignedTAId ? (
                               <span
                                 style={{
                                   fontSize: "11px",
                                   color: "var(--text-tertiary)",
                                 }}
                               >
-                                ({completion.fulfilled}/{completion.total})
+                                Awaiting assignment
                               </span>
-                            </div>
-                            <div
-                              style={{
-                                height: "3px",
-                                background: "var(--border-subtle)",
-                                borderRadius: "2px",
-                                overflow: "hidden",
-                                width: "80px",
-                              }}
-                            >
-                              <div
+                            ) : isAssignedToMe ? (
+                              <button
+                                className="action-button"
                                 style={{
-                                  width: `${completion.progress}%`,
-                                  height: "100%",
-                                  background:
-                                    completion.progress === 100
-                                      ? "var(--success)"
-                                      : "var(--primary-accent)",
+                                  fontSize: "11px",
+                                  padding: "6px 12px",
                                 }}
-                              />
-                            </div>
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedRequisition(req);
+                                }}
+                              >
+                                Manage
+                              </button>
+                            ) : (
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  color: "var(--text-tertiary)",
+                                }}
+                              >
+                                Assigned
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+
+                  {!isLoading &&
+                    !error &&
+                    filteredRequisitions.length === 0 && (
+                      <tr>
+                        <td colSpan={8}>
+                          <div className="tickets-empty-state">
+                            <BarChart3
+                              size={48}
+                              style={{ marginBottom: "16px", opacity: 0.5 }}
+                            />
+                            <h3>No requisitions found</h3>
+                            <p>Try adjusting your filters or search criteria</p>
                           </div>
                         </td>
-
-                        <td>
-                          <span className={getStatusClass(req.overallStatus)}>
-                            {req.overallStatus}
-                          </span>
-                        </td>
-
-                        <td>
-                          <span
-                            className={`priority-indicator ${getPriorityClass(req.priority)}`}
-                          >
-                            {req.priority}
-                          </span>
-                        </td>
-
-                        <td>
-                          <span
-                            className={`aging-indicator ${getAgingClass(agingDays)}`}
-                          >
-                            {agingDays} days
-                          </span>
-                        </td>
-
-                        <td>
-                          {req.assignedTA ? (
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                              }}
-                            >
-                              <div
-                                style={{
-                                  width: "8px",
-                                  height: "8px",
-                                  borderRadius: "50%",
-                                  background: isAssignedToMe
-                                    ? "var(--success)"
-                                    : "var(--warning)",
-                                }}
-                              />
-                              {req.assignedTA}
-                            </div>
-                          ) : (
-                            <span className="status-badge inactive">
-                              Unassigned
-                            </span>
-                          )}
-                        </td>
-
-                        <td>
-                          {!req.assignedTA ? (
-                            <button
-                              className="action-button primary"
-                              style={{ fontSize: "11px", padding: "6px 12px" }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleAssignRequisition(req.id);
-                              }}
-                            >
-                              Assign to TA
-                            </button>
-                          ) : isAssignedToMe ? (
-                            <button
-                              className="action-button"
-                              style={{ fontSize: "11px", padding: "6px 12px" }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedRequisition(req);
-                              }}
-                            >
-                              Manage
-                            </button>
-                          ) : (
-                            <span
-                              style={{
-                                fontSize: "11px",
-                                color: "var(--text-tertiary)",
-                              }}
-                            >
-                              Assigned
-                            </span>
-                          )}
-                        </td>
                       </tr>
-                    );
-                  })}
-
-                {!isLoading && !error && filteredRequisitions.length === 0 && (
-                  <tr>
-                    <td colSpan={8}>
-                      <div className="tickets-empty-state">
-                        <BarChart3
-                          size={48}
-                          style={{ marginBottom: "16px", opacity: 0.5 }}
-                        />
-                        <h3>No requisitions found</h3>
-                        <p>Try adjusting your filters or search criteria</p>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Quick Stats */}
-          <div
-            style={{
-              marginTop: "20px",
-              padding: "16px",
-              backgroundColor: "var(--bg-tertiary)",
-              borderRadius: "12px",
-              fontSize: "12px",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <div>
-                <strong>
-                  Showing {filteredRequisitions.length} of {requisitions.length}{" "}
-                  requisitions
-                </strong>
-              </div>
-              <div>
-                <span
-                  style={{ marginRight: "16px", color: "var(--text-tertiary)" }}
-                >
-                  ⚠ {requisitions.filter((r) => !r.assignedTA).length}{" "}
-                  unassigned
-                </span>
-                <span style={{ color: "var(--text-tertiary)" }}>
-                  ⏱ Avg aging:{" "}
-                  {Math.round(
-                    requisitions.reduce(
-                      (sum, req) => sum + getAgingDays(req.dateCreated),
-                      0,
-                    ) / requisitions.length,
-                  )}{" "}
-                  days
-                </span>
-              </div>
+                    )}
+                </tbody>
+              </table>
             </div>
-          </div>
-        </div>
 
-        {/* Matchmaking Panel */}
-        {selectedRequisition && (
-          <div
-            style={{
-              backgroundColor: "var(--bg-secondary)",
-              borderRadius: "16px",
-              padding: "24px",
-              border: "1px solid var(--border-subtle)",
-              height: "calc(100vh - 300px)",
-              overflow: "hidden",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
+            {/* Quick Stats */}
             <div
               style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "24px",
+                marginTop: "20px",
+                padding: "16px",
+                backgroundColor: "var(--bg-tertiary)",
+                borderRadius: "12px",
+                fontSize: "12px",
               }}
             >
-              <div>
-                <h3
-                  style={{
-                    fontSize: "16px",
-                    fontWeight: 600,
-                    marginBottom: "4px",
-                  }}
-                >
-                  Matchmaking for {selectedRequisition.id}
-                </h3>
-                <p style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                  Assign resources to requisition items - Work item by item
-                </p>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <div>
+                  <strong>
+                    Showing {filteredRequisitions.length} of{" "}
+                    {requisitions.length} requisitions
+                  </strong>
+                </div>
+                <div>
+                  <span
+                    style={{
+                      marginRight: "16px",
+                      color: "var(--text-tertiary)",
+                    }}
+                  >
+                    ⚠ {requisitions.filter((r) => !r.assignedTAId).length}{" "}
+                    unassigned
+                  </span>
+                  <span style={{ color: "var(--text-tertiary)" }}>
+                    ⏱ Avg aging:{" "}
+                    {Math.round(
+                      requisitions.reduce(
+                        (sum, req) => sum + getAgingDays(req.dateCreated),
+                        0,
+                      ) / requisitions.length,
+                    )}{" "}
+                    days
+                  </span>
+                </div>
               </div>
-              <button
-                className="action-button"
-                onClick={() => setSelectedRequisition(null)}
-                style={{ fontSize: "12px", padding: "8px 12px" }}
-              >
-                Close Panel
-              </button>
-            </div>
-
-            <div style={{ flex: 1, overflow: "hidden" }}>
-              <MatchmakingPanel
-                requisition={selectedRequisition}
-                employees={employees}
-                onAssignEmployee={handleAssignEmployee}
-              />
             </div>
           </div>
-        )}
-      </div>
+
+          {/* Matchmaking Panel */}
+          {selectedRequisition && (
+            <div
+              style={{
+                backgroundColor: "var(--bg-secondary)",
+                borderRadius: "16px",
+                padding: "24px",
+                border: "1px solid var(--border-subtle)",
+                height: "calc(100vh - 300px)",
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "24px",
+                }}
+              >
+                <div>
+                  <h3
+                    style={{
+                      fontSize: "16px",
+                      fontWeight: 600,
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Matchmaking for {selectedRequisition.id}
+                  </h3>
+                  <p
+                    style={{ fontSize: "12px", color: "var(--text-tertiary)" }}
+                  >
+                    Assign resources to requisition items - Work item by item
+                  </p>
+                </div>
+                <button
+                  className="action-button"
+                  onClick={() => setSelectedRequisition(null)}
+                  style={{ fontSize: "12px", padding: "8px 12px" }}
+                >
+                  Close Panel
+                </button>
+              </div>
+
+              <div style={{ flex: 1, overflow: "hidden" }}>
+                <MatchmakingPanel
+                  requisition={selectedRequisition}
+                  employees={employees}
+                  onAssignEmployee={handleAssignEmployee}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Workflow Note */}
       {!selectedRequisition && (

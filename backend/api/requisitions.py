@@ -1,17 +1,26 @@
+from datetime import datetime
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
-from typing import Optional
+from typing import Optional, List
 
 from db.session import get_db
 from db.models.auth import User
-from utils.dependencies import require_any_role, validate_status_transition
+from utils.dependencies import (
+    require_any_role,
+    validate_status_transition,
+    get_current_user_roles,
+)
 from db.models.requisition import Requisition
 from db.models.requisition_item import RequisitionItem
+from db.models.audit_log import AuditLog
 from schemas.requisition import (
     RequisitionCreate,
     RequisitionUpdate,
     RequisitionStatusUpdate,
+    RequisitionAssign,
     RequisitionResponse,
 )
 from schemas.requisition_item import RequisitionItemResponse
@@ -43,7 +52,7 @@ def create_requisition(
             required_by_date=payload.required_by_date,
             date_closed=payload.date_closed,
             raised_by=current_user.user_id,
-            overall_status="Draft",
+            overall_status="Pending Budget Approval",
         )
 
         db.add(requisition)
@@ -74,10 +83,29 @@ def create_requisition(
 def list_requisitions(
     status: Optional[str] = None,
     raised_by: Optional[int] = None,
+    my_assignments: bool = False,
+    assigned_ta: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee", "TA"))
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee", "TA")),
+    roles: List[str] = Depends(get_current_user_roles),
 ):
     query = db.query(Requisition).options(selectinload(Requisition.items))
+
+    if "TA" in roles:
+        query = query.filter(
+            Requisition.overall_status.in_(
+                ["Approved & Unassigned", "Active"]
+            )
+        )
+
+        if my_assignments:
+            query = query.filter(
+                Requisition.assigned_ta == current_user.user_id,
+                Requisition.overall_status == "Active",
+            )
+
+    if assigned_ta is not None:
+        query = query.filter(Requisition.assigned_ta == assigned_ta)
 
     if status:
         query = query.filter(Requisition.overall_status == status)
@@ -130,8 +158,36 @@ def update_requisition(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    for field, value in payload.dict(exclude_unset=True).items():
+    updates = payload.dict(exclude_unset=True)
+    old_budget = requisition.budget_amount
+
+    if "overall_status" in updates and updates["overall_status"] not in (
+        "Pending Budget Approval",
+        "Pending HR Approval",
+        "Approved & Unassigned",
+        "Active",
+        "Closed",
+        "Rejected",
+    ):
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    for field, value in updates.items():
         setattr(requisition, field, value)
+
+    if "budget_amount" in updates and updates.get("budget_amount") != old_budget:
+        audit = AuditLog(
+            entity_name="requisition",
+            entity_id=str(requisition.req_id),
+            action="BUDGET_UPDATE",
+            performed_by=current_user.user_id,
+            old_value=json.dumps({
+                "budget_amount": str(old_budget) if old_budget is not None else None
+            }),
+            new_value=json.dumps({
+                "budget_amount": str(updates.get("budget_amount")) if updates.get("budget_amount") is not None else None
+            }),
+        )
+        db.add(audit)
 
     db.commit()
     return {"message": "Requisition updated"}
@@ -144,12 +200,12 @@ def update_requisition_status(
     current_user: User = Depends(require_any_role("Manager", "Admin", "HR"))
 ):
     if payload.overall_status not in (
-        "Draft",
-        "Pending Budget",
-        "Approved",
+        "Pending Budget Approval",
+        "Pending HR Approval",
+        "Approved & Unassigned",
         "Active",
         "Closed",
-        "Expired",
+        "Rejected",
     ):
         raise HTTPException(status_code=400, detail="Invalid status")
 
@@ -178,12 +234,82 @@ def approve_budget(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    validate_status_transition(requisition.overall_status, "Approved")
-    requisition.budget_approved_by = 2
-    requisition.overall_status = "Approved"
+    validate_status_transition(requisition.overall_status, "Pending HR Approval")
+    requisition.budget_approved_by = current_user.user_id
+    requisition.overall_status = "Pending HR Approval"
     db.commit()
 
     return {"message": "Budget approved"}
+
+
+@router.patch("/{req_id}/approve-release")
+def approve_and_release(
+    req_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Admin", "HR"))
+):
+    requisition = db.query(Requisition).filter(
+        Requisition.req_id == req_id
+    ).first()
+
+    if not requisition:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+
+    validate_status_transition(requisition.overall_status, "Approved & Unassigned")
+    requisition.approved_by = current_user.user_id
+    requisition.approval_history = datetime.utcnow()
+    requisition.overall_status = "Approved & Unassigned"
+    db.commit()
+
+    return {"message": "Requisition approved and released"}
+
+
+@router.patch("/{req_id}/assign-ta")
+def assign_ta(
+    req_id: int,
+    payload: RequisitionAssign,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Admin", "HR"))
+):
+    requisition = (
+        db.query(Requisition)
+        .filter(Requisition.req_id == req_id)
+        .with_for_update()
+        .first()
+    )
+
+    if not requisition:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+
+    if requisition.assigned_ta is not None:
+        raise HTTPException(status_code=409, detail="Requisition already assigned")
+
+    if requisition.overall_status != "Approved & Unassigned":
+        raise HTTPException(
+            status_code=400,
+            detail="Requisition is not ready for TA assignment",
+        )
+
+    validate_status_transition(requisition.overall_status, "Active")
+    requisition.assigned_ta = payload.ta_user_id
+    requisition.assigned_at = datetime.utcnow()
+    requisition.overall_status = "Active"
+
+    audit = AuditLog(
+        entity_name="requisition",
+        entity_id=str(requisition.req_id),
+        action="TA_ASSIGN",
+        performed_by=current_user.user_id,
+        old_value=json.dumps({"assigned_ta": None, "overall_status": "Approved & Unassigned"}),
+        new_value=json.dumps({
+            "assigned_ta": payload.ta_user_id,
+            "overall_status": "Active",
+        }),
+    )
+    db.add(audit)
+
+    db.commit()
+    return {"message": "TA assigned", "assigned_ta": payload.ta_user_id}
 
 
 @router.post("/{req_id}/cancel")

@@ -44,6 +44,12 @@ class Requisition(Base):
         nullable=True
     )
 
+    approved_by = Column(
+        Integer,
+        ForeignKey("users.user_id"),
+        nullable=True
+    )
+
     # --------------------
     # Business Context
     # --------------------
@@ -74,10 +80,12 @@ class Requisition(Base):
     overall_status = Column(
         String(30),
         nullable=False,
-        default="Draft"
+        default="Pending Budget Approval"
     )
 
     date_closed = Column(TIMESTAMP, nullable=True)
+    approval_history = Column(TIMESTAMP, nullable=True)
+    assigned_at = Column(TIMESTAMP, nullable=True)
 
     # --------------------
     # Relationships
@@ -108,12 +116,12 @@ class Requisition(Base):
         CheckConstraint(
             """
             overall_status IN (
-                'Draft',
-                'Pending Budget',
-                'Approved',
+                'Pending Budget Approval',
+                'Pending HR Approval',
+                'Approved & Unassigned',
                 'Active',
                 'Closed',
-                'Expired'
+                'Rejected'
             )
             """,
             name="chk_requisition_status"

@@ -13,6 +13,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { apiClient } from "../../api/client";
+import { useAuth } from "../../contexts/AuthContext";
 
 /* ======================================================
    Types
@@ -30,6 +31,7 @@ interface Requisition {
   dateClosed?: string;
   raisedBy?: string;
   assignedTA?: string;
+  assignedTAId?: number | null;
   items: RequisitionItem[];
   workMode?: "Remote" | "Hybrid" | "WFO";
   location?: string;
@@ -75,6 +77,7 @@ interface BackendRequisition {
   office_location?: string | null;
   justification?: string | null;
   raised_by?: number | null;
+  assigned_ta?: number | null;
   items: BackendRequisitionItem[];
 }
 
@@ -93,6 +96,8 @@ const mapRequisitions = (data: BackendRequisition[]): Requisition[] =>
     overallStatus: req.overall_status ?? "—",
     dateCreated: req.created_at ?? "",
     raisedBy: req.raised_by ? `User #${req.raised_by}` : "—",
+    assignedTAId: req.assigned_ta ?? null,
+    assignedTA: req.assigned_ta ? `User #${req.assigned_ta}` : undefined,
     workMode: (req.work_mode as Requisition["workMode"]) ?? undefined,
     location: req.office_location ?? undefined,
     justification: req.justification ?? undefined,
@@ -141,6 +146,16 @@ const getStatusClass = (status: Requisition["overallStatus"]) => {
       return "in-progress";
     case "Active":
       return "in-progress";
+    case "Pending Budget Approval":
+      return "open";
+    case "Pending HR Approval":
+      return "in-progress";
+    case "Approved & Unassigned":
+      return "in-progress";
+    case "Active":
+      return "in-progress";
+    case "Rejected":
+      return "closed";
     case "Closed":
       return "closed";
     case "Expired":
@@ -210,33 +225,35 @@ const TAKpiCards: React.FC<{
   requisitions: Requisition[];
   currentTA: string;
 }> = ({ requisitions, currentTA }) => {
+  const currentUserId = useAuth().user?.user_id ?? null;
   const stats = {
-    totalAssigned: requisitions.filter((r) => r.assignedTA === currentTA)
+    totalAssigned: requisitions.filter((r) => r.assignedTAId === currentUserId)
       .length,
-    unassigned: requisitions.filter((r) => !r.assignedTA).length,
+    unassigned: requisitions.filter((r) => !r.assignedTAId).length,
     pendingItems: requisitions.reduce(
       (sum, req) =>
         sum + req.items.filter((item) => item.itemStatus === "Pending").length,
       0,
     ),
     highPriority: requisitions.filter(
-      (r) => r.priority === "High" && r.assignedTA === currentTA,
+      (r) => r.priority === "High" && r.assignedTAId === currentUserId,
     ).length,
     avgCompletion: Math.round(
       requisitions
-        .filter((r) => r.assignedTA === currentTA)
+        .filter((r) => r.assignedTAId === currentUserId)
         .reduce(
           (sum, req) => sum + calculateCompletion(req.items).progress,
           0,
         ) /
         Math.max(
-          requisitions.filter((r) => r.assignedTA === currentTA).length,
+          requisitions.filter((r) => r.assignedTAId === currentUserId).length,
           1,
         ),
     ),
     overdue: requisitions.filter(
       (r) =>
-        calculateAgingDays(r.dateCreated) > 30 && r.assignedTA === currentTA,
+        calculateAgingDays(r.dateCreated) > 30 &&
+        r.assignedTAId === currentUserId,
     ).length,
   };
 
@@ -269,7 +286,8 @@ const TAKpiCards: React.FC<{
           Pending Positions
         </div>
         <div className="kpi-trend negative">
-          Across {requisitions.filter((r) => r.assignedTA === currentTA).length}{" "}
+          Across{" "}
+          {requisitions.filter((r) => r.assignedTAId === currentUserId).length}{" "}
           requisitions
         </div>
       </div>
@@ -396,6 +414,9 @@ const Requisitions: React.FC<RequisitionsProps> = ({
   onSelfAssign,
   onManageItems,
 }) => {
+  const { user } = useAuth();
+  const currentUserId = user?.user_id ?? null;
+  const currentTaLabel = user?.username ?? currentTA;
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -411,8 +432,11 @@ const Requisitions: React.FC<RequisitionsProps> = ({
       try {
         setIsLoading(true);
         setError(null);
-        const response =
-          await apiClient.get<BackendRequisition[]>("/requisitions");
+        const endpoint =
+          activeFilter === "my"
+            ? "/requisitions?my_assignments=true"
+            : "/requisitions";
+        const response = await apiClient.get<BackendRequisition[]>(endpoint);
         if (isMounted) {
           setRequisitions(mapRequisitions(response.data));
         }
@@ -428,16 +452,30 @@ const Requisitions: React.FC<RequisitionsProps> = ({
 
     fetchRequisitions();
 
+    const handleFocus = () => {
+      fetchRequisitions();
+    };
+
+    window.addEventListener("focus", handleFocus);
+    const intervalId = window.setInterval(fetchRequisitions, 30000);
+
     return () => {
       isMounted = false;
+      window.removeEventListener("focus", handleFocus);
+      window.clearInterval(intervalId);
     };
-  }, []);
+  }, [activeFilter]);
+
+  const visibleRequisitions = requisitions.filter((req) =>
+    ["Approved & Unassigned", "Active"].includes(req.overallStatus),
+  );
 
   // Filter requisitions
-  const filteredRequisitions = requisitions.filter((req) => {
+  const filteredRequisitions = visibleRequisitions.filter((req) => {
     // Status filter
-    if (activeFilter === "my" && req.assignedTA !== currentTA) return false;
-    if (activeFilter === "unassigned" && req.assignedTA) return false;
+    if (activeFilter === "my" && req.assignedTAId !== currentUserId)
+      return false;
+    if (activeFilter === "unassigned" && req.assignedTAId) return false;
     if (activeFilter === "high" && req.priority !== "High") return false;
     if (activeFilter === "overdue" && calculateAgingDays(req.dateCreated) <= 30)
       return false;
@@ -459,14 +497,22 @@ const Requisitions: React.FC<RequisitionsProps> = ({
   const handleSelfAssign = (reqId: string) => {
     setRequisitions((prev) =>
       prev.map((req) =>
-        req.id === reqId ? { ...req, assignedTA: currentTA } : req,
+        req.id === reqId
+          ? {
+              ...req,
+              assignedTAId: currentUserId,
+              assignedTA: currentTaLabel,
+            }
+          : req,
       ),
     );
     onSelfAssign?.(reqId);
   };
 
   // Calculate stats for current TA
-  const myRequisitions = requisitions.filter((r) => r.assignedTA === currentTA);
+  const myRequisitions = visibleRequisitions.filter(
+    (r) => r.assignedTAId === currentUserId,
+  );
   const myStats = {
     total: myRequisitions.length,
     pendingPositions: myRequisitions.reduce(
@@ -499,7 +545,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
       </div>
 
       {/* KPI Stats */}
-      <TAKpiCards requisitions={requisitions} currentTA={currentTA} />
+      <TAKpiCards requisitions={visibleRequisitions} currentTA={currentTA} />
 
       {/* Personal Stats */}
       {myRequisitions.length > 0 && (
@@ -646,14 +692,14 @@ const Requisitions: React.FC<RequisitionsProps> = ({
         >
           <Briefcase size={12} />
           My Assignments (
-          {requisitions.filter((r) => r.assignedTA === currentTA).length})
+          {requisitions.filter((r) => r.assignedTAId === currentUserId).length})
         </button>
         <button
           className={`filter-chip ${activeFilter === "unassigned" ? "active" : ""}`}
           onClick={() => setActiveFilter("unassigned")}
         >
           <UserPlus size={12} />
-          Unassigned ({requisitions.filter((r) => !r.assignedTA).length})
+          Unassigned ({requisitions.filter((r) => !r.assignedTAId).length})
         </button>
         <button
           className={`filter-chip ${activeFilter === "high" ? "active" : ""}`}
@@ -778,8 +824,11 @@ const Requisitions: React.FC<RequisitionsProps> = ({
               filteredRequisitions.map((req) => {
                 const agingDays = calculateAgingDays(req.dateCreated);
                 const completion = calculateCompletion(req.items);
-                const isAssignedToMe = req.assignedTA === currentTA;
-                const isUnassigned = !req.assignedTA;
+                const isAssignedToMe = req.assignedTAId === currentUserId;
+                const isUnassigned = !req.assignedTAId;
+                const assignedLabel = req.assignedTAId
+                  ? (req.assignedTA ?? `User #${req.assignedTAId}`)
+                  : "Unassigned";
 
                 return (
                   <React.Fragment key={req.id}>
@@ -940,7 +989,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                       </td>
 
                       <td>
-                        {req.assignedTA ? (
+                        {req.assignedTAId ? (
                           <div
                             style={{
                               display: "flex",
@@ -959,7 +1008,9 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                               }}
                             />
                             <span style={{ fontSize: "13px" }}>
-                              {req.assignedTA}
+                              {isAssignedToMe
+                                ? assignedLabel
+                                : `Managed by ${assignedLabel}`}
                             </span>
                           </div>
                         ) : (
@@ -974,14 +1025,27 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                           {isUnassigned ? (
                             <>
                               <button
-                                className="action-button primary"
-                                onClick={() => handleSelfAssign(req.id)}
+                                className="action-button"
+                                disabled
+                                style={{
+                                  fontSize: "12px",
+                                  padding: "6px 12px",
+                                  opacity: 0.6,
+                                  cursor: "not-allowed",
+                                }}
+                                title="TA self-assign is disabled"
+                              >
+                                Self Assign
+                              </button>
+                              <button
+                                className="action-button"
+                                onClick={() => onViewRequisition?.(req.id)}
                                 style={{
                                   fontSize: "12px",
                                   padding: "6px 12px",
                                 }}
                               >
-                                Self Assign
+                                View
                               </button>
                             </>
                           ) : isAssignedToMe ? (
@@ -1014,7 +1078,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                                 color: "var(--text-tertiary)",
                               }}
                             >
-                              Assigned to another TA
+                              Managed by another TA
                             </span>
                           )}
                         </div>
@@ -1027,14 +1091,28 @@ const Requisitions: React.FC<RequisitionsProps> = ({
             {!isLoading && !error && filteredRequisitions.length === 0 && (
               <tr>
                 <td colSpan={9}>
-                  <div className="tickets-empty-state">
-                    <BarChart3
-                      size={48}
-                      style={{ marginBottom: "16px", opacity: 0.5 }}
-                    />
-                    <h3>No requisitions found</h3>
-                    <p>Try adjusting your filters or search criteria</p>
-                  </div>
+                  {activeFilter === "my" && myRequisitions.length === 0 ? (
+                    <div className="tickets-empty-state empty-state">
+                      <BarChart3
+                        size={48}
+                        style={{ marginBottom: "16px", opacity: 0.5 }}
+                      />
+                      <h3>Waiting for HR to assign a new requisition</h3>
+                      <p>
+                        Once HR assigns a requisition, it will appear in your
+                        list.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="tickets-empty-state">
+                      <BarChart3
+                        size={48}
+                        style={{ marginBottom: "16px", opacity: 0.5 }}
+                      />
+                      <h3>No requisitions found</h3>
+                      <p>Try adjusting your filters or search criteria</p>
+                    </div>
+                  )}
                 </td>
               </tr>
             )}
@@ -1062,7 +1140,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
         >
           <div>
             Showing <strong>{filteredRequisitions.length}</strong> of{" "}
-            <strong>{requisitions.length}</strong> requisitions
+            <strong>{visibleRequisitions.length}</strong> requisitions
             {activeFilter === "my" && (
               <span
                 style={{ marginLeft: "12px", color: "var(--primary-accent)" }}
@@ -1077,7 +1155,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
               ⚡{" "}
               {
                 requisitions.filter(
-                  (r) => r.priority === "High" && !r.assignedTA,
+                  (r) => r.priority === "High" && !r.assignedTAId,
                 ).length
               }{" "}
               high priority unassigned
@@ -1373,7 +1451,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
             Total Unassigned
           </div>
           <div style={{ fontSize: "20px", fontWeight: 700 }}>
-            {requisitions.filter((r) => !r.assignedTA).length}
+            {requisitions.filter((r) => !r.assignedTAId).length}
           </div>
         </div>
         <div>

@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
 import { apiClient } from "../../api/client";
+import { useAuth } from "../../contexts/AuthContext";
 
 interface RequisitionDetailsProps {
   requisitionId?: string | null;
@@ -88,6 +89,7 @@ interface TicketData {
   justification: string;
   dateCreated: string;
   assignedTA: string;
+  assignedTAId?: number | null;
   daysOpen: number;
   slaHours: number;
   budget: string;
@@ -124,6 +126,7 @@ interface BackendRequisition {
   justification?: string | null;
   duration?: string | null;
   raised_by?: number | null;
+  assigned_ta?: number | null;
   items: BackendRequisitionItem[];
 }
 
@@ -134,6 +137,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
 }) => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const effectiveTicketId = requisitionId ?? id;
   const getTodayDate = () =>
     new Date().toISOString().split("T")[0] ?? new Date().toISOString();
@@ -149,6 +153,12 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [ticket, setTicket] = useState<TicketData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const currentUserId = user?.user_id ?? null;
+  const canAssignResources = Boolean(
+    ticket?.assignedTAId &&
+    currentUserId &&
+    ticket.assignedTAId === currentUserId,
+  );
 
   const parseReqId = (value?: string | null) => {
     if (!value) return null;
@@ -170,6 +180,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         }).format(req.budget_amount)
       : "—";
 
+    const assignedTAId = req.assigned_ta ?? null;
     return {
       id: `REQ-${req.req_id}`,
       ticketId: `REQ-${req.req_id}`,
@@ -184,7 +195,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       overallStatus: req.overall_status ?? "—",
       justification: req.justification ?? "—",
       dateCreated: req.created_at ?? "",
-      assignedTA: "Unassigned",
+      assignedTA: assignedTAId ? `User #${assignedTAId}` : "Unassigned",
+      assignedTAId,
       daysOpen,
       slaHours: 72,
       budget,
@@ -204,6 +216,12 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       notes: [],
     };
   };
+
+  useEffect(() => {
+    if (!canAssignResources && selectedItemForAssignment) {
+      setSelectedItemForAssignment(null);
+    }
+  }, [canAssignResources, selectedItemForAssignment]);
 
   useEffect(() => {
     let isMounted = true;
@@ -306,7 +324,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
 
   // Handle employee assignment
   const handleAssignEmployee = (itemId: string, employeeId: string) => {
-    if (!ticket) return;
+    if (!ticket || !canAssignResources) return;
     const employee = ticket.availableEmployees.find(
       (emp) => emp.id === employeeId,
     );
@@ -1014,6 +1032,24 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
             </p>
           </div>
 
+          {!canAssignResources && (
+            <div
+              style={{
+                marginBottom: "16px",
+                padding: "12px 16px",
+                borderRadius: "10px",
+                backgroundColor: "rgba(245, 158, 11, 0.08)",
+                border: "1px solid rgba(245, 158, 11, 0.2)",
+                color: "var(--warning)",
+                fontSize: "13px",
+              }}
+            >
+              {ticket?.assignedTAId
+                ? "Assignment locked. This requisition is assigned to another TA."
+                : "Assignment locked. HR must assign a TA before resources can be assigned."}
+            </div>
+          )}
+
           <div
             style={{ display: "flex", flexDirection: "column", gap: "16px" }}
           >
@@ -1107,8 +1143,11 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                             display: "flex",
                             alignItems: "center",
                             gap: "6px",
+                            opacity: canAssignResources ? 1 : 0.6,
                           }}
+                          disabled={!canAssignResources}
                           onClick={() =>
+                            canAssignResources &&
                             setSelectedItemForAssignment(
                               selectedItemForAssignment === item.id
                                 ? null
@@ -1119,7 +1158,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                           <UserPlus size={12} />
                           {selectedItemForAssignment === item.id
                             ? "Cancel"
-                            : "Assign Employee"}
+                            : canAssignResources
+                              ? "Assign Employee"
+                              : "Locked"}
                         </button>
                       )}
 
@@ -1186,108 +1227,110 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                         {item.description}
                       </div>
 
-                      {selectedItemForAssignment === item.id && (
-                        <div
-                          style={{
-                            marginTop: "16px",
-                            padding: "16px",
-                            backgroundColor: "var(--bg-secondary)",
-                            borderRadius: "8px",
-                          }}
-                        >
+                      {selectedItemForAssignment === item.id &&
+                        canAssignResources && (
                           <div
                             style={{
-                              fontSize: "13px",
-                              fontWeight: 600,
-                              marginBottom: "12px",
+                              marginTop: "16px",
+                              padding: "16px",
+                              backgroundColor: "var(--bg-secondary)",
+                              borderRadius: "8px",
                             }}
                           >
-                            Available Matches ({matchedEmployees.length})
-                          </div>
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: "8px",
-                            }}
-                          >
-                            {matchedEmployees.map((emp) => (
-                              <div
-                                key={emp.id}
-                                style={{
-                                  padding: "12px",
-                                  backgroundColor: "var(--bg-primary)",
-                                  borderRadius: "8px",
-                                  border: "1px solid var(--border-subtle)",
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  alignItems: "center",
-                                }}
-                              >
-                                <div>
-                                  <div style={{ fontWeight: 500 }}>
-                                    {emp.name}
+                            <div
+                              style={{
+                                fontSize: "13px",
+                                fontWeight: 600,
+                                marginBottom: "12px",
+                              }}
+                            >
+                              Available Matches ({matchedEmployees.length})
+                            </div>
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "8px",
+                              }}
+                            >
+                              {matchedEmployees.map((emp) => (
+                                <div
+                                  key={emp.id}
+                                  style={{
+                                    padding: "12px",
+                                    backgroundColor: "var(--bg-primary)",
+                                    borderRadius: "8px",
+                                    border: "1px solid var(--border-subtle)",
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                  }}
+                                >
+                                  <div>
+                                    <div style={{ fontWeight: 500 }}>
+                                      {emp.name}
+                                    </div>
+                                    <div
+                                      style={{
+                                        fontSize: "11px",
+                                        color: "var(--text-tertiary)",
+                                      }}
+                                    >
+                                      {emp.department} • {emp.location} •{" "}
+                                      {emp.experience}y exp
+                                    </div>
                                   </div>
                                   <div
                                     style={{
-                                      fontSize: "11px",
-                                      color: "var(--text-tertiary)",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "12px",
                                     }}
                                   >
-                                    {emp.department} • {emp.location} •{" "}
-                                    {emp.experience}y exp
+                                    <span
+                                      style={{
+                                        padding: "4px 8px",
+                                        borderRadius: "12px",
+                                        fontSize: "11px",
+                                        background:
+                                          emp.availability === "Available"
+                                            ? "rgba(16, 185, 129, 0.1)"
+                                            : "rgba(245, 158, 11, 0.1)",
+                                        color:
+                                          emp.availability === "Available"
+                                            ? "var(--success)"
+                                            : "var(--warning)",
+                                      }}
+                                    >
+                                      {emp.availability}
+                                    </span>
+                                    <span
+                                      style={{
+                                        fontWeight: 600,
+                                        color: "var(--primary-accent)",
+                                      }}
+                                    >
+                                      {emp.matchScore}% match
+                                    </span>
+                                    <button
+                                      className="action-button primary"
+                                      style={{
+                                        fontSize: "11px",
+                                        padding: "6px 12px",
+                                      }}
+                                      disabled={!canAssignResources}
+                                      onClick={() =>
+                                        handleAssignEmployee(item.id, emp.id)
+                                      }
+                                    >
+                                      Assign
+                                    </button>
                                   </div>
                                 </div>
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "12px",
-                                  }}
-                                >
-                                  <span
-                                    style={{
-                                      padding: "4px 8px",
-                                      borderRadius: "12px",
-                                      fontSize: "11px",
-                                      background:
-                                        emp.availability === "Available"
-                                          ? "rgba(16, 185, 129, 0.1)"
-                                          : "rgba(245, 158, 11, 0.1)",
-                                      color:
-                                        emp.availability === "Available"
-                                          ? "var(--success)"
-                                          : "var(--warning)",
-                                    }}
-                                  >
-                                    {emp.availability}
-                                  </span>
-                                  <span
-                                    style={{
-                                      fontWeight: 600,
-                                      color: "var(--primary-accent)",
-                                    }}
-                                  >
-                                    {emp.matchScore}% match
-                                  </span>
-                                  <button
-                                    className="action-button primary"
-                                    style={{
-                                      fontSize: "11px",
-                                      padding: "6px 12px",
-                                    }}
-                                    onClick={() =>
-                                      handleAssignEmployee(item.id, emp.id)
-                                    }
-                                  >
-                                    Assign
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
                     </div>
                   )}
                 </div>
@@ -1343,250 +1386,281 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
               Match resources to open positions based on skills and availability
             </p>
           </div>
-
-          {/* Search and Filter */}
-          <div className="filter-grid" style={{ marginBottom: "24px" }}>
-            <div className="filter-item">
-              <label>Skill Match</label>
-              <select style={{ width: "100%" }}>
-                <option>All Skills</option>
-                <option>Python Developer</option>
-                <option>React Developer</option>
-                <option>DevOps Engineer</option>
-              </select>
+          {!canAssignResources ? (
+            <div
+              style={{
+                marginTop: "16px",
+                padding: "16px",
+                borderRadius: "12px",
+                backgroundColor: "rgba(245, 158, 11, 0.08)",
+                border: "1px solid rgba(245, 158, 11, 0.2)",
+                color: "var(--warning)",
+                fontSize: "13px",
+              }}
+            >
+              {ticket?.assignedTAId
+                ? "Resource mapping is locked because this requisition is assigned to another TA."
+                : "Resource mapping is locked until HR assigns a TA."}
             </div>
-            <div className="filter-item">
-              <label>Availability</label>
-              <select style={{ width: "100%" }}>
-                <option>All Status</option>
-                <option>Available</option>
-                <option>On Project</option>
-                <option>On Notice</option>
-              </select>
-            </div>
-            <div className="filter-item">
-              <label>Location</label>
-              <select style={{ width: "100%" }}>
-                <option>All Locations</option>
-                <option>Bengaluru</option>
-                <option>Mumbai</option>
-                <option>Delhi</option>
-                <option>Pune</option>
-              </select>
-            </div>
-            <div className="filter-item">
-              <label>Experience Level</label>
-              <select style={{ width: "100%" }}>
-                <option>All Levels</option>
-                <option>Junior (0-2y)</option>
-                <option>Mid (2-5y)</option>
-                <option>Senior (5-8y)</option>
-                <option>Lead (8+y)</option>
-              </select>
-            </div>
-          </div>
+          ) : (
+            <>
+              {/* Search and Filter */}
+              <div className="filter-grid" style={{ marginBottom: "24px" }}>
+                <div className="filter-item">
+                  <label>Skill Match</label>
+                  <select style={{ width: "100%" }}>
+                    <option>All Skills</option>
+                    <option>Python Developer</option>
+                    <option>React Developer</option>
+                    <option>DevOps Engineer</option>
+                  </select>
+                </div>
+                <div className="filter-item">
+                  <label>Availability</label>
+                  <select style={{ width: "100%" }}>
+                    <option>All Status</option>
+                    <option>Available</option>
+                    <option>On Project</option>
+                    <option>On Notice</option>
+                  </select>
+                </div>
+                <div className="filter-item">
+                  <label>Location</label>
+                  <select style={{ width: "100%" }}>
+                    <option>All Locations</option>
+                    <option>Bengaluru</option>
+                    <option>Mumbai</option>
+                    <option>Delhi</option>
+                    <option>Pune</option>
+                  </select>
+                </div>
+                <div className="filter-item">
+                  <label>Experience Level</label>
+                  <select style={{ width: "100%" }}>
+                    <option>All Levels</option>
+                    <option>Junior (0-2y)</option>
+                    <option>Mid (2-5y)</option>
+                    <option>Senior (5-8y)</option>
+                    <option>Lead (8+y)</option>
+                  </select>
+                </div>
+              </div>
 
-          {/* Employees List */}
-          <div
-            style={{ display: "flex", flexDirection: "column", gap: "12px" }}
-          >
-            {ticket.availableEmployees.map((emp) => {
-              const openItems = ticket.items.filter(
-                (item) =>
-                  item.itemStatus === "Pending" &&
-                  item.skill.includes(emp.skill.split(" ")[0] ?? "") &&
-                  item.level === emp.level,
-              );
+              {/* Employees List */}
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "12px",
+                }}
+              >
+                {ticket.availableEmployees.map((emp) => {
+                  const openItems = ticket.items.filter(
+                    (item) =>
+                      item.itemStatus === "Pending" &&
+                      item.skill.includes(emp.skill.split(" ")[0] ?? "") &&
+                      item.level === emp.level,
+                  );
 
-              return (
-                <div
-                  key={emp.id}
-                  style={{
-                    padding: "20px",
-                    backgroundColor: "var(--bg-primary)",
-                    borderRadius: "12px",
-                    border: "1px solid var(--border-subtle)",
-                    transition: "all 0.2s ease",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      justifyContent: "space-between",
-                      marginBottom: "16px",
-                    }}
-                  >
-                    <div>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "12px",
-                          marginBottom: "8px",
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: "40px",
-                            height: "40px",
-                            borderRadius: "8px",
-                            background:
-                              "linear-gradient(135deg, var(--slate-600), var(--slate-700))",
-                            color: "white",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontWeight: 600,
-                            fontSize: "14px",
-                          }}
-                        >
-                          {emp.name
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")}
-                        </div>
-                        <div>
-                          <div style={{ fontSize: "15px", fontWeight: 600 }}>
-                            {emp.name}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "13px",
-                              color: "var(--text-secondary)",
-                            }}
-                          >
-                            {emp.skill} • {emp.level} • {emp.department}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "16px",
-                          fontSize: "12px",
-                          color: "var(--text-tertiary)",
-                        }}
-                      >
-                        <span>📍 {emp.location}</span>
-                        <span>📊 {emp.experience} years exp</span>
-                        <span
-                          style={{
-                            padding: "2px 8px",
-                            borderRadius: "12px",
-                            background:
-                              emp.availability === "Available"
-                                ? "rgba(16, 185, 129, 0.1)"
-                                : emp.availability === "On Notice"
-                                  ? "rgba(245, 158, 11, 0.1)"
-                                  : "rgba(100, 116, 139, 0.1)",
-                            color:
-                              emp.availability === "Available"
-                                ? "var(--success)"
-                                : emp.availability === "On Notice"
-                                  ? "var(--warning)"
-                                  : "var(--slate-500)",
-                          }}
-                        >
-                          {emp.availability}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div style={{ textAlign: "right" }}>
-                      <div
-                        style={{
-                          fontSize: "20px",
-                          fontWeight: 700,
-                          color: "var(--primary-accent)",
-                        }}
-                      >
-                        {emp.matchScore}%
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "11px",
-                          color: "var(--text-tertiary)",
-                        }}
-                      >
-                        Match Score
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Matching Positions */}
-                  {openItems.length > 0 && (
+                  return (
                     <div
+                      key={emp.id}
                       style={{
-                        marginTop: "16px",
-                        paddingTop: "16px",
-                        borderTop: "1px solid var(--border-subtle)",
+                        padding: "20px",
+                        backgroundColor: "var(--bg-primary)",
+                        borderRadius: "12px",
+                        border: "1px solid var(--border-subtle)",
+                        transition: "all 0.2s ease",
                       }}
                     >
                       <div
                         style={{
-                          fontSize: "13px",
-                          fontWeight: 600,
-                          marginBottom: "8px",
-                        }}
-                      >
-                        Matching Open Positions ({openItems.length})
-                      </div>
-                      <div
-                        style={{
                           display: "flex",
-                          flexDirection: "column",
-                          gap: "8px",
+                          alignItems: "flex-start",
+                          justifyContent: "space-between",
+                          marginBottom: "16px",
                         }}
                       >
-                        {openItems.map((item) => (
+                        <div>
                           <div
-                            key={item.id}
                             style={{
-                              padding: "10px 12px",
-                              backgroundColor: "var(--bg-secondary)",
-                              borderRadius: "8px",
                               display: "flex",
-                              justifyContent: "space-between",
                               alignItems: "center",
+                              gap: "12px",
+                              marginBottom: "8px",
                             }}
                           >
+                            <div
+                              style={{
+                                width: "40px",
+                                height: "40px",
+                                borderRadius: "8px",
+                                background:
+                                  "linear-gradient(135deg, var(--slate-600), var(--slate-700))",
+                                color: "white",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                fontWeight: 600,
+                                fontSize: "14px",
+                              }}
+                            >
+                              {emp.name
+                                .split(" ")
+                                .map((n) => n[0])
+                                .join("")}
+                            </div>
                             <div>
                               <div
-                                style={{ fontWeight: 500, fontSize: "13px" }}
+                                style={{ fontSize: "15px", fontWeight: 600 }}
                               >
-                                {item.skill}
+                                {emp.name}
                               </div>
                               <div
                                 style={{
-                                  fontSize: "11px",
-                                  color: "var(--text-tertiary)",
+                                  fontSize: "13px",
+                                  color: "var(--text-secondary)",
                                 }}
                               >
-                                {item.level} • {item.experience}y exp •{" "}
-                                {item.education}
+                                {emp.skill} • {emp.level} • {emp.department}
                               </div>
                             </div>
-                            <button
-                              className="action-button primary"
-                              style={{ fontSize: "11px", padding: "6px 12px" }}
-                              onClick={() =>
-                                handleAssignEmployee(item.id, emp.id)
-                              }
-                            >
-                              Assign to Position
-                            </button>
                           </div>
-                        ))}
+
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "16px",
+                              fontSize: "12px",
+                              color: "var(--text-tertiary)",
+                            }}
+                          >
+                            <span>📍 {emp.location}</span>
+                            <span>📊 {emp.experience} years exp</span>
+                            <span
+                              style={{
+                                padding: "2px 8px",
+                                borderRadius: "12px",
+                                background:
+                                  emp.availability === "Available"
+                                    ? "rgba(16, 185, 129, 0.1)"
+                                    : emp.availability === "On Notice"
+                                      ? "rgba(245, 158, 11, 0.1)"
+                                      : "rgba(100, 116, 139, 0.1)",
+                                color:
+                                  emp.availability === "Available"
+                                    ? "var(--success)"
+                                    : emp.availability === "On Notice"
+                                      ? "var(--warning)"
+                                      : "var(--slate-500)",
+                              }}
+                            >
+                              {emp.availability}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div style={{ textAlign: "right" }}>
+                          <div
+                            style={{
+                              fontSize: "20px",
+                              fontWeight: 700,
+                              color: "var(--primary-accent)",
+                            }}
+                          >
+                            {emp.matchScore}%
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              color: "var(--text-tertiary)",
+                            }}
+                          >
+                            Match Score
+                          </div>
+                        </div>
                       </div>
+
+                      {/* Matching Positions */}
+                      {openItems.length > 0 && (
+                        <div
+                          style={{
+                            marginTop: "16px",
+                            paddingTop: "16px",
+                            borderTop: "1px solid var(--border-subtle)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: "13px",
+                              fontWeight: 600,
+                              marginBottom: "8px",
+                            }}
+                          >
+                            Matching Open Positions ({openItems.length})
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "8px",
+                            }}
+                          >
+                            {openItems.map((item) => (
+                              <div
+                                key={item.id}
+                                style={{
+                                  padding: "10px 12px",
+                                  backgroundColor: "var(--bg-secondary)",
+                                  borderRadius: "8px",
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                }}
+                              >
+                                <div>
+                                  <div
+                                    style={{
+                                      fontWeight: 500,
+                                      fontSize: "13px",
+                                    }}
+                                  >
+                                    {item.skill}
+                                  </div>
+                                  <div
+                                    style={{
+                                      fontSize: "11px",
+                                      color: "var(--text-tertiary)",
+                                    }}
+                                  >
+                                    {item.level} • {item.experience}y exp •{" "}
+                                    {item.education}
+                                  </div>
+                                </div>
+                                <button
+                                  className="action-button primary"
+                                  style={{
+                                    fontSize: "11px",
+                                    padding: "6px 12px",
+                                  }}
+                                  onClick={() =>
+                                    handleAssignEmployee(item.id, emp.id)
+                                  }
+                                >
+                                  Assign to Position
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
       )}
 

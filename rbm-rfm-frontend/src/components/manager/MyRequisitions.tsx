@@ -67,6 +67,19 @@ const MyRequisitions: React.FC = () => {
       maximumFractionDigits: 0,
     }).format(value);
   };
+
+  const getStatusBadgeClass = (status: string) => {
+    if (
+      status === "Pending Budget Approval" ||
+      status === "Pending HR Approval"
+    ) {
+      return "status-badge inactive";
+    }
+    if (status === "Approved & Unassigned" || status === "In-Progress") {
+      return "status-badge active";
+    }
+    return `status-badge ${status.toLowerCase().replace(/\s+/g, "-")}`;
+  };
   return (
     <>
       {/* Page Header */}
@@ -134,11 +147,7 @@ const MyRequisitions: React.FC = () => {
                   <td>{req.project_name || "—"}</td>
                   <td>{req.client_name || "—"}</td>
                   <td>
-                    <span
-                      className={`status-badge ${req.overall_status
-                        .toLowerCase()
-                        .replace(/\s+/g, "-")}`}
-                    >
+                    <span className={getStatusBadgeClass(req.overall_status)}>
                       {req.overall_status}
                     </span>
                   </td>
