@@ -20,8 +20,8 @@ class RequisitionStatusHistory(Base):
         nullable=False
     )
 
-    old_status = Column(String(20), nullable=True)
-    new_status = Column(String(20), nullable=True)
+    old_status = Column(String(50), nullable=True)
+    new_status = Column(String(50), nullable=True)
 
     changed_by = Column(
         Integer,
