@@ -1174,6 +1174,131 @@
   border: 1px solid var(--border-subtle);
 }
 
+.progress-divider {
+  color: var(--text-quaternary);
+}
+
+.form-banner {
+  margin-bottom: 20px;
+}
+
+.employee-stepper-wrapper {
+  margin-bottom: 24px;
+}
+
+.stepper-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.stepper-progress-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  appearance: none;
+  width: 100%;
+}
+
+.stepper-progress-bar::-webkit-progress-bar {
+  background: var(--border-subtle);
+  border-radius: 999px;
+}
+
+.stepper-progress-bar::-webkit-progress-value {
+  background: linear-gradient(90deg, var(--primary-accent), var(--success));
+  border-radius: 999px;
+}
+
+.stepper-progress-bar::-moz-progress-bar {
+  background: linear-gradient(90deg, var(--primary-accent), var(--success));
+  border-radius: 999px;
+}
+
+.stepper-progress-label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+
+.section-divider {
+  height: 1px;
+  background: var(--border-light);
+  margin: 32px 0;
+}
+
+.section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.contact-list {
+  display: grid;
+  gap: 16px;
+}
+
+.education-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.skill-selector {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.skill-action-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.dropdown-option.selected {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--primary-accent);
+}
+
+.range-input {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.range-input input[type="range"] {
+  flex: 1;
+}
+
+.range-value {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.secure-section {
+  border: 1px dashed rgba(239, 68, 68, 0.3);
+  border-radius: 16px;
+  padding: 24px;
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.secure-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--error);
+  background: rgba(239, 68, 68, 0.1);
+  padding: 6px 12px;
+  border-radius: 999px;
+  margin-bottom: 16px;
+}
+
 /* ============================================================================
    VALIDATION STATES
    ============================================================================ */

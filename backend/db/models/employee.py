@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Date, TIMESTAMP, CheckConstraint
+from sqlalchemy import Column, String, Date, TIMESTAMP, CheckConstraint, Integer, ForeignKey
 from sqlalchemy.sql import func
 
 from db.base import Base
@@ -19,6 +19,12 @@ class Employee(Base):
         String(20),
         nullable=False,
         server_default="Onboarding"
+    )
+
+    company_role_id = Column(
+        Integer,
+        ForeignKey("company_roles.role_id"),
+        nullable=True,
     )
 
     created_at = Column(

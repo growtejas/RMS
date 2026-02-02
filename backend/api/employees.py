@@ -1,5 +1,7 @@
 from db.models.user_employee_map import UserEmployeeMap
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -14,16 +16,48 @@ from db.models.employee_education import EmployeeEducation
 from db.models.employee_availability import EmployeeAvailability
 from db.models.employee_finance import EmployeeFinance
 from db.models.skill import Skill
+from db.models.company_role import CompanyRole
 from schemas.employee import (
     EmployeeCreate,
     EmployeeUpdate,
     EmployeeStatusUpdate,
-    EmployeeResponse
+    EmployeeResponse,
+    NextEmployeeIdResponse
 )
 from schemas.employee_onboard import EmployeeOnboard, EmployeeOnboardResponse
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 router = APIRouter(prefix="/employees", tags=["Employees"])
+
+
+def _format_employee_id(next_number: int) -> str:
+    return f"RBM-{str(next_number).zfill(4)}"
+
+
+def _get_next_employee_id(existing_ids: list[str]) -> str:
+    numbers: set[int] = set()
+    for emp_id in existing_ids:
+        matches = re.findall(r"\d+", emp_id or "")
+        if not matches:
+            continue
+        value = int(matches[0])
+        if value > 0:
+            numbers.add(value)
+
+    candidate = 6
+    while candidate in numbers:
+        candidate += 1
+
+    return _format_employee_id(candidate)
+
+
+@router.get("/next-id", response_model=NextEmployeeIdResponse)
+def get_next_employee_id(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin"))
+):
+    existing_ids = [row[0] for row in db.query(Employee.emp_id).all()]
+    return NextEmployeeIdResponse(emp_id=_get_next_employee_id(existing_ids))
 # API 1 — Create Employee
 @router.post("/", response_model=EmployeeResponse)
 def create_employee(
@@ -125,6 +159,26 @@ def onboard_employee(
     if email_exists:
         raise HTTPException(status_code=400, detail="Work email already exists")
 
+    if payload.company_role_id:
+        role = (
+            db.query(CompanyRole)
+            .filter(
+                CompanyRole.role_id == payload.company_role_id,
+                CompanyRole.is_active.is_(True),
+            )
+            .first()
+        )
+        if not role:
+            raise HTTPException(status_code=400, detail="Invalid company role")
+
+    if payload.contacts:
+        contact_types = [contact.type for contact in payload.contacts]
+        if len(contact_types) != len(set(contact_types)):
+            raise HTTPException(
+                status_code=400,
+                detail="Duplicate contact types are not allowed",
+            )
+
     if payload.skills:
         skill_ids = [skill.skill_id for skill in payload.skills]
         existing_ids = {
@@ -133,7 +187,9 @@ def onboard_employee(
             .filter(Skill.skill_id.in_(skill_ids))
             .all()
         }
-        missing = [str(skill_id) for skill_id in set(skill_ids) if skill_id not in existing_ids]
+        missing = [
+            str(skill_id) for skill_id in set(skill_ids) if skill_id not in existing_ids
+        ]
         if missing:
             raise HTTPException(
                 status_code=400,
@@ -141,7 +197,7 @@ def onboard_employee(
             )
 
     try:
-        with db.begin():
+        with db.begin_nested():
             employee = Employee(
                 emp_id=payload.emp_id,
                 full_name=payload.full_name,
@@ -150,6 +206,7 @@ def onboard_employee(
                 gender=payload.gender,
                 doj=payload.doj,
                 emp_status="Onboarding",
+                company_role_id=payload.company_role_id,
             )
             db.add(employee)
 
@@ -205,10 +262,18 @@ def onboard_employee(
                         tax_id=payload.finance.tax_id,
                     )
                 )
-    except SQLAlchemyError as exc:
+        db.commit()
+    except IntegrityError as exc:
+        detail = str(getattr(exc, "orig", exc))
         raise HTTPException(
             status_code=400,
-            detail="Failed to onboard employee. Please verify the data.",
+            detail=f"Failed to onboard employee due to a data constraint: {detail}",
+        ) from exc
+    except SQLAlchemyError as exc:
+        detail = str(getattr(exc, "orig", exc))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to onboard employee. Please verify the data: {detail}",
         ) from exc
 
     return EmployeeOnboardResponse(

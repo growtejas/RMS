@@ -38,6 +38,7 @@ class EmployeeOnboard(BaseModel):
     emp_id: str
     full_name: str
     rbm_email: EmailStr
+    company_role_id: Optional[int] = None
     dob: Optional[date] = None
     gender: Optional[str] = None
     doj: Optional[date] = None

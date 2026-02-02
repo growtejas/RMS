@@ -2,6 +2,7 @@ from db.models.auth import User, Role, UserRole
 from db.models.employee import Employee
 from db.models.department import Department
 from db.models.location import Location
+from db.models.company_role import CompanyRole
 from db.models.employee_assignment import EmployeeAssignment
 from db.models.employee_contact import EmployeeContact
 from db.models.skill import Skill

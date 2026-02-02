@@ -28,6 +28,14 @@ class EmployeeResponse(BaseModel):
     full_name: str
     rbm_email: EmailStr
     emp_status: str
+    dob: Optional[date] = None
+    gender: Optional[str] = None
+    doj: Optional[date] = None
+    company_role_id: Optional[int] = None
 
     class Config:
         from_attributes = True
+
+
+class NextEmployeeIdResponse(BaseModel):
+    emp_id: str
