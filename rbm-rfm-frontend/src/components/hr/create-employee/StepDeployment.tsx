@@ -1,11 +1,15 @@
 import React from "react";
-import type { CreateEmployeeForm, LocationOption, UserOption } from "./types";
+import type {
+  CreateEmployeeForm,
+  LocationOption,
+  ManagerOption,
+} from "./types";
 import type { FormErrorMap } from "./validation";
 
 type StepDeploymentProps = {
   formData: CreateEmployeeForm;
   locations: LocationOption[];
-  managers: UserOption[];
+  managers: ManagerOption[];
   errors: FormErrorMap;
   onChange: (
     field: keyof CreateEmployeeForm["deployment"],
@@ -82,8 +86,8 @@ const StepDeployment: React.FC<StepDeploymentProps> = ({
           >
             <option value="">Select manager</option>
             {managers.map((manager) => (
-              <option key={manager.user_id} value={manager.user_id}>
-                {manager.username}
+              <option key={manager.emp_id} value={manager.emp_id}>
+                {manager.full_name} ({manager.emp_id})
               </option>
             ))}
           </select>

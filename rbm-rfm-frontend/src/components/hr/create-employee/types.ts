@@ -74,3 +74,8 @@ export type UserOption = {
   username: string;
   roles?: string[];
 };
+
+export type ManagerOption = {
+  emp_id: string;
+  full_name: string;
+};

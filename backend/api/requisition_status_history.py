@@ -35,6 +35,7 @@ def create_requisition_status_history(
         old_status=payload.old_status,
         new_status=payload.new_status,
         changed_by=payload.changed_by,
+        justification=payload.justification,
     )
 
     db.add(history)

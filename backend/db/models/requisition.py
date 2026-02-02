@@ -57,6 +57,7 @@ class Requisition(Base):
     client_name = Column(String(100), nullable=True)
     justification = Column(Text, nullable=True)
     manager_notes = Column(Text, nullable=True)
+    rejection_reason = Column(Text, nullable=True)
 
     # --------------------
     # Request Details

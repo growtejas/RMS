@@ -2,6 +2,7 @@ from sqlalchemy import (
     Column,
     Integer,
     String,
+    Text,
     TIMESTAMP,
     ForeignKey
 )
@@ -22,6 +23,7 @@ class RequisitionStatusHistory(Base):
 
     old_status = Column(String(50), nullable=True)
     new_status = Column(String(50), nullable=True)
+    justification = Column(Text, nullable=True)
 
     changed_by = Column(
         Integer,

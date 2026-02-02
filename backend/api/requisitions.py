@@ -22,6 +22,7 @@ from schemas.requisition import (
     RequisitionUpdate,
     RequisitionStatusUpdate,
     RequisitionAssign,
+    RequisitionReject,
     RequisitionResponse,
 )
 from schemas.requisition_item import RequisitionItemResponse
@@ -38,6 +39,7 @@ def _record_status_history(
     old_status: str | None,
     new_status: str | None,
     changed_by: int | None,
+    justification: str | None = None,
 ) -> None:
     if not new_status or new_status == old_status:
         return
@@ -46,6 +48,7 @@ def _record_status_history(
         old_status=old_status,
         new_status=new_status,
         changed_by=changed_by,
+        justification=justification,
     )
     db.add(history)
 
@@ -378,6 +381,56 @@ def assign_ta(
 
     db.commit()
     return {"message": "TA assigned", "assigned_ta": payload.ta_user_id}
+
+
+@router.put("/{req_id}/reject")
+def reject_requisition(
+    req_id: int,
+    payload: RequisitionReject,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR"))
+):
+    requisition = (
+        db.query(Requisition)
+        .filter(Requisition.req_id == req_id)
+        .with_for_update()
+        .first()
+    )
+
+    if not requisition:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+
+    reason = (payload.reason or "").strip()
+    if len(reason) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Rejection reason must be at least 10 characters",
+        )
+
+    if requisition.overall_status == "Rejected":
+        raise HTTPException(status_code=409, detail="Requisition already rejected")
+
+    if requisition.overall_status in ("Approved & Unassigned", "Active", "Closed"):
+        raise HTTPException(
+            status_code=400,
+            detail="Approved or closed requisitions cannot be rejected",
+        )
+
+    old_status = requisition.overall_status
+    requisition.overall_status = "Rejected"
+    requisition.rejection_reason = reason
+
+    _record_status_history(
+        db,
+        requisition.req_id,
+        old_status,
+        requisition.overall_status,
+        current_user.user_id,
+        justification=reason,
+    )
+
+    db.commit()
+    return {"message": "Requisition rejected"}
 
 
 @router.post("/{req_id}/cancel")

@@ -12,9 +12,9 @@ import type {
   CreateEmployeeForm,
   DepartmentOption,
   LocationOption,
+  ManagerOption,
   RoleOption,
   SkillOption,
-  UserOption,
 } from "./create-employee/types";
 import {
   FormErrorMap,
@@ -109,7 +109,7 @@ const CreateEmployee: React.FC = () => {
   const [roles, setRoles] = useState<RoleOption[]>([]);
   const [skillsCatalog, setSkillsCatalog] = useState<SkillOption[]>([]);
   const [locations, setLocations] = useState<LocationOption[]>([]);
-  const [managers, setManagers] = useState<UserOption[]>([]);
+  const [managers, setManagers] = useState<ManagerOption[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
   const [errors, setErrors] = useState<FormErrorMap>({});
   const [error, setError] = useState<string | null>(null);
@@ -178,7 +178,7 @@ const CreateEmployee: React.FC = () => {
           apiClient.get<LocationOption[]>("/locations/", {
             signal: controller.signal,
           }),
-          apiClient.get<UserOption[]>("/users", {
+          apiClient.get<ManagerOption[]>("/employees/employees", {
             signal: controller.signal,
           }),
         ]);
@@ -189,7 +189,7 @@ const CreateEmployee: React.FC = () => {
           rolesResult,
           skillsResult,
           locationsResult,
-          usersResult,
+          managersResult,
         ] = results;
 
         const loadIssues: string[] = [];
@@ -265,17 +265,11 @@ const CreateEmployee: React.FC = () => {
           );
         }
 
-        if (usersResult.status === "fulfilled") {
-          setManagers(
-            (usersResult.value.data ?? []).filter((user) =>
-              (user.roles ?? []).some(
-                (role) => role.toLowerCase() === "manager",
-              ),
-            ),
-          );
-        } else if (!isCanceledError(usersResult.reason)) {
+        if (managersResult.status === "fulfilled") {
+          setManagers(managersResult.value.data ?? []);
+        } else if (!isCanceledError(managersResult.reason)) {
           loadIssues.push(
-            `Managers (${extractErrorMessage(usersResult.reason)})`,
+            `Managers (${extractErrorMessage(managersResult.reason)})`,
           );
         }
 

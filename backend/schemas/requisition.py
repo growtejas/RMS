@@ -41,6 +41,10 @@ class RequisitionUpdate(BaseModel):
     overall_status: Optional[str] = None
 
 
+class RequisitionReject(BaseModel):
+    reason: constr(min_length=10)
+
+
 class RequisitionStatusUpdate(BaseModel):
     overall_status: str
 
@@ -62,6 +66,7 @@ class RequisitionResponse(BaseModel):
     duration: Optional[str] = None
     is_replacement: Optional[bool] = None
     manager_notes: Optional[str] = None
+    rejection_reason: Optional[str] = None
     overall_status: str
     raised_by: int
     assigned_ta: Optional[int] = None
