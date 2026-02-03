@@ -426,6 +426,7 @@ def update_requisition(
         "Pending HR Approval",
         "Approved & Unassigned",
         "Active",
+        "Fulfilled",
         "Closed",
         "Rejected",
     ):
@@ -475,6 +476,7 @@ def update_requisition_status(
         "Pending HR Approval",
         "Approved & Unassigned",
         "Active",
+        "Fulfilled",
         "Closed",
         "Rejected",
     ):

@@ -120,6 +120,7 @@ class Requisition(Base):
                 'Pending HR Approval',
                 'Approved & Unassigned',
                 'Active',
+                'Fulfilled',
                 'Closed',
                 'Rejected'
             )

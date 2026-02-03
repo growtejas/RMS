@@ -6,6 +6,7 @@ from db.models.auth import User
 from utils.dependencies import require_any_role
 from db.models.requisition_item import RequisitionItem
 from db.models.requisition import Requisition
+from db.models.requisition_status_history import RequisitionStatusHistory
 from db.models.employee import Employee
 from schemas.requisition_item import (
     RequisitionItemCreate,
@@ -18,6 +19,65 @@ router = APIRouter(
     prefix="/requisitions",
     tags=["Requisition Items"]
 )
+
+
+def _record_status_history(
+    db: Session,
+    req_id: int,
+    old_status: str | None,
+    new_status: str | None,
+    changed_by: int | None = None,
+) -> None:
+    if not new_status or new_status == old_status:
+        return
+    history = RequisitionStatusHistory(
+        req_id=req_id,
+        old_status=old_status,
+        new_status=new_status,
+        changed_by=changed_by,
+    )
+    db.add(history)
+
+
+def _recalculate_requisition_status(db: Session, req_id: int) -> None:
+    requisition = (
+        db.query(Requisition)
+        .filter(Requisition.req_id == req_id)
+        .with_for_update()
+        .first()
+    )
+
+    if not requisition:
+        return
+
+    total_count = (
+        db.query(RequisitionItem)
+        .filter(RequisitionItem.req_id == req_id)
+        .count()
+    )
+    if total_count == 0:
+        return
+
+    fulfilled_count = (
+        db.query(RequisitionItem)
+        .filter(
+            RequisitionItem.req_id == req_id,
+            RequisitionItem.item_status == "Fulfilled",
+        )
+        .count()
+    )
+
+    old_status = requisition.overall_status
+    new_status = old_status
+
+    if fulfilled_count == total_count:
+        new_status = "Fulfilled"
+    elif fulfilled_count > 0 and old_status not in ("Fulfilled", "Closed"):
+        new_status = "Active"
+
+    if new_status != old_status:
+        requisition.overall_status = new_status
+        _record_status_history(db, req_id, old_status, new_status)
 
 # --------------------------------------------------
 # CREATE REQUISITION ITEM
@@ -115,33 +175,10 @@ def assign_employee_to_item(
     item.assigned_emp_id = payload.emp_id
     item.item_status = "Fulfilled"
 
-    requisition = db.query(Requisition).filter(
-        Requisition.req_id == item.req_id
-    ).first()
-
-    if requisition:
-        fulfilled_count = (
-            db.query(RequisitionItem)
-            .filter(
-                RequisitionItem.req_id == requisition.req_id,
-                RequisitionItem.item_status == "Fulfilled",
-            )
-            .count()
-        )
-
-        total_count = (
-            db.query(RequisitionItem)
-            .filter(RequisitionItem.req_id == requisition.req_id)
-            .count()
-        )
-
-        if fulfilled_count > 0:
-            requisition.overall_status = "Active"
-
-        if total_count > 0 and fulfilled_count == total_count:
-            requisition.overall_status = "Closed"
+    _recalculate_requisition_status(db, item.req_id)
 
     db.commit()
+    db.refresh(item)
 
     return {"message": "Employee assigned successfully"}
 
@@ -171,6 +208,10 @@ def update_item_status(
         raise HTTPException(status_code=404, detail="Item not found")
 
     item.item_status = payload.status
+
+    _recalculate_requisition_status(db, item.req_id)
+
     db.commit()
+    db.refresh(item)
 
     return {"message": "Item status updated"}

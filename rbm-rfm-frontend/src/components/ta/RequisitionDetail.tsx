@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   Calendar,
@@ -181,6 +181,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const getTodayDate = () =>
     new Date().toISOString().split("T")[0] ?? new Date().toISOString();
   const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<
     "overview" | "items" | "employees" | "timeline"
   >("overview");
@@ -188,6 +189,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [selectedItemForAssignment, setSelectedItemForAssignment] = useState<
     string | null
   >(null);
+  const initialItemStatusesRef = useRef<Record<string, string>>({});
   const [newNote, setNewNote] = useState("");
   const [ticket, setTicket] = useState<TicketData | null>(null);
   const [statusHistory, setStatusHistory] = useState<StatusHistoryEntry[]>([]);
@@ -326,7 +328,13 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
           `/requisitions/${reqId}`,
         );
         if (isMounted) {
-          setTicket(buildTicket(response.data));
+          const built = buildTicket(response.data);
+          setTicket(built);
+          const statusMap: Record<string, string> = {};
+          built.items.forEach((item) => {
+            statusMap[item.id] = item.itemStatus;
+          });
+          initialItemStatusesRef.current = statusMap;
         }
       } catch (err) {
         if (!isMounted) return;
@@ -562,7 +570,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         item.itemStatus === "Fulfilled" || item.itemStatus === "Cancelled",
     );
     if (allItemsDone) {
-      setTicket((prev) => (prev ? { ...prev, overallStatus: "Closed" } : prev));
+      setTicket((prev) =>
+        prev ? { ...prev, overallStatus: "Fulfilled" } : prev,
+      );
     }
   };
 
@@ -620,10 +630,50 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   };
 
   // Save changes
-  const handleSave = () => {
-    setIsEditing(false);
-    if (onUpdate) {
-      onUpdate(ticket);
+  const handleSave = async () => {
+    if (!ticket) return;
+    setIsSaving(true);
+
+    try {
+      const updates = ticket.items.filter((item) => {
+        const original = initialItemStatusesRef.current[item.id];
+        return original && original !== item.itemStatus;
+      });
+
+      await Promise.all(
+        updates.map((item) => {
+          const numericId = Number(item.id.replace("ITEM-", ""));
+          return apiClient.patch(`/requisitions/items/${numericId}/status`, {
+            status: item.itemStatus,
+          });
+        }),
+      );
+
+      const reqId = parseReqId(effectiveTicketId);
+      if (reqId) {
+        const response = await apiClient.get<BackendRequisition>(
+          `/requisitions/${reqId}`,
+        );
+        const built = buildTicket(response.data);
+        setTicket(built);
+        const statusMap: Record<string, string> = {};
+        built.items.forEach((item) => {
+          statusMap[item.id] = item.itemStatus;
+        });
+        initialItemStatusesRef.current = statusMap;
+
+        const historyResponse = await apiClient.get<StatusHistoryEntry[]>(
+          `/requisitions/${reqId}/status-history`,
+        );
+        setStatusHistory(historyResponse.data ?? []);
+      }
+
+      setIsEditing(false);
+      if (onUpdate) {
+        onUpdate(ticket);
+      }
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -722,10 +772,11 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
               <button
                 className="action-button primary"
                 onClick={handleSave}
+                disabled={isSaving}
                 style={{ display: "flex", alignItems: "center", gap: "8px" }}
               >
                 <Save size={16} />
-                Save Changes
+                {isSaving ? "Saving..." : "Save Changes"}
               </button>
             </>
           )}

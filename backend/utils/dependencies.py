@@ -153,7 +153,7 @@ def validate_status_transition(current_status: str, new_status: str) -> None:
         "Pending Budget Approval": {"Pending HR Approval", "Rejected"},
         "Pending HR Approval": {"Approved & Unassigned", "Rejected"},
         "Approved & Unassigned": {"Active"},
-        "Active": {"Closed"},
+        "Active": {"Closed", "Fulfilled"},
     }
 
     if current_status == new_status:

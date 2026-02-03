@@ -252,17 +252,16 @@ const EmployeeProfile: React.FC = () => {
             filteredEmployees.map((employee) => (
               <div
                 key={employee.emp_id}
-                className="stat-card"
-                style={{ cursor: "pointer" }}
+                className="stat-card employee-card"
                 onClick={() => {
                   setSelectedEmployeeId(employee.emp_id);
                   setActiveTab("overview");
                 }}
               >
-                <div style={{ fontWeight: 600 }}>{employee.full_name}</div>
+                <div className="employee-card-title">{employee.full_name}</div>
                 <div className="text-xs text-slate-500">{employee.emp_id}</div>
 
-                <div style={{ marginTop: "12px", fontSize: "13px" }}>
+                <div className="employee-card-meta">
                   <div>
                     <strong>Status:</strong> {employee.emp_status ?? "—"}
                   </div>
