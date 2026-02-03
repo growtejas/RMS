@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Eye } from "lucide-react";
 import { apiClient } from "../../api/client";
 
@@ -14,6 +15,7 @@ interface Requisition {
 }
 
 const MyRequisitions: React.FC = () => {
+  const navigate = useNavigate();
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -156,7 +158,12 @@ const MyRequisitions: React.FC = () => {
                   <td>{formatCurrency(req.budget_amount)}</td>
                   <td>{formatDate(req.created_at)}</td>
                   <td>
-                    <button className="action-button text-sm">
+                    <button
+                      className="action-button text-sm"
+                      onClick={() =>
+                        navigate(`/manager/requisitions/${req.req_id}`)
+                      }
+                    >
                       <Eye size={14} />
                       View
                     </button>

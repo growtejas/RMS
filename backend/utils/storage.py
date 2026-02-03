@@ -20,6 +20,11 @@ class StorageService(ABC):
         """Return access URL or file path for a stored key."""
         raise NotImplementedError
 
+    @abstractmethod
+    def delete(self, key: str) -> None:
+        """Delete a stored object by key."""
+        raise NotImplementedError
+
 
 class LocalStorageService(StorageService):
     def __init__(self, base_dir: Optional[str] = None) -> None:
@@ -46,6 +51,11 @@ class LocalStorageService(StorageService):
     def get_url(self, key: str) -> str:
         target = self._safe_path(key)
         return str(target)
+
+    def delete(self, key: str) -> None:
+        target = self._safe_path(key)
+        if target.exists():
+            target.unlink()
 
 
 class S3StorageService(StorageService):
@@ -85,6 +95,24 @@ class S3StorageService(StorageService):
                 detail="S3 bucket not configured",
             )
         return f"https://{self.bucket}.s3.amazonaws.com/{key}"
+
+    def delete(self, key: str) -> None:
+        if not self.bucket:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="S3 bucket not configured",
+            )
+
+        try:
+            import boto3  # type: ignore
+        except Exception as exc:  # pragma: no cover
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="S3 storage is not available",
+            ) from exc
+
+        client = boto3.client("s3")
+        client.delete_object(Bucket=self.bucket, Key=key)
 
 
 def get_storage_service() -> StorageService:

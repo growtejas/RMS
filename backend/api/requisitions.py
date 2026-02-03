@@ -19,6 +19,7 @@ from db.models.requisition_item import RequisitionItem
 from db.models.requisition_status_history import RequisitionStatusHistory
 from db.models.audit_log import AuditLog
 from schemas.requisition import (
+    RequisitionManagerUpdate,
     RequisitionUpdate,
     RequisitionStatusUpdate,
     RequisitionAssign,
@@ -221,6 +222,76 @@ def get_requisition(
     return requisition
 
 
+@router.put("/{req_id}")
+def update_requisition_manager(
+    req_id: int,
+    payload: RequisitionManagerUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager")),
+):
+    requisition = db.query(Requisition).filter(
+        Requisition.req_id == req_id
+    ).first()
+
+    if not requisition:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+
+    if requisition.raised_by != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Not allowed to edit")
+
+    allowed_statuses = {
+        "Draft",
+        "Pending Budget Approval",
+        "Pending HR Approval",
+    }
+    if requisition.overall_status not in allowed_statuses:
+        raise HTTPException(status_code=403, detail="Requisition is locked")
+
+    updates = payload.dict(exclude_unset=True)
+    items_payload = updates.pop("items", None)
+    old_budget = requisition.budget_amount
+
+    for field, value in updates.items():
+        setattr(requisition, field, value)
+
+    if items_payload is not None:
+        db.query(RequisitionItem).filter(
+            RequisitionItem.req_id == req_id
+        ).delete(synchronize_session=False)
+
+        for item in items_payload:
+            validated = RequisitionItemCreate(**item)
+            db_item = RequisitionItem(
+                req_id=req_id,
+                role_position=validated.role_position,
+                job_description=validated.job_description,
+                skill_level=validated.skill_level,
+                experience_years=validated.experience_years,
+                education_requirement=validated.education_requirement,
+                requirements=validated.requirements,
+                item_status="Pending",
+            )
+            db.add(db_item)
+
+    if "budget_amount" in updates and updates.get("budget_amount") != old_budget:
+        audit = AuditLog(
+            entity_name="requisition",
+            entity_id=str(requisition.req_id),
+            action="BUDGET_UPDATE",
+            performed_by=current_user.user_id,
+            old_value=json.dumps({
+                "budget_amount": str(old_budget) if old_budget is not None else None
+            }),
+            new_value=json.dumps({
+                "budget_amount": str(updates.get("budget_amount")) if updates.get("budget_amount") is not None else None
+            }),
+        )
+        db.add(audit)
+
+    db.commit()
+    return {"message": "Requisition updated"}
+
+
 @router.get("/{req_id}/jd")
 def download_requisition_jd(
     req_id: int,
@@ -247,6 +318,90 @@ def download_requisition_jd(
         media_type="application/pdf",
         filename=f"requisition_{req_id}_jd.pdf",
     )
+
+
+@router.post("/{req_id}/jd")
+async def upload_requisition_jd(
+    req_id: int,
+    jd_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    current_user: User = Depends(require_any_role("Manager")),
+):
+    requisition = db.query(Requisition).filter(
+        Requisition.req_id == req_id
+    ).first()
+
+    if not requisition:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+
+    if requisition.raised_by != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Not allowed to edit")
+
+    allowed_statuses = {
+        "Draft",
+        "Pending Budget Approval",
+        "Pending HR Approval",
+        "Budget Rejected",
+    }
+    if requisition.overall_status not in allowed_statuses:
+        raise HTTPException(status_code=403, detail="Requisition is locked")
+
+    if jd_file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="JD must be a PDF")
+
+    jd_file.file.seek(0, 2)
+    size = jd_file.file.tell()
+    jd_file.file.seek(0)
+    if size > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="JD exceeds 10MB")
+
+    if requisition.jd_file_key:
+        storage.delete(requisition.jd_file_key)
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    safe_name = f"{req_id}_{timestamp}.pdf"
+    file_key = storage.save(jd_file, safe_name)
+    requisition.jd_file_key = file_key
+    db.commit()
+
+    return {"message": "JD uploaded", "jd_file_key": file_key}
+
+
+@router.delete("/{req_id}/jd")
+def delete_requisition_jd(
+    req_id: int,
+    db: Session = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    current_user: User = Depends(require_any_role("Manager")),
+):
+    requisition = db.query(Requisition).filter(
+        Requisition.req_id == req_id
+    ).first()
+
+    if not requisition:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+
+    if requisition.raised_by != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Not allowed to edit")
+
+    allowed_statuses = {
+        "Draft",
+        "Pending Budget Approval",
+        "Pending HR Approval",
+        "Budget Rejected",
+    }
+    if requisition.overall_status not in allowed_statuses:
+        raise HTTPException(status_code=403, detail="Requisition is locked")
+
+    if not requisition.jd_file_key:
+        raise HTTPException(status_code=404, detail="JD file not available")
+
+    storage.delete(requisition.jd_file_key)
+    requisition.jd_file_key = None
+    db.commit()
+
+    return {"message": "JD removed"}
 
 
 @router.patch("/{req_id}")

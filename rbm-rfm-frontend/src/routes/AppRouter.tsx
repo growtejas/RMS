@@ -6,6 +6,7 @@ import AdminDashboard from "../components/admin/Dashboard";
 import HrDashboard from "../components/hr/Dashboard";
 import TADashboard from "../components/ta/Dashboard";
 import ManagerDashboard from "../components/manager/ManagerDashboard";
+import ManagerRequisitionDetails from "../components/manager/ManagerRequisitionDetails";
 import OwnerDashboard from "../components/owner/OwnerDashboard";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -114,6 +115,14 @@ export const AppRouter = () => {
           element={
             <ProtectedRoute requiredRoles={["manager"]}>
               <ManagerDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/manager/requisitions/:id"
+          element={
+            <ProtectedRoute requiredRoles={["manager"]}>
+              <ManagerRequisitionDetails />
             </ProtectedRoute>
           }
         />

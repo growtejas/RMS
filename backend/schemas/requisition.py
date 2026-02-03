@@ -39,6 +39,21 @@ class RequisitionUpdate(BaseModel):
     overall_status: Optional[str] = None
 
 
+class RequisitionManagerUpdate(BaseModel):
+    project_name: Optional[constr(max_length=100)] = None
+    client_name: Optional[constr(max_length=100)] = None
+    office_location: Optional[constr(max_length=100)] = None
+    work_mode: Optional[constr(max_length=10)] = None
+    required_by_date: Optional[date] = None
+    priority: Optional[constr(max_length=10)] = None
+    justification: Optional[str] = None
+    budget_amount: Optional[condecimal(max_digits=12, decimal_places=2)] = None
+    duration: Optional[constr(max_length=50)] = None
+    is_replacement: Optional[bool] = None
+    manager_notes: Optional[str] = None
+    items: Optional[List[RequisitionItemCreate]] = None
+
+
 class RequisitionReject(BaseModel):
     reason: constr(min_length=10)
 
