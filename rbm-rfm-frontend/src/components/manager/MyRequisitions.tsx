@@ -5,7 +5,7 @@ import { apiClient } from "../../api/client";
 interface Requisition {
   req_id: number;
   project_name: string;
-  client_name: string;
+  client_name: string | null;
   overall_status: string;
   required_by_date: string;
   priority: string;

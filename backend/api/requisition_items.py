@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -142,7 +140,6 @@ def assign_employee_to_item(
 
         if total_count > 0 and fulfilled_count == total_count:
             requisition.overall_status = "Closed"
-            requisition.date_closed = datetime.utcnow()
 
     db.commit()
 

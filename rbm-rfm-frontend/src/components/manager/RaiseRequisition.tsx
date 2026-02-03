@@ -33,7 +33,6 @@ interface RequisitionFormData {
   officeLocation: string;
   workMode: "Remote" | "Hybrid" | "WFO";
   requiredBy: string;
-  dateClosed: string;
   justification: string;
   priority: "Low" | "Medium" | "High";
 
@@ -45,8 +44,6 @@ interface RequisitionFormData {
   projectDuration: string;
   isReplacement: boolean;
   additionalNotes: string;
-  approvedBy: string | null;
-  budgetApprovedBy: string | null;
 }
 
 type SkillOption = {
@@ -73,7 +70,6 @@ const RaiseRequisition: React.FC = () => {
     officeLocation: "",
     workMode: "Hybrid",
     requiredBy: "",
-    dateClosed: "",
     justification: "",
     priority: "Medium",
     items: [],
@@ -81,8 +77,6 @@ const RaiseRequisition: React.FC = () => {
     projectDuration: "",
     isReplacement: false,
     additionalNotes: "",
-    approvedBy: null,
-    budgetApprovedBy: null,
   });
   const [skills, setSkills] = useState<SkillOption[]>([]);
   const [skillLoadError, setSkillLoadError] = useState<string | null>(null);
@@ -97,6 +91,10 @@ const RaiseRequisition: React.FC = () => {
   const [activeSkillField, setActiveSkillField] = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [jdFile, setJdFile] = useState<File | null>(null);
+  const [jdError, setJdError] = useState<string | null>(null);
+
+  const MAX_JD_SIZE = 10 * 1024 * 1024;
 
   useEffect(() => {
     const fetchSkills = async () => {
@@ -138,20 +136,36 @@ const RaiseRequisition: React.FC = () => {
     return skills.find((skill) => skill.id === skillId)?.name ?? "";
   };
 
-  const getDaysUntil = (dateValue: string) => {
-    if (!dateValue) {
-      return null;
+  // ================= STEP HANDLERS =================
+  const handleJdChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    if (!file) {
+      setJdFile(null);
+      setJdError(null);
+      return;
     }
-    const today = new Date();
-    const target = new Date(`${dateValue}T00:00:00`);
-    if (Number.isNaN(target.getTime())) {
-      return null;
+
+    if (file.type !== "application/pdf") {
+      setJdError("Only PDF files are allowed.");
+      setJdFile(null);
+      return;
     }
-    const diffMs = target.getTime() - today.getTime();
-    return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+    if (file.size > MAX_JD_SIZE) {
+      setJdError("PDF must be 10MB or smaller.");
+      setJdFile(null);
+      return;
+    }
+
+    setJdFile(file);
+    setJdError(null);
   };
 
-  // ================= STEP HANDLERS =================
+  const handleJdRemove = () => {
+    setJdFile(null);
+    setJdError(null);
+  };
+
   const handleNext = () => {
     if (activeStep < 2) setActiveStep(activeStep + 1);
   };
@@ -163,6 +177,11 @@ const RaiseRequisition: React.FC = () => {
   const handleSubmit = async () => {
     if (!validateStep(2)) {
       setSubmitError("Please complete all required fields.");
+      return;
+    }
+
+    if (jdError) {
+      setSubmitError(jdError);
       return;
     }
 
@@ -229,23 +248,34 @@ const RaiseRequisition: React.FC = () => {
 
       const workModePayload =
         formData.workMode === "Remote" ? "WFH" : formData.workMode;
+      const clientNamePayload = formData.clientName.trim();
+      const durationPayload = formData.projectDuration.trim();
 
-      await apiClient.post("/requisitions/", {
-        project_name: formData.projectName || undefined,
-        client_name: formData.clientName || undefined,
-        office_location: formData.officeLocation || undefined,
-        work_mode: workModePayload || undefined,
-        required_by_date: formData.requiredBy || undefined,
-        priority: formData.priority || undefined,
-        justification: formData.justification || undefined,
-        budget_amount: budgetValue,
-        duration: formData.projectDuration || undefined,
-        is_replacement: formData.isReplacement,
-        manager_notes: formData.additionalNotes || undefined,
-        date_closed: formData.dateClosed
-          ? new Date(`${formData.dateClosed}T00:00:00`).toISOString()
-          : undefined,
-        items: itemsPayload,
+      const payload = new FormData();
+      payload.append("project_name", formData.projectName || "");
+      payload.append("client_name", clientNamePayload || "");
+      payload.append("office_location", formData.officeLocation || "");
+      payload.append("work_mode", workModePayload || "");
+      payload.append("required_by_date", formData.requiredBy || "");
+      payload.append("priority", formData.priority || "");
+      payload.append("justification", formData.justification || "");
+      payload.append("duration", durationPayload || "");
+      payload.append("is_replacement", String(formData.isReplacement));
+      payload.append("manager_notes", formData.additionalNotes || "");
+      payload.append("items_json", JSON.stringify(itemsPayload));
+
+      if (budgetValue !== undefined) {
+        payload.append("budget_amount", String(budgetValue));
+      }
+
+      if (jdFile) {
+        payload.append("jd_file", jdFile);
+      }
+
+      await apiClient.post("/requisitions/", payload, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
       });
 
       alert("Requisition submitted successfully!");
@@ -255,7 +285,6 @@ const RaiseRequisition: React.FC = () => {
         officeLocation: "",
         workMode: "Hybrid",
         requiredBy: "",
-        dateClosed: "",
         justification: "",
         priority: "Medium",
         items: [],
@@ -263,12 +292,12 @@ const RaiseRequisition: React.FC = () => {
         projectDuration: "",
         isReplacement: false,
         additionalNotes: "",
-        approvedBy: null,
-        budgetApprovedBy: null,
       });
       setSkillSearch({});
       setSecondarySkillPick({});
       setActiveStep(0);
+      setJdFile(null);
+      setJdError(null);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Failed to submit requisition";
@@ -326,7 +355,6 @@ const RaiseRequisition: React.FC = () => {
       case 0:
         return !!(
           formData.projectName &&
-          formData.clientName &&
           formData.requiredBy &&
           formData.justification
         );
@@ -342,13 +370,14 @@ const RaiseRequisition: React.FC = () => {
           )
         );
       case 2:
-        return !!formData.projectDuration;
+        return true;
       default:
         return false;
     }
   };
 
   const canProceed = validateStep(activeStep);
+  const canSubmit = canProceed && !isSubmitting && !jdError;
   const steps = ["Project Scope", "Resource Details", "Budget & Finalize"];
 
   // ================= STEP 1: PROJECT SCOPE =================
@@ -383,7 +412,7 @@ const RaiseRequisition: React.FC = () => {
         </div>
 
         <div className="form-field">
-          <label>Client Name *</label>
+          <label>Client Name</label>
           <div className="search-box" style={{ padding: "0" }}>
             <input
               value={formData.clientName}
@@ -556,52 +585,6 @@ const RaiseRequisition: React.FC = () => {
         </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: "24px",
-          marginBottom: "24px",
-        }}
-      >
-        <div className="form-field">
-          <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <Calendar size={14} />
-            Project Fulfillment Deadline
-            {(() => {
-              const daysUntil = getDaysUntil(formData.dateClosed);
-              if (daysUntil !== null && daysUntil <= 7) {
-                return (
-                  <span className="priority-indicator priority-medium">
-                    {daysUntil <= 0 ? "Due" : `${daysUntil}d`}
-                  </span>
-                );
-              }
-              return null;
-            })()}
-          </label>
-          <input
-            type="date"
-            value={formData.dateClosed}
-            onChange={(e) =>
-              setFormData({ ...formData, dateClosed: e.target.value })
-            }
-            style={{ width: "100%" }}
-            min={new Date().toISOString().split("T")[0]}
-          />
-          <div
-            style={{
-              marginTop: "6px",
-              fontSize: "12px",
-              color: "var(--text-tertiary)",
-            }}
-          >
-            If this deadline is reached without fulfillment, the requisition
-            status will automatically move to "Closed".
-          </div>
-        </div>
-      </div>
-
       <div className="form-field">
         <label>Business Justification *</label>
         <textarea
@@ -707,7 +690,7 @@ const RaiseRequisition: React.FC = () => {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
+                  gridTemplateColumns: "1fr 1fr 1fr",
                   gap: "20px",
                   marginBottom: "20px",
                 }}
@@ -924,7 +907,7 @@ const RaiseRequisition: React.FC = () => {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 1fr 1fr",
+                  gridTemplateColumns: "1fr 1fr",
                   gap: "20px",
                   marginBottom: "20px",
                 }}
@@ -1203,7 +1186,7 @@ const RaiseRequisition: React.FC = () => {
           <div className="form-field">
             <label>
               <Calendar size={14} style={{ marginRight: "8px" }} />
-              Project Duration *
+              Project Duration
             </label>
             <select
               value={formData.projectDuration}
@@ -1212,7 +1195,7 @@ const RaiseRequisition: React.FC = () => {
               }
               style={{ width: "100%" }}
             >
-              <option value="">Select duration</option>
+              <option value="">Select duration (optional)</option>
               <option value="1-3 months">1-3 months (Short-term)</option>
               <option value="3-6 months">3-6 months</option>
               <option value="6-12 months">6-12 months</option>
@@ -1222,32 +1205,59 @@ const RaiseRequisition: React.FC = () => {
           </div>
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: "24px",
-            marginBottom: "32px",
-          }}
-        >
-          <div className="form-field">
-            <label>Approved By (HR Head)</label>
-            <input
-              value={formData.approvedBy ?? "Pending"}
-              readOnly
-              disabled
-              style={{ width: "100%" }}
-            />
-          </div>
-          <div className="form-field">
-            <label>Budget Approved By</label>
-            <input
-              value={formData.budgetApprovedBy ?? "Pending"}
-              readOnly
-              disabled
-              style={{ width: "100%" }}
-            />
-          </div>
+        <div className="form-field" style={{ marginBottom: "32px" }}>
+          <label>Job Description (PDF)</label>
+          <input
+            type="file"
+            accept="application/pdf"
+            onChange={handleJdChange}
+          />
+          {jdFile && (
+            <div
+              style={{
+                marginTop: "8px",
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+              }}
+            >
+              <span
+                style={{ fontSize: "12px", color: "var(--text-secondary)" }}
+              >
+                {jdFile.name}
+              </span>
+              <button
+                type="button"
+                className="action-button"
+                onClick={handleJdRemove}
+                style={{ fontSize: "12px", padding: "6px 10px" }}
+              >
+                Remove
+              </button>
+            </div>
+          )}
+          {jdError && (
+            <div
+              style={{
+                marginTop: "6px",
+                fontSize: "12px",
+                color: "var(--error)",
+              }}
+            >
+              {jdError}
+            </div>
+          )}
+          {!jdError && (
+            <div
+              style={{
+                marginTop: "6px",
+                fontSize: "12px",
+                color: "var(--text-tertiary)",
+              }}
+            >
+              PDF only • Max size 10MB
+            </div>
+          )}
         </div>
 
         <div style={{ marginBottom: "32px" }}>
@@ -1588,10 +1598,10 @@ const RaiseRequisition: React.FC = () => {
             <button
               className="action-button primary"
               onClick={handleSubmit}
-              disabled={!canProceed || isSubmitting}
+              disabled={!canSubmit}
               style={{
                 minWidth: "180px",
-                background: canProceed
+                background: canSubmit
                   ? "linear-gradient(135deg, var(--success), #059669)"
                   : "var(--bg-tertiary)",
               }}

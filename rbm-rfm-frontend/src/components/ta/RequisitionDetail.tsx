@@ -96,7 +96,6 @@ interface TicketData {
   budgetApprovedBy?: number | null;
   approvalHistory?: string | null;
   assignedAt?: string | null;
-  dateClosed?: string | null;
   createdAt?: string | null;
   daysOpen: number;
   slaHours: number;
@@ -139,7 +138,6 @@ interface BackendRequisition {
   approved_by?: number | null;
   approval_history?: string | null;
   assigned_at?: string | null;
-  date_closed?: string | null;
   items: BackendRequisitionItem[];
 }
 
@@ -283,7 +281,6 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       budgetApprovedBy: req.budget_approved_by ?? null,
       approvalHistory: req.approval_history ?? null,
       assignedAt: req.assigned_at ?? null,
-      dateClosed: req.date_closed ?? null,
       createdAt: req.created_at ?? null,
       daysOpen,
       slaHours: 72,
@@ -490,12 +487,12 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       });
     });
 
-    if (ticket.overallStatus === "Closed" || ticket.dateClosed) {
+    if (ticket.overallStatus === "Closed") {
       steps.push({
         id: "closed",
         title: "Requisition Closed",
         actor: resolveUserName(statusHistoryByStatus["Closed"]?.changed_by),
-        time: statusHistoryByStatus["Closed"]?.changed_at ?? ticket.dateClosed,
+        time: statusHistoryByStatus["Closed"]?.changed_at ?? null,
       });
     }
 

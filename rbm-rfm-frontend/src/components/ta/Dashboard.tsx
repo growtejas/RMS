@@ -49,7 +49,6 @@ interface BackendRequisition {
   overall_status: string;
   priority?: string | null;
   created_at?: string | null;
-  date_closed?: string | null;
   assigned_ta?: number | null;
 }
 
@@ -134,23 +133,10 @@ const TADashboard: React.FC = () => {
     const assignedToMe = requisitions.filter(
       (req) => req.assigned_ta && req.assigned_ta === currentUserId,
     ).length;
-    const closed = requisitions.filter((req) => req.date_closed).length;
-    const avgFulfillmentDays = closed
-      ? Math.round(
-          requisitions
-            .filter((req) => req.date_closed && req.created_at)
-            .reduce((sum, req) => {
-              const closedAt = new Date(req.date_closed as string).getTime();
-              const createdAt = new Date(req.created_at as string).getTime();
-              return sum + Math.max(0, closedAt - createdAt) / 86400000;
-            }, 0) /
-            Math.max(
-              requisitions.filter((req) => req.date_closed && req.created_at)
-                .length,
-              1,
-            ),
-        )
-      : 0;
+    const closed = requisitions.filter(
+      (req) => req.overall_status === "Closed",
+    ).length;
+    const avgFulfillmentDays = 0;
 
     return [
       {

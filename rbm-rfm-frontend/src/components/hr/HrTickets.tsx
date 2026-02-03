@@ -499,7 +499,7 @@ const MatchmakingPanel: React.FC<MatchmakingPanelProps> = ({
                   color: "var(--text-secondary)",
                 }}
               >
-                <div>Exp: {item.experience} years</div>
+                <div>Exp: {item.experience ?? "—"} years</div>
                 <div>Education: {item.education}</div>
                 <div>Status: {item.itemStatus}</div>
               </div>

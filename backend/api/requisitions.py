@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import datetime, date
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
 from typing import Optional, List
@@ -18,14 +19,15 @@ from db.models.requisition_item import RequisitionItem
 from db.models.requisition_status_history import RequisitionStatusHistory
 from db.models.audit_log import AuditLog
 from schemas.requisition import (
-    RequisitionCreate,
     RequisitionUpdate,
     RequisitionStatusUpdate,
     RequisitionAssign,
     RequisitionReject,
     RequisitionResponse,
 )
+from schemas.requisition_item import RequisitionItemCreate
 from schemas.requisition_item import RequisitionItemResponse
+from utils.storage import get_storage_service, StorageService
 
 router = APIRouter(
     prefix="/requisitions",
@@ -54,25 +56,63 @@ def _record_status_history(
 
 
 @router.post("/", response_model=RequisitionResponse)
-def create_requisition(
-    payload: RequisitionCreate,
+async def create_requisition(
+    project_name: str | None = Form(None),
+    client_name: str | None = Form(None),
+    office_location: str | None = Form(None),
+    work_mode: str | None = Form(None),
+    required_by_date: str | None = Form(None),
+    priority: str | None = Form(None),
+    justification: str | None = Form(None),
+    budget_amount: str | None = Form(None),
+    duration: str | None = Form(None),
+    is_replacement: bool = Form(False),
+    manager_notes: str | None = Form(None),
+    items_json: str = Form("[]"),
+    jd_file: UploadFile | None = File(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("Manager", "Admin", "HR"))
+    storage: StorageService = Depends(get_storage_service),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR")),
 ):
     try:
+        normalized_client = client_name.strip() if client_name else None
+        normalized_client = normalized_client or None
+        normalized_duration = duration.strip() if duration else None
+        normalized_duration = normalized_duration or None
+
+        parsed_budget = None
+        if budget_amount:
+            try:
+                parsed_budget = float(budget_amount)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid budget")
+
+        parsed_required_by = None
+        if required_by_date:
+            try:
+                parsed_required_by = date.fromisoformat(required_by_date)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid required_by_date") from exc
+
+        try:
+            items_payload = json.loads(items_json or "[]")
+            if not isinstance(items_payload, list):
+                raise ValueError("items_json must be a list")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid items payload") from exc
+
         requisition = Requisition(
-            project_name=payload.project_name,
-            client_name=payload.client_name,
-            justification=payload.justification,
-            manager_notes=payload.manager_notes,
-            priority=payload.priority,
-            is_replacement=payload.is_replacement or False,
-            duration=payload.duration,
-            work_mode=payload.work_mode,
-            office_location=payload.office_location,
-            budget_amount=payload.budget_amount,
-            required_by_date=payload.required_by_date,
-            date_closed=payload.date_closed,
+            project_name=project_name or None,
+            client_name=normalized_client,
+            justification=justification or None,
+            manager_notes=manager_notes or None,
+            priority=priority or None,
+            is_replacement=is_replacement,
+            duration=normalized_duration,
+            work_mode=work_mode or None,
+            office_location=office_location or None,
+            budget_amount=parsed_budget,
+            required_by_date=parsed_required_by,
             raised_by=current_user.user_id,
             overall_status="Pending Budget Approval",
         )
@@ -80,19 +120,34 @@ def create_requisition(
         db.add(requisition)
         db.flush()
 
-        if payload.items:
-            for item in payload.items:
+        if items_payload:
+            for item in items_payload:
+                validated = RequisitionItemCreate(**item)
                 db_item = RequisitionItem(
                     req_id=requisition.req_id,
-                    role_position=item.role_position,
-                    job_description=item.job_description,
-                    skill_level=item.skill_level,
-                    experience_years=item.experience_years,
-                    education_requirement=item.education_requirement,
-                    requirements=item.requirements,
+                    role_position=validated.role_position,
+                    job_description=validated.job_description,
+                    skill_level=validated.skill_level,
+                    experience_years=validated.experience_years,
+                    education_requirement=validated.education_requirement,
+                    requirements=validated.requirements,
                     item_status="Pending",
                 )
                 db.add(db_item)
+
+        if jd_file:
+            if jd_file.content_type != "application/pdf":
+                raise HTTPException(status_code=400, detail="JD must be a PDF")
+            jd_file.file.seek(0, 2)
+            size = jd_file.file.tell()
+            jd_file.file.seek(0)
+            if size > 10 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="JD exceeds 10MB")
+
+            timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+            safe_name = f"{requisition.req_id}_{timestamp}.pdf"
+            file_key = storage.save(jd_file, safe_name)
+            requisition.jd_file_key = file_key
 
         db.commit()
         db.refresh(requisition)
@@ -166,6 +221,34 @@ def get_requisition(
     return requisition
 
 
+@router.get("/{req_id}/jd")
+def download_requisition_jd(
+    req_id: int,
+    db: Session = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "TA")),
+):
+    requisition = db.query(Requisition).filter(
+        Requisition.req_id == req_id
+    ).first()
+
+    if not requisition:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+
+    if not requisition.jd_file_key:
+        raise HTTPException(status_code=404, detail="JD file not available")
+
+    url = storage.get_url(requisition.jd_file_key)
+    if url.startswith("http://") or url.startswith("https://"):
+        return RedirectResponse(url)
+
+    return FileResponse(
+        url,
+        media_type="application/pdf",
+        filename=f"requisition_{req_id}_jd.pdf",
+    )
+
+
 @router.patch("/{req_id}")
 def update_requisition(
     req_id: int,
@@ -197,9 +280,6 @@ def update_requisition(
 
     for field, value in updates.items():
         setattr(requisition, field, value)
-
-    if updates.get("overall_status") == "Closed" and requisition.date_closed is None:
-        requisition.date_closed = datetime.utcnow()
 
     if "overall_status" in updates:
         _record_status_history(
@@ -254,8 +334,6 @@ def update_requisition_status(
 
     old_status = requisition.overall_status
     requisition.overall_status = payload.overall_status
-    if payload.overall_status == "Closed" and requisition.date_closed is None:
-        requisition.date_closed = datetime.utcnow()
     _record_status_history(
         db,
         requisition.req_id,

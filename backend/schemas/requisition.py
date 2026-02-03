@@ -16,7 +16,6 @@ class RequisitionCreate(BaseModel):
     duration: Optional[constr(max_length=50)] = None
     is_replacement: Optional[bool] = None
     manager_notes: Optional[str] = None
-    date_closed: Optional[datetime] = None
     items: List[RequisitionItemCreate] = Field(default_factory=list)
 
 
@@ -32,7 +31,6 @@ class RequisitionUpdate(BaseModel):
     office_location: Optional[constr(max_length=100)] = None
     budget_amount: Optional[condecimal(max_digits=12, decimal_places=2)] = None
     required_by_date: Optional[date] = None
-    date_closed: Optional[datetime] = None
     assigned_ta: Optional[int] = None
     budget_approved_by: Optional[int] = None
     approved_by: Optional[int] = None
@@ -67,6 +65,7 @@ class RequisitionResponse(BaseModel):
     is_replacement: Optional[bool] = None
     manager_notes: Optional[str] = None
     rejection_reason: Optional[str] = None
+    jd_file_key: Optional[str] = None
     overall_status: str
     raised_by: int
     assigned_ta: Optional[int] = None

@@ -96,7 +96,6 @@ interface TicketData {
   budgetApprovedBy?: number | null;
   approvalHistory?: string | null;
   assignedAt?: string | null;
-  dateClosed?: string | null;
   createdAt?: string | null;
   daysOpen: number;
   slaHours: number;
@@ -139,7 +138,6 @@ interface BackendRequisition {
   approved_by?: number | null;
   approval_history?: string | null;
   assigned_at?: string | null;
-  date_closed?: string | null;
   items: BackendRequisitionItem[];
 }
 
@@ -238,7 +236,6 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       budgetApprovedBy: req.budget_approved_by ?? null,
       approvalHistory: req.approval_history ?? null,
       assignedAt: req.assigned_at ?? null,
-      dateClosed: req.date_closed ?? null,
       createdAt: req.created_at ?? null,
       daysOpen,
       slaHours: 72,
@@ -504,12 +501,12 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       });
     });
 
-    if (ticket.overallStatus === "Closed" || ticket.dateClosed) {
+    if (ticket.overallStatus === "Closed") {
       steps.push({
         id: "closed",
         title: "Requisition Closed",
         actor: resolveUserName(statusHistoryByStatus["Closed"]?.changed_by),
-        time: statusHistoryByStatus["Closed"]?.changed_at ?? ticket.dateClosed,
+        time: statusHistoryByStatus["Closed"]?.changed_at ?? null,
       });
     }
 
@@ -1721,16 +1718,6 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                 <option>Mumbai</option>
                 <option>Delhi</option>
                 <option>Pune</option>
-              </select>
-            </div>
-            <div className="filter-item">
-              <label>Experience Level</label>
-              <select style={{ width: "100%" }}>
-                <option>All Levels</option>
-                <option>Junior (0-2y)</option>
-                <option>Mid (2-5y)</option>
-                <option>Senior (5-8y)</option>
-                <option>Lead (8+y)</option>
               </select>
             </div>
           </div>

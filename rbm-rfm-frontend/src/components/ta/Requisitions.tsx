@@ -28,7 +28,6 @@ interface Requisition {
   requiredBy: string;
   overallStatus: string;
   dateCreated: string;
-  dateClosed?: string;
   raisedBy?: string;
   assignedTA?: string;
   assignedTAId?: number | null;
@@ -48,7 +47,6 @@ interface RequisitionItem {
   assignedEmployeeId?: string;
   assignedEmployeeName?: string;
   assignedDate?: string;
-  experience?: number;
   description?: string;
 }
 
@@ -57,7 +55,6 @@ interface BackendRequisitionItem {
   req_id: number;
   role_position: string;
   skill_level?: string | null;
-  experience_years?: number | null;
   education_requirement?: string | null;
   job_description: string;
   requirements?: string | null;
@@ -109,7 +106,6 @@ const mapRequisitions = (data: BackendRequisition[]): Requisition[] =>
         level: item.skill_level ?? "—",
         education: item.education_requirement ?? "—",
         itemStatus: item.item_status,
-        experience: item.experience_years ?? undefined,
         description: item.job_description,
       })) ?? [],
   }));

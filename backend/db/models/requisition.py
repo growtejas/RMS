@@ -58,6 +58,7 @@ class Requisition(Base):
     justification = Column(Text, nullable=True)
     manager_notes = Column(Text, nullable=True)
     rejection_reason = Column(Text, nullable=True)
+    jd_file_key = Column(Text, nullable=True)
 
     # --------------------
     # Request Details
@@ -83,8 +84,6 @@ class Requisition(Base):
         nullable=False,
         default="Pending Budget Approval"
     )
-
-    date_closed = Column(TIMESTAMP, nullable=True)
     approval_history = Column(TIMESTAMP, nullable=True)
     assigned_at = Column(TIMESTAMP, nullable=True)
 
