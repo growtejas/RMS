@@ -12,25 +12,21 @@ import {
   UserPlus,
   Clock,
   AlertCircle,
-  Calendar,
   ArrowUpRight,
   Activity,
   Briefcase,
-  TrendingUp,
   RefreshCw,
   CheckCircle,
   XCircle,
-  Eye,
-  Loader2,
   ShieldAlert,
 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   hrDashboardService,
   HRMetrics,
-  PendingApproval,
   RecentActivity,
 } from "../../api/hrDashboardService";
+import HRPendingApprovals from "./HRPendingApprovals";
 
 // ============================================
 // Types
@@ -45,23 +41,6 @@ type LoadingState = "idle" | "loading" | "success" | "error";
 // ============================================
 // Helper Functions
 // ============================================
-
-/**
- * Format date string to readable format
- */
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return "—";
-  try {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  } catch {
-    return dateStr;
-  }
-}
 
 /**
  * Format timestamp to relative time or date
@@ -87,22 +66,6 @@ function formatTimestamp(timestamp: string): string {
     });
   } catch {
     return timestamp;
-  }
-}
-
-/**
- * Get priority badge color class
- */
-function getPriorityClass(priority: string | null): string {
-  switch (priority?.toLowerCase()) {
-    case "high":
-      return "bg-red-100 text-red-800";
-    case "medium":
-      return "bg-amber-100 text-amber-800";
-    case "low":
-      return "bg-green-100 text-green-800";
-    default:
-      return "bg-slate-100 text-slate-600";
   }
 }
 
@@ -286,9 +249,6 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
   const [loadingState, setLoadingState] = useState<LoadingState>("idle");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [metrics, setMetrics] = useState<HRMetrics | null>(null);
-  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>(
-    [],
-  );
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -319,7 +279,6 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
         );
 
         setMetrics(data.metrics);
-        setPendingApprovals(data.pending_approvals);
         setRecentActivity(data.recent_activity);
         setLoadingState("success");
       } catch (error) {
@@ -459,93 +418,13 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
         {/* Left Column - Pending Approvals Table */}
         <div className="lg:col-span-2">
-          <div className="master-data-manager">
-            <div className="data-manager-header">
-              <h2>Pending HR Approvals</h2>
-              <p className="subtitle">
-                Requisitions awaiting your review ({pendingApprovals.length})
-              </p>
-            </div>
-
-            {pendingApprovals.length === 0 ? (
-              <EmptyState
-                icon={<CheckCircle size={48} />}
-                title="All caught up!"
-                description="No requisitions pending HR approval"
-              />
-            ) : (
-              <div className="data-table-container">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Req ID</th>
-                      <th>Project / Client</th>
-                      <th>Requested By</th>
-                      <th>Priority</th>
-                      <th>Budget</th>
-                      <th>Required By</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pendingApprovals.map((approval) => (
-                      <tr key={approval.req_id}>
-                        <td>
-                          <span className="font-mono text-sm text-blue-600">
-                            REQ-{approval.req_id.toString().padStart(4, "0")}
-                          </span>
-                        </td>
-                        <td>
-                          <div className="font-medium">
-                            {approval.project_name || "—"}
-                          </div>
-                          <div className="text-xs text-slate-500">
-                            {approval.client_name || "No client"}
-                          </div>
-                        </td>
-                        <td>{approval.requester_name}</td>
-                        <td>
-                          <span
-                            className={`px-2 py-1 rounded text-xs font-medium ${getPriorityClass(
-                              approval.priority,
-                            )}`}
-                          >
-                            {approval.priority || "—"}
-                          </span>
-                        </td>
-                        <td>
-                          {approval.budget_amount
-                            ? `₹${approval.budget_amount.toLocaleString("en-IN")}`
-                            : "—"}
-                        </td>
-                        <td>{formatDate(approval.required_by_date)}</td>
-                        <td>
-                          <button
-                            className="action-button primary text-sm py-1 px-3"
-                            onClick={() =>
-                              handleViewRequisition(approval.req_id)
-                            }
-                          >
-                            <Eye size={14} className="mr-1" />
-                            Review
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+          <HRPendingApprovals
+            onViewRequisition={handleViewRequisition}
+            onActionComplete={() => fetchDashboardData(false)}
+          />
         </div>
-        Right Column - Quick Actions & Activity
-        <div className="space-y-6">
-          {/* Quick Actions */}
-          <div className="audit-log-viewer">
-            <div className="viewer-header">
-              <h2>Quick Actions</h2>
-            </div>
-            {/* <div className="space-y-3">
+
+        {/* <div className="space-y-3">
               <button className="action-button primary w-full justify-center">
                 <UserPlus size={16} />
                 <span className="ml-2">Create New Employee</span>
@@ -559,9 +438,8 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
                 <span className="ml-2">Generate Reports</span>
               </button>
             </div> */}
-          </div>
 
-          {/* <div className="audit-log-viewer">
+        {/* <div className="audit-log-viewer">
             <div className="viewer-header">
               <h2>Recent Activity</h2>
               <p className="subtitle">Latest HR actions</p>
@@ -614,7 +492,7 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
               </div>
             )}
           </div> */}
-          {/* {metrics && (
+        {/* {metrics && (
             <div className="audit-log-viewer">
               <div className="viewer-header">
                 <h2>Employee Status</h2>
@@ -641,7 +519,6 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
               </div>
             </div>
           )} */}
-        </div>
       </div>
     </div>
   );

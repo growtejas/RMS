@@ -76,6 +76,15 @@ class HRDashboardDataResponse(BaseModel):
     recent_activity: list[RecentActivityItem]
 
 
+class HRPendingApprovalItem(BaseModel):
+    requisition_id: str
+    project_name: Optional[str]
+    manager_name: Optional[str]
+    requested_date: Optional[str]
+    budget_amount: Optional[float]
+    status: str
+
+
 class ManagerSlaRiskItem(BaseModel):
     requisition_id: str
     days_open: int
@@ -203,6 +212,38 @@ def get_pending_approvals(db: Session, limit: int = 10) -> list[dict]:
             "budget_amount": float(req.budget_amount) if req.budget_amount else None,
             "required_by_date": req.required_by_date.isoformat() if req.required_by_date else None,
             "created_at": req.created_at.isoformat() if req.created_at else "",
+        })
+
+    return result
+
+
+def get_hr_pending_approvals(db: Session, limit: Optional[int] = None) -> list[dict]:
+    """Get requisitions pending HR approval ordered by oldest first."""
+    query = (
+        db.query(Requisition, User.username)
+        .outerjoin(User, User.user_id == Requisition.raised_by)
+        .filter(
+            Requisition.overall_status.in_(
+                ["Pending HR Approval", "Pending Budget Approval"]
+            )
+        )
+        .order_by(Requisition.created_at.asc())
+    )
+
+    if limit:
+        query = query.limit(limit)
+
+    rows = query.all()
+
+    result = []
+    for req, username in rows:
+        result.append({
+            "requisition_id": str(req.req_id),
+            "project_name": req.project_name,
+            "manager_name": username,
+            "requested_date": req.created_at.isoformat() if req.created_at else None,
+            "budget_amount": float(req.budget_amount) if req.budget_amount else None,
+            "status": req.overall_status,
         })
 
     return result
@@ -432,6 +473,18 @@ def get_hr_metrics(
         pending_approvals=pending_list,
         recent_activity=activity_list,
     )
+
+
+@router.get("/hr/pending-approvals", response_model=list[HRPendingApprovalItem])
+def get_hr_pending_approvals_endpoint(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin"))
+):
+    """
+    Get HR pending approvals list ordered by oldest first.
+    Requires HR role.
+    """
+    return get_hr_pending_approvals(db)
 
 
 @router.get("/hr-metrics/summary", response_model=HRMetricsResponse)

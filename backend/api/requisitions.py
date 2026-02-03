@@ -529,6 +529,46 @@ def approve_budget(
     return {"message": "Budget approved"}
 
 
+@router.put("/{req_id}/approve")
+def approve_requisition(
+    req_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR"))
+):
+    requisition = (
+        db.query(Requisition)
+        .filter(Requisition.req_id == req_id)
+        .with_for_update()
+        .first()
+    )
+
+    if not requisition:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+
+    if requisition.overall_status != "Pending HR Approval":
+        raise HTTPException(
+            status_code=400,
+            detail="Requisition is not pending HR approval",
+        )
+
+    validate_status_transition(requisition.overall_status, "Approved & Unassigned")
+    old_status = requisition.overall_status
+    requisition.approved_by = current_user.user_id
+    requisition.approval_history = datetime.utcnow()
+    requisition.overall_status = "Approved & Unassigned"
+
+    _record_status_history(
+        db,
+        requisition.req_id,
+        old_status,
+        requisition.overall_status,
+        current_user.user_id,
+    )
+
+    db.commit()
+    return {"message": "Requisition approved"}
+
+
 @router.patch("/{req_id}/approve-release")
 def approve_and_release(
     req_id: int,
@@ -643,10 +683,10 @@ def reject_requisition(
     if requisition.overall_status == "Rejected":
         raise HTTPException(status_code=409, detail="Requisition already rejected")
 
-    if requisition.overall_status in ("Approved & Unassigned", "Active", "Closed"):
+    if requisition.overall_status != "Pending HR Approval":
         raise HTTPException(
             status_code=400,
-            detail="Approved or closed requisitions cannot be rejected",
+            detail="Requisition is not pending HR approval",
         )
 
     old_status = requisition.overall_status

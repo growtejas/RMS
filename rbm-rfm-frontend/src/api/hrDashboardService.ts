@@ -32,6 +32,15 @@ export interface PendingApproval {
   created_at: string;
 }
 
+export interface HRPendingApprovalItem {
+  requisition_id: string;
+  project_name: string | null;
+  manager_name: string | null;
+  requested_date: string | null;
+  budget_amount: number | null;
+  status: string;
+}
+
 export interface RecentActivity {
   audit_id: number;
   action: string;
@@ -95,21 +104,30 @@ export const hrDashboardService = {
   getMetricsSummary: fetchHRMetricsSummary,
 
   /**
+   * Fetch pending HR approvals (dedicated endpoint)
+   */
+  getPendingApprovals: async (signal?: AbortSignal) => {
+    const response = await apiClient.get<HRPendingApprovalItem[]>(
+      "/dashboard/hr/pending-approvals",
+      { signal },
+    );
+    return response.data;
+  },
+
+  /**
    * Approve a requisition (convenience wrapper)
    */
-  approveRequisition: async (reqId: number) => {
-    const response = await apiClient.put(`/requisitions/${reqId}/status`, {
-      overall_status: "Approved & Unassigned",
-    });
+  approveRequisition: async (reqId: number | string) => {
+    const response = await apiClient.put(`/requisitions/${reqId}/approve`);
     return response.data;
   },
 
   /**
    * Reject a requisition with reason
    */
-  rejectRequisition: async (reqId: number, reason: string) => {
+  rejectRequisition: async (reqId: number | string, reason: string) => {
     const response = await apiClient.put(`/requisitions/${reqId}/reject`, {
-      rejection_reason: reason,
+      reason,
     });
     return response.data;
   },

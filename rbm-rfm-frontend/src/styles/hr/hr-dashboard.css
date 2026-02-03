@@ -1031,6 +1031,30 @@ body {
   background: var(--bg-tertiary);
 }
 
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+}
+
+.table-no-wrap th,
+.table-no-wrap td {
+  white-space: nowrap;
+}
+
+.table-scroll .data-table {
+  min-width: 720px;
+}
+
+.truncate-cell {
+  display: block;
+  max-width: clamp(200px, 24vw, 240px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Striped effect for better readability */
 .data-table tbody tr:nth-child(even),
 .log-table tbody tr:nth-child(even) {
