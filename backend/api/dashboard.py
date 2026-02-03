@@ -4,6 +4,7 @@ Provides aggregated metrics for different dashboard views (HR, Admin, etc.)
 """
 
 from datetime import datetime, timedelta
+import os
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
@@ -15,6 +16,8 @@ from db.models.auth import User
 from db.models.employee import Employee
 from db.models.employee_availability import EmployeeAvailability
 from db.models.requisition import Requisition
+from db.models.requisition_item import RequisitionItem
+from db.models.requisition_status_history import RequisitionStatusHistory
 from db.models.audit_log import AuditLog
 from utils.dependencies import require_any_role
 
@@ -71,6 +74,27 @@ class HRDashboardDataResponse(BaseModel):
     metrics: HRMetricsResponse
     pending_approvals: list[PendingApprovalItem]
     recent_activity: list[RecentActivityItem]
+
+
+class ManagerSlaRiskItem(BaseModel):
+    requisition_id: str
+    days_open: int
+
+
+class ManagerPendingPositionsAlert(BaseModel):
+    requisition_id: str
+    pending_count: int
+
+
+class ManagerMetricsResponse(BaseModel):
+    total_requisitions: int
+    open: int
+    in_progress: int
+    closed: int
+    pending_positions: int
+    avg_fulfillment_days: float
+    sla_risks: list[ManagerSlaRiskItem]
+    pending_positions_alerts: list[ManagerPendingPositionsAlert]
 
 
 # ============================================
@@ -222,6 +246,143 @@ def get_recent_hr_activity(db: Session, limit: int = 5) -> list[dict]:
 
 
 # ============================================
+# Manager Dashboard Helper Functions
+# ============================================
+
+MANAGER_SLA_DAYS = int(os.getenv("MANAGER_SLA_DAYS", "30"))
+
+OPEN_STATUSES = {
+    "Pending Budget Approval",
+    "Pending HR Approval",
+}
+
+IN_PROGRESS_STATUSES = {
+    "Approved & Unassigned",
+    "Active",
+}
+
+CLOSED_STATUSES = {"Closed"}
+
+
+def get_manager_status_counts(db: Session, manager_id: int) -> dict[str, int]:
+    """Get requisition counts by status for a specific manager."""
+    rows = (
+        db.query(Requisition.overall_status, func.count(Requisition.req_id))
+        .filter(Requisition.raised_by == manager_id)
+        .group_by(Requisition.overall_status)
+        .all()
+    )
+    return {status: count for status, count in rows}
+
+
+def get_manager_pending_positions_count(db: Session, manager_id: int) -> int:
+    """Total unfulfilled positions for a manager's requisitions."""
+    return (
+        db.query(func.count(RequisitionItem.item_id))
+        .join(Requisition, Requisition.req_id == RequisitionItem.req_id)
+        .filter(
+            Requisition.raised_by == manager_id,
+            RequisitionItem.item_status.notin_(["Fulfilled", "Cancelled"]),
+        )
+        .scalar()
+    ) or 0
+
+
+def get_manager_pending_positions_alerts(
+    db: Session,
+    manager_id: int,
+    limit: int = 10,
+) -> list[dict]:
+    """Pending positions grouped by requisition for alerting."""
+    rows = (
+        db.query(
+            Requisition.req_id,
+            func.count(RequisitionItem.item_id).label("pending_count"),
+        )
+        .join(RequisitionItem, RequisitionItem.req_id == Requisition.req_id)
+        .filter(
+            Requisition.raised_by == manager_id,
+            RequisitionItem.item_status.notin_(["Fulfilled", "Cancelled"]),
+        )
+        .group_by(Requisition.req_id)
+        .order_by(func.count(RequisitionItem.item_id).desc())
+        .limit(limit)
+        .all()
+    )
+
+    return [
+        {
+            "requisition_id": str(req_id),
+            "pending_count": int(pending_count),
+        }
+        for req_id, pending_count in rows
+    ]
+
+
+def get_manager_sla_risks(
+    db: Session,
+    manager_id: int,
+    sla_days: int,
+    limit: int = 10,
+) -> list[dict]:
+    """Requisitions open beyond SLA threshold."""
+    now = datetime.utcnow()
+
+    requisitions = (
+        db.query(Requisition.req_id, Requisition.created_at)
+        .filter(
+            Requisition.raised_by == manager_id,
+            Requisition.overall_status.notin_(["Closed", "Rejected"]),
+        )
+        .all()
+    )
+
+    risks = []
+    for req_id, created_at in requisitions:
+        if not created_at:
+            continue
+        days_open = (now - created_at).days
+        if days_open >= sla_days:
+            risks.append({
+                "requisition_id": str(req_id),
+                "days_open": int(days_open),
+            })
+
+    risks.sort(key=lambda item: item["days_open"], reverse=True)
+    return risks[:limit]
+
+
+def get_manager_avg_fulfillment_days(db: Session, manager_id: int) -> float:
+    """Average days to close requisitions for a manager."""
+    closed_subquery = (
+        db.query(
+            RequisitionStatusHistory.req_id,
+            func.min(RequisitionStatusHistory.changed_at).label("closed_at"),
+        )
+        .filter(RequisitionStatusHistory.new_status == "Closed")
+        .group_by(RequisitionStatusHistory.req_id)
+        .subquery()
+    )
+
+    rows = (
+        db.query(Requisition.created_at, closed_subquery.c.closed_at)
+        .join(closed_subquery, Requisition.req_id == closed_subquery.c.req_id)
+        .filter(Requisition.raised_by == manager_id)
+        .all()
+    )
+
+    durations = []
+    for created_at, closed_at in rows:
+        if created_at and closed_at:
+            durations.append((closed_at - created_at).days)
+
+    if not durations:
+        return 0.0
+
+    return round(sum(durations) / len(durations), 2)
+
+
+# ============================================
 # Endpoints
 # ============================================
 
@@ -292,4 +453,47 @@ def get_hr_metrics_summary(
         bench_employees=get_bench_employee_count(db),
         pending_hr_approvals=get_pending_hr_approval_count(db),
         upcoming_probation_count=get_upcoming_probation_count(db),
+    )
+
+
+@router.get("/manager-metrics", response_model=ManagerMetricsResponse)
+def get_manager_metrics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager"))
+):
+    """
+    Get manager dashboard metrics scoped to the current manager.
+    """
+    status_counts = get_manager_status_counts(db, current_user.user_id)
+
+    total_requisitions = sum(status_counts.values())
+    open_count = sum(status_counts.get(status, 0) for status in OPEN_STATUSES)
+    in_progress_count = sum(
+        status_counts.get(status, 0) for status in IN_PROGRESS_STATUSES
+    )
+    closed_count = sum(status_counts.get(status, 0) for status in CLOSED_STATUSES)
+
+    pending_positions = get_manager_pending_positions_count(
+        db, current_user.user_id
+    )
+    avg_fulfillment_days = get_manager_avg_fulfillment_days(
+        db, current_user.user_id
+    )
+
+    sla_risks = get_manager_sla_risks(
+        db, current_user.user_id, MANAGER_SLA_DAYS
+    )
+    pending_positions_alerts = get_manager_pending_positions_alerts(
+        db, current_user.user_id
+    )
+
+    return ManagerMetricsResponse(
+        total_requisitions=total_requisitions,
+        open=open_count,
+        in_progress=in_progress_count,
+        closed=closed_count,
+        pending_positions=pending_positions,
+        avg_fulfillment_days=avg_fulfillment_days,
+        sla_risks=sla_risks,
+        pending_positions_alerts=pending_positions_alerts,
     )

@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 
 export type ManagerDashboardView =
-  | "dashboard"
+  | "manager-dashboard"
   | "raise-requisition"
   | "my-requisitions"
   | "requisition-audit";
@@ -33,7 +33,7 @@ const ManagerSidebar: React.FC<ManagerSidebarProps> = ({
     icon: React.ReactNode;
   }[] = [
     {
-      id: "dashboard",
+      id: "manager-dashboard",
       label: "Dashboard",
       icon: <LayoutDashboard size={20} />,
     },
