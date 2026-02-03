@@ -96,7 +96,7 @@ export const AppRouter = () => {
         <Route
           path="/hr"
           element={
-            <ProtectedRoute requiredRoles={["hr"]}>
+            <ProtectedRoute requiredRoles={["hr", "admin"]}>
               <HrDashboard />
             </ProtectedRoute>
           }

@@ -15,6 +15,7 @@ import HrReports from "./HrReports";
 import HrAuditLog from "./HrAuditLog";
 import HrRequisitions from "./HrTickets";
 import TicketDetails from "./TicketDetails";
+import HRDashboardView from "./HRDashboardView";
 
 const viewLabels: Record<HrDashboardView, string> = {
   dashboard: "Dashboard",
@@ -30,19 +31,6 @@ const viewLabels: Record<HrDashboardView, string> = {
   "ticket-detail": "Requisition Details",
 };
 
-/**
-  Temporary mock metrics
-  Will be replaced by API response later
- */
-const dashboardMetrics = [
-  { label: "Total Employees", value: 128 },
-  { label: "Onboarding", value: 6 },
-  { label: "Active & Available", value: 82 },
-  { label: "Allocated", value: 31 },
-  { label: "Exited", value: 9 },
-  { label: "Bench Count", value: 14 },
-];
-
 const HrDashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -52,23 +40,17 @@ const HrDashboard: React.FC = () => {
 
   const activeLabel = useMemo(() => viewLabels[activeView], [activeView]);
 
-  const renderDashboard = () => (
-    <>
-      <div className="admin-metrics">
-        {dashboardMetrics.map((metric) => (
-          <div key={metric.label} className="stat-card">
-            <span className="stat-number">{metric.value}</span>
-            <span className="stat-label">{metric.label}</span>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-
   const renderContent = () => {
     switch (activeView) {
       case "dashboard":
-        return renderDashboard();
+        return (
+          <HRDashboardView
+            onViewRequisition={(reqId: number) => {
+              setSelectedTicketId(reqId.toString());
+              setActiveView("ticket-detail");
+            }}
+          />
+        );
       case "employees":
         return <EmployeeList />;
       case "create-employee":
