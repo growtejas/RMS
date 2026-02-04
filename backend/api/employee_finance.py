@@ -50,6 +50,6 @@ def get_finance(
 ):
     record = db.query(EmployeeFinance).filter_by(emp_id=emp_id).first()
     if not record:
-        raise HTTPException(status_code=404, detail="Finance record not found")
+        return EmployeeFinanceResponse(emp_id=emp_id, bank_details=None, tax_id=None)
 
     return record

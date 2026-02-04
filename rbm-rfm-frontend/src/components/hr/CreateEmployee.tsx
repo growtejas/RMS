@@ -1,7 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { apiClient } from "../../api/client";
-import { useAuth } from "../../contexts/AuthContext";
 import "../../styles/hr/create-employee.css";
 import Stepper from "./create-employee/Stepper";
 import StepCoreProfile from "./create-employee/StepCoreProfile";
@@ -103,7 +102,6 @@ const initialFormData: CreateEmployeeForm = {
 };
 
 const CreateEmployee: React.FC = () => {
-  const { user } = useAuth();
   const [formData, setFormData] = useState<CreateEmployeeForm>(initialFormData);
   const [departments, setDepartments] = useState<DepartmentOption[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>([]);
@@ -117,11 +115,13 @@ const CreateEmployee: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [issuedEmpId, setIssuedEmpId] = useState<string>("");
+  const submitInFlight = useRef(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [isConfirmed, setIsConfirmed] = useState(false);
+  const formRef = useRef<HTMLFormElement | null>(null);
 
-  const canViewFinance = (user?.roles ?? []).includes("hr");
-
-  const steps = useMemo(() => {
-    const base = [
+  const steps = useMemo(
+    () => [
       {
         id: "core",
         title: "Core Profile",
@@ -137,22 +137,19 @@ const CreateEmployee: React.FC = () => {
         title: "Deployment",
         description: "Availability",
       },
-    ];
-
-    if (canViewFinance) {
-      base.push({
+      {
         id: "finance",
         title: "Financial",
         description: "Restricted",
-      });
-    }
-
-    return base;
-  }, [canViewFinance]);
+      },
+    ],
+    [],
+  );
 
   const currentStepId = steps[currentStep]?.id as StepId | undefined;
   const progressPercent =
     steps.length === 0 ? 0 : ((currentStep + 1) / steps.length) * 100;
+  const isLastStep = currentStep === steps.length - 1;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -285,6 +282,25 @@ const CreateEmployee: React.FC = () => {
     return () => controller.abort();
   }, []);
 
+  const handleConfirmSubmit = () => {
+    setIsConfirmed(true);
+    setShowConfirmModal(false);
+    setTimeout(() => {
+      formRef.current?.requestSubmit();
+    }, 0);
+  };
+
+  const handleCancelConfirm = () => {
+    setShowConfirmModal(false);
+    setIsConfirmed(false);
+  };
+
+  useEffect(() => {
+    console.log("[CreateEmployee] currentStep changed:", currentStep);
+    console.log("[CreateEmployee] steps.length:", steps.length);
+    console.log("[CreateEmployee] isLastStep:", isLastStep);
+  }, [currentStep, steps.length, isLastStep]);
+
   const updateCoreField = (
     field: keyof CreateEmployeeForm["core"],
     value: string,
@@ -358,6 +374,14 @@ const CreateEmployee: React.FC = () => {
   };
 
   const handleNext = () => {
+    if (isSubmitting) return;
+
+    console.log("[CreateEmployee] handleNext BEFORE", {
+      currentStep,
+      stepsLength: steps.length,
+      isLastStep,
+    });
+
     if (!currentStepId) return;
     const validation = validateStep(currentStepId);
     if (!validation.isValid) {
@@ -366,7 +390,15 @@ const CreateEmployee: React.FC = () => {
       return;
     }
     setErrors({});
-    setCurrentStep((prev) => Math.min(prev + 1, steps.length - 1));
+    setCurrentStep((prev) => {
+      const next = Math.min(prev + 1, steps.length - 1);
+      console.log("[CreateEmployee] handleNext AFTER", {
+        prev,
+        next,
+        stepsLength: steps.length,
+      });
+      return next;
+    });
   };
 
   const handlePrevious = () => {
@@ -381,10 +413,45 @@ const CreateEmployee: React.FC = () => {
     }
   };
 
+  const handleFormKeyDown = (event: React.KeyboardEvent<HTMLFormElement>) => {
+    if (event.key === "Enter") {
+      console.log("[CreateEmployee] Enter key pressed", {
+        currentStep,
+        stepsLength: steps.length,
+        isLastStep,
+      });
+    }
+    if (event.key === "Enter" && !isLastStep) {
+      event.preventDefault();
+      handleNext();
+    }
+  };
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    console.log("[CreateEmployee] handleSubmit called", {
+      currentStep,
+      stepsLength: steps.length,
+      isLastStep,
+    });
+    if (submitInFlight.current || isSubmitting) {
+      return;
+    }
     setError(null);
     setSuccess(null);
+
+    if (!isLastStep) {
+      console.warn("[CreateEmployee] Blocked submit before final step", {
+        currentStep,
+        stepsLength: steps.length,
+      });
+      return;
+    }
+
+    if (!isConfirmed) {
+      setShowConfirmModal(true);
+      return;
+    }
 
     const validations = steps.map((step) => ({
       id: step.id as StepId,
@@ -412,6 +479,7 @@ const CreateEmployee: React.FC = () => {
     }
 
     try {
+      submitInFlight.current = true;
       setIsSubmitting(true);
       const payload = {
         emp_id: formData.core.empId,
@@ -447,8 +515,7 @@ const CreateEmployee: React.FC = () => {
           effective_from: formData.deployment.effectiveFrom,
         },
         finance:
-          canViewFinance &&
-          (formData.finance.bankDetails || formData.finance.taxId)
+          formData.finance.bankDetails || formData.finance.taxId
             ? {
                 bank_details: formData.finance.bankDetails,
                 tax_id: formData.finance.taxId,
@@ -499,7 +566,9 @@ const CreateEmployee: React.FC = () => {
           : "Failed to onboard employee. Please try again.";
       setError(message);
     } finally {
+      submitInFlight.current = false;
       setIsSubmitting(false);
+      setIsConfirmed(false);
     }
   };
 
@@ -535,7 +604,12 @@ const CreateEmployee: React.FC = () => {
         onStepChange={handleStepChange}
       />
 
-      <form className="employee-form-container" onSubmit={handleSubmit}>
+      <form
+        ref={formRef}
+        className="employee-form-container"
+        onSubmit={handleSubmit}
+        onKeyDown={handleFormKeyDown}
+      >
         <div
           className={`form-section ${currentStepId === "core" ? "active" : ""}`}
         >
@@ -602,24 +676,22 @@ const CreateEmployee: React.FC = () => {
           />
         </div>
 
-        {canViewFinance && (
-          <div
-            className={`form-section ${currentStepId === "finance" ? "active" : ""}`}
-          >
-            <div className="section-header">
-              <h2>
-                <span className="section-icon">4</span> Financial
-              </h2>
-              <p className="section-subtitle">Restricted financial data.</p>
-            </div>
-            <StepFinance
-              formData={formData}
-              errors={errors}
-              onChange={updateFinanceField}
-              isDisabled={isSubmitting}
-            />
+        <div
+          className={`form-section ${currentStepId === "finance" ? "active" : ""}`}
+        >
+          <div className="section-header">
+            <h2>
+              <span className="section-icon">4</span> Financial
+            </h2>
+            <p className="section-subtitle">Restricted financial data.</p>
           </div>
-        )}
+          <StepFinance
+            formData={formData}
+            errors={errors}
+            onChange={updateFinanceField}
+            isDisabled={isSubmitting}
+          />
+        </div>
 
         <div className="form-actions">
           <div className="stepper-buttons">
@@ -663,6 +735,71 @@ const CreateEmployee: React.FC = () => {
           </div>
         </div>
       </form>
+
+      {showConfirmModal && (
+        <div
+          className="confirm-modal-overlay"
+          role="presentation"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-create-title"
+            className="confirm-modal"
+            style={{
+              background: "var(--bg-primary)",
+              borderRadius: "16px",
+              padding: "24px",
+              width: "min(420px, 90vw)",
+              boxShadow: "0 24px 60px rgba(15, 23, 42, 0.25)",
+              border: "1px solid var(--border-subtle)",
+            }}
+          >
+            <h3
+              id="confirm-create-title"
+              style={{ margin: "0 0 8px", fontSize: "18px" }}
+            >
+              Confirm employee creation
+            </h3>
+            <p style={{ margin: "0 0 20px", color: "var(--text-secondary)" }}>
+              Are you sure you want to create this employee?
+            </p>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "12px",
+              }}
+            >
+              <button
+                type="button"
+                className="action-button"
+                onClick={handleCancelConfirm}
+                disabled={isSubmitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="action-button primary"
+                onClick={handleConfirmSubmit}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "Submitting..." : "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
