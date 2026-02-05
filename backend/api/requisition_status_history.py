@@ -23,6 +23,14 @@ def create_requisition_status_history(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("Manager", "Admin", "HR"))
 ):
+    # PHASE 1 SAFETY: Manual status history creation is disabled
+    # Status history is recorded internally by workflow operations
+    raise HTTPException(
+        status_code=403,
+        detail="Manual status history creation is disabled. History is recorded automatically by workflow operations."
+    )
+
+    # --- DISABLED CODE BELOW (kept for reference) ---
     requisition = db.query(Requisition).filter(
         Requisition.req_id == req_id
     ).first()

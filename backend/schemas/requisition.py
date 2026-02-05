@@ -90,6 +90,12 @@ class RequisitionResponse(BaseModel):
     assigned_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     items: List[RequisitionItemResponse] = Field(default_factory=list)
+    total_items: Optional[int] = None
+    fulfilled_items: Optional[int] = None
+    cancelled_items: Optional[int] = None
+    active_items: Optional[int] = None
+    progress_ratio: Optional[float] = None
+    progress_text: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -55,6 +55,9 @@ from api.admin_overview import router as admin_overview_router
 # ---- Authentication ----
 from api.auth import router as auth_router
 
+# ---- Uploads ----
+from api.uploads import router as uploads_router
+
 
 # ---- Include routers (EACH EXACTLY ONCE) ----
 app.include_router(users_router, prefix="/api")
@@ -80,4 +83,5 @@ app.include_router(hr_router, prefix="/api")
 app.include_router(dashboard_router, prefix="/api")
 app.include_router(admin_overview_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
+app.include_router(uploads_router, prefix="/api")
 

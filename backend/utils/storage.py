@@ -120,3 +120,11 @@ def get_storage_service() -> StorageService:
     if storage_type == "s3":
         return S3StorageService()
     return LocalStorageService()
+
+
+def get_jd_storage_service() -> StorageService:
+    storage_type = os.getenv("STORAGE_TYPE", "local").lower()
+    if storage_type == "s3":
+        return S3StorageService()
+    base_dir = os.getenv("JD_UPLOAD_DIR", "uploads/jd")
+    return LocalStorageService(base_dir=base_dir)

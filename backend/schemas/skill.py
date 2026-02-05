@@ -11,6 +11,10 @@ class SkillUpdate(BaseModel):
     skill_name: str
 
 
+class SkillInstantCreate(BaseModel):
+    name: str
+
+
 class SkillResponse(BaseModel):
     skill_id: int
     skill_name: str

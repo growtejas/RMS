@@ -28,25 +28,25 @@ class Requisition(Base):
     # --------------------
     raised_by = Column(
         Integer,
-        ForeignKey("users.user_id"),
+        ForeignKey("users.user_id", ondelete="RESTRICT"),
         nullable=False
     )
 
     assigned_ta = Column(
         Integer,
-        ForeignKey("users.user_id"),
+        ForeignKey("users.user_id", ondelete="RESTRICT"),
         nullable=True
     )
 
     budget_approved_by = Column(
         Integer,
-        ForeignKey("users.user_id"),
+        ForeignKey("users.user_id", ondelete="RESTRICT"),
         nullable=True
     )
 
     approved_by = Column(
         Integer,
-        ForeignKey("users.user_id"),
+        ForeignKey("users.user_id", ondelete="RESTRICT"),
         nullable=True
     )
 
@@ -82,7 +82,8 @@ class Requisition(Base):
     overall_status = Column(
         String(30),
         nullable=False,
-        default="Pending Budget Approval"
+        default="Pending Budget Approval",
+        index=True
     )
     approval_history = Column(TIMESTAMP, nullable=True)
     assigned_at = Column(TIMESTAMP, nullable=True)

@@ -3,6 +3,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
 from typing import Optional, List
@@ -11,13 +12,10 @@ from db.session import get_db
 from db.models.auth import User
 from utils.dependencies import (
     require_any_role,
-    validate_status_transition,
     get_current_user_roles,
 )
 from db.models.requisition import Requisition
 from db.models.requisition_item import RequisitionItem
-from db.models.requisition_status_history import RequisitionStatusHistory
-from db.models.audit_log import AuditLog
 from schemas.requisition import (
     RequisitionManagerUpdate,
     RequisitionUpdate,
@@ -30,30 +28,19 @@ from schemas.requisition_item import RequisitionItemCreate
 from schemas.requisition_item import RequisitionItemResponse
 from utils.storage import get_storage_service, StorageService
 
+# Workflow engine imports
+from services.requisition import (
+    RequisitionWorkflowEngine,
+    RequisitionEvents,
+    RequisitionPermissions,
+)
+from services.requisition.workflow_engine import WorkflowError
+from services.notification_service import send as notify
+
 router = APIRouter(
     prefix="/requisitions",
     tags=["Requisitions"]
 )
-
-
-def _record_status_history(
-    db: Session,
-    req_id: int,
-    old_status: str | None,
-    new_status: str | None,
-    changed_by: int | None,
-    justification: str | None = None,
-) -> None:
-    if not new_status or new_status == old_status:
-        return
-    history = RequisitionStatusHistory(
-        req_id=req_id,
-        old_status=old_status,
-        new_status=new_status,
-        changed_by=changed_by,
-        justification=justification,
-    )
-    db.add(history)
 
 
 @router.post("/", response_model=RequisitionResponse)
@@ -219,6 +206,32 @@ def get_requisition(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
+    items = (
+        db.query(RequisitionItem)
+        .filter(RequisitionItem.req_id == req_id)
+        .all()
+    )
+
+    total_items = len(items)
+    fulfilled_items = sum(1 for item in items if item.item_status == "Fulfilled")
+    cancelled_items = sum(1 for item in items if item.item_status == "Cancelled")
+    active_items = total_items - cancelled_items
+
+    if active_items > 0:
+        progress_ratio = fulfilled_items / active_items
+        progress_text = f"{fulfilled_items}/{active_items}"
+    else:
+        progress_ratio = 1.0
+        progress_text = "0/0"
+
+    requisition.items = items
+    requisition.total_items = total_items
+    requisition.fulfilled_items = fulfilled_items
+    requisition.cancelled_items = cancelled_items
+    requisition.active_items = active_items
+    requisition.progress_ratio = progress_ratio
+    requisition.progress_text = progress_text
+
     return requisition
 
 
@@ -236,15 +249,11 @@ def update_requisition_manager(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    if requisition.raised_by != current_user.user_id:
+    # Use permissions module for ownership and status checks
+    if not RequisitionPermissions.is_owner(requisition, current_user.user_id):
         raise HTTPException(status_code=403, detail="Not allowed to edit")
 
-    allowed_statuses = {
-        "Draft",
-        "Pending Budget Approval",
-        "Pending HR Approval",
-    }
-    if requisition.overall_status not in allowed_statuses:
+    if requisition.overall_status not in RequisitionPermissions.EDITABLE_STATUSES:
         raise HTTPException(status_code=403, detail="Requisition is locked")
 
     updates = payload.dict(exclude_unset=True)
@@ -273,20 +282,15 @@ def update_requisition_manager(
             )
             db.add(db_item)
 
+    # Use events module for audit logging
     if "budget_amount" in updates and updates.get("budget_amount") != old_budget:
-        audit = AuditLog(
-            entity_name="requisition",
-            entity_id=str(requisition.req_id),
-            action="BUDGET_UPDATE",
+        RequisitionEvents.log_budget_update(
+            db=db,
+            req_id=requisition.req_id,
+            old_budget=float(old_budget) if old_budget else None,
+            new_budget=float(updates.get("budget_amount")) if updates.get("budget_amount") else None,
             performed_by=current_user.user_id,
-            old_value=json.dumps({
-                "budget_amount": str(old_budget) if old_budget is not None else None
-            }),
-            new_value=json.dumps({
-                "budget_amount": str(updates.get("budget_amount")) if updates.get("budget_amount") is not None else None
-            }),
         )
-        db.add(audit)
 
     db.commit()
     return {"message": "Requisition updated"}
@@ -335,16 +339,10 @@ async def upload_requisition_jd(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    if requisition.raised_by != current_user.user_id:
-        raise HTTPException(status_code=403, detail="Not allowed to edit")
-
-    allowed_statuses = {
-        "Draft",
-        "Pending Budget Approval",
-        "Pending HR Approval",
-        "Budget Rejected",
-    }
-    if requisition.overall_status not in allowed_statuses:
+    # Use permissions module for checks
+    if not RequisitionPermissions.can_edit_jd(requisition, current_user.user_id):
+        if not RequisitionPermissions.is_owner(requisition, current_user.user_id):
+            raise HTTPException(status_code=403, detail="Not allowed to edit")
         raise HTTPException(status_code=403, detail="Requisition is locked")
 
     if jd_file.content_type != "application/pdf":
@@ -382,16 +380,10 @@ def delete_requisition_jd(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    if requisition.raised_by != current_user.user_id:
-        raise HTTPException(status_code=403, detail="Not allowed to edit")
-
-    allowed_statuses = {
-        "Draft",
-        "Pending Budget Approval",
-        "Pending HR Approval",
-        "Budget Rejected",
-    }
-    if requisition.overall_status not in allowed_statuses:
+    # Use permissions module for checks
+    if not RequisitionPermissions.can_edit_jd(requisition, current_user.user_id):
+        if not RequisitionPermissions.is_owner(requisition, current_user.user_id):
+            raise HTTPException(status_code=403, detail="Not allowed to edit")
         raise HTTPException(status_code=403, detail="Requisition is locked")
 
     if not requisition.jd_file_key:
@@ -419,48 +411,30 @@ def update_requisition(
         raise HTTPException(status_code=404, detail="Requisition not found")
 
     updates = payload.dict(exclude_unset=True)
+
+    # PHASE 1 SAFETY: Block workflow fields from being modified via generic update
+    blocked_fields = {"overall_status", "approved_by", "budget_approved_by", "assigned_ta"}
+    attempted_blocked = blocked_fields & set(updates.keys())
+    if attempted_blocked:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot modify workflow fields via this endpoint: {', '.join(attempted_blocked)}"
+        )
+
     old_budget = requisition.budget_amount
-
-    if "overall_status" in updates and updates["overall_status"] not in (
-        "Pending Budget Approval",
-        "Pending HR Approval",
-        "Approved & Unassigned",
-        "Active",
-        "Fulfilled",
-        "Closed",
-        "Closed (Partially Fulfilled)",
-        "Rejected",
-    ):
-        raise HTTPException(status_code=400, detail="Invalid status")
-
-    old_status = requisition.overall_status
 
     for field, value in updates.items():
         setattr(requisition, field, value)
 
-    if "overall_status" in updates:
-        _record_status_history(
-            db,
-            requisition.req_id,
-            old_status,
-            updates.get("overall_status"),
-            current_user.user_id,
-        )
-
+    # Use events module for audit logging
     if "budget_amount" in updates and updates.get("budget_amount") != old_budget:
-        audit = AuditLog(
-            entity_name="requisition",
-            entity_id=str(requisition.req_id),
-            action="BUDGET_UPDATE",
+        RequisitionEvents.log_budget_update(
+            db=db,
+            req_id=requisition.req_id,
+            old_budget=float(old_budget) if old_budget else None,
+            new_budget=float(updates.get("budget_amount")) if updates.get("budget_amount") else None,
             performed_by=current_user.user_id,
-            old_value=json.dumps({
-                "budget_amount": str(old_budget) if old_budget is not None else None
-            }),
-            new_value=json.dumps({
-                "budget_amount": str(updates.get("budget_amount")) if updates.get("budget_amount") is not None else None
-            }),
         )
-        db.add(audit)
 
     db.commit()
     return {"message": "Requisition updated"}
@@ -472,37 +446,13 @@ def update_requisition_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("Manager", "Admin", "HR"))
 ):
-    if payload.overall_status not in (
-        "Pending Budget Approval",
-        "Pending HR Approval",
-        "Approved & Unassigned",
-        "Active",
-        "Fulfilled",
-        "Closed",
-        "Closed (Partially Fulfilled)",
-        "Rejected",
-    ):
-        raise HTTPException(status_code=400, detail="Invalid status")
-
-    requisition = db.query(Requisition).filter(
-        Requisition.req_id == req_id
-    ).first()
-
-    if not requisition:
-        raise HTTPException(status_code=404, detail="Requisition not found")
-
-    old_status = requisition.overall_status
-    requisition.overall_status = payload.overall_status
-    _record_status_history(
-        db,
-        requisition.req_id,
-        old_status,
-        payload.overall_status,
-        current_user.user_id,
+    # PHASE 1 SAFETY: Direct status override is disabled
+    # Use dedicated workflow endpoints instead (approve_budget, approve_requisition, assign_ta, etc.)
+    raise HTTPException(
+        status_code=403,
+        detail="Direct status modification is disabled. Use workflow endpoints."
     )
-    db.commit()
 
-    return {"message": "Status updated"}
 
 @router.patch("/{req_id}/approve-budget")
 def approve_budget(
@@ -510,6 +460,7 @@ def approve_budget(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("Admin", "HR"))
 ):
+    """Approve budget for a requisition. Transitions to Pending HR Approval."""
     requisition = db.query(Requisition).filter(
         Requisition.req_id == req_id
     ).first()
@@ -517,20 +468,21 @@ def approve_budget(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    validate_status_transition(requisition.overall_status, "Pending HR Approval")
-    old_status = requisition.overall_status
-    requisition.budget_approved_by = current_user.user_id
-    requisition.overall_status = "Pending HR Approval"
-    _record_status_history(
-        db,
-        requisition.req_id,
-        old_status,
-        requisition.overall_status,
-        current_user.user_id,
-    )
-    db.commit()
-
-    return {"message": "Budget approved"}
+    try:
+        RequisitionWorkflowEngine.approve_budget(
+            db=db,
+            requisition=requisition,
+            user_id=current_user.user_id,
+        )
+        db.commit()
+        notify(
+            requisition.raised_by,
+            f"HEADER_APPROVED: Requisition {req_id} budget approved",
+        )
+        return {"message": "Budget approved"}
+    except WorkflowError as e:
+        db.rollback()
+        raise HTTPException(status_code=e.status_code, detail=e.message)
 
 
 @router.put("/{req_id}/approve")
@@ -539,6 +491,7 @@ def approve_requisition(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("HR"))
 ):
+    """HR approval of a requisition. Transitions to Approved & Unassigned."""
     requisition = (
         db.query(Requisition)
         .filter(Requisition.req_id == req_id)
@@ -549,28 +502,21 @@ def approve_requisition(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    if requisition.overall_status != "Pending HR Approval":
-        raise HTTPException(
-            status_code=400,
-            detail="Requisition is not pending HR approval",
+    try:
+        RequisitionWorkflowEngine.approve_hr(
+            db=db,
+            requisition=requisition,
+            user_id=current_user.user_id,
         )
-
-    validate_status_transition(requisition.overall_status, "Approved & Unassigned")
-    old_status = requisition.overall_status
-    requisition.approved_by = current_user.user_id
-    requisition.approval_history = datetime.utcnow()
-    requisition.overall_status = "Approved & Unassigned"
-
-    _record_status_history(
-        db,
-        requisition.req_id,
-        old_status,
-        requisition.overall_status,
-        current_user.user_id,
-    )
-
-    db.commit()
-    return {"message": "Requisition approved"}
+        db.commit()
+        notify(
+            requisition.raised_by,
+            f"HEADER_APPROVED: Requisition {req_id} approved",
+        )
+        return {"message": "Requisition approved"}
+    except WorkflowError as e:
+        db.rollback()
+        raise HTTPException(status_code=e.status_code, detail=e.message)
 
 
 @router.patch("/{req_id}/approve-release")
@@ -579,6 +525,7 @@ def approve_and_release(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("Admin", "HR"))
 ):
+    """Combined approval (budget + HR). Transitions to Approved & Unassigned."""
     requisition = db.query(Requisition).filter(
         Requisition.req_id == req_id
     ).first()
@@ -586,21 +533,20 @@ def approve_and_release(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    validate_status_transition(requisition.overall_status, "Approved & Unassigned")
-    old_status = requisition.overall_status
-    requisition.approved_by = current_user.user_id
-    requisition.approval_history = datetime.utcnow()
-    requisition.overall_status = "Approved & Unassigned"
-    _record_status_history(
-        db,
-        requisition.req_id,
-        old_status,
-        requisition.overall_status,
-        current_user.user_id,
-    )
-    db.commit()
-
-    return {"message": "Requisition approved and released"}
+    try:
+        # This endpoint allows approval from either Pending Budget or Pending HR status
+        if requisition.overall_status == "Pending Budget Approval":
+            RequisitionWorkflowEngine.approve_budget(db, requisition, current_user.user_id)
+        RequisitionWorkflowEngine.approve_hr(db, requisition, current_user.user_id)
+        db.commit()
+        notify(
+            requisition.raised_by,
+            f"HEADER_APPROVED: Requisition {req_id} approved and released",
+        )
+        return {"message": "Requisition approved and released"}
+    except WorkflowError as e:
+        db.rollback()
+        raise HTTPException(status_code=e.status_code, detail=e.message)
 
 
 @router.patch("/{req_id}/assign-ta")
@@ -610,6 +556,7 @@ def assign_ta(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("Admin", "HR"))
 ):
+    """Assign a TA to a requisition. Transitions to Active."""
     requisition = (
         db.query(Requisition)
         .filter(Requisition.req_id == req_id)
@@ -620,44 +567,22 @@ def assign_ta(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    if requisition.assigned_ta is not None:
-        raise HTTPException(status_code=409, detail="Requisition already assigned")
-
-    if requisition.overall_status != "Approved & Unassigned":
-        raise HTTPException(
-            status_code=400,
-            detail="Requisition is not ready for TA assignment",
+    try:
+        RequisitionWorkflowEngine.assign_ta(
+            db=db,
+            requisition=requisition,
+            ta_user_id=payload.ta_user_id,
+            performed_by=current_user.user_id,
         )
-
-    validate_status_transition(requisition.overall_status, "Active")
-    old_status = requisition.overall_status
-    requisition.assigned_ta = payload.ta_user_id
-    requisition.assigned_at = datetime.utcnow()
-    requisition.overall_status = "Active"
-
-    _record_status_history(
-        db,
-        requisition.req_id,
-        old_status,
-        requisition.overall_status,
-        current_user.user_id,
-    )
-
-    audit = AuditLog(
-        entity_name="requisition",
-        entity_id=str(requisition.req_id),
-        action="TA_ASSIGN",
-        performed_by=current_user.user_id,
-        old_value=json.dumps({"assigned_ta": None, "overall_status": "Approved & Unassigned"}),
-        new_value=json.dumps({
-            "assigned_ta": payload.ta_user_id,
-            "overall_status": "Active",
-        }),
-    )
-    db.add(audit)
-
-    db.commit()
-    return {"message": "TA assigned", "assigned_ta": payload.ta_user_id}
+        db.commit()
+        notify(
+            payload.ta_user_id,
+            f"ITEM_ASSIGNED_TA: Requisition {req_id} assigned to you",
+        )
+        return {"message": "TA assigned", "assigned_ta": payload.ta_user_id}
+    except WorkflowError as e:
+        db.rollback()
+        raise HTTPException(status_code=e.status_code, detail=e.message)
 
 
 @router.put("/{req_id}/reject")
@@ -667,6 +592,7 @@ def reject_requisition(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("HR"))
 ):
+    """Reject a requisition. Requires reason."""
     requisition = (
         db.query(Requisition)
         .filter(Requisition.req_id == req_id)
@@ -677,53 +603,58 @@ def reject_requisition(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    reason = (payload.reason or "").strip()
-    if len(reason) < 10:
-        raise HTTPException(
-            status_code=400,
-            detail="Rejection reason must be at least 10 characters",
+    try:
+        RequisitionWorkflowEngine.reject(
+            db=db,
+            requisition=requisition,
+            user_id=current_user.user_id,
+            reason=payload.reason,
         )
-
-    if requisition.overall_status == "Rejected":
-        raise HTTPException(status_code=409, detail="Requisition already rejected")
-
-    if requisition.overall_status != "Pending HR Approval":
-        raise HTTPException(
-            status_code=400,
-            detail="Requisition is not pending HR approval",
+        db.commit()
+        notify(
+            requisition.raised_by,
+            f"HEADER_REJECTED: Requisition {req_id} rejected",
         )
+        return {"message": "Requisition rejected"}
+    except WorkflowError as e:
+        db.rollback()
+        raise HTTPException(status_code=e.status_code, detail=e.message)
 
-    old_status = requisition.overall_status
-    requisition.overall_status = "Rejected"
-    requisition.rejection_reason = reason
 
-    _record_status_history(
-        db,
-        requisition.req_id,
-        old_status,
-        requisition.overall_status,
-        current_user.user_id,
-        justification=reason,
-    )
-
-    db.commit()
-    return {"message": "Requisition rejected"}
+class RequisitionCancel(BaseModel):
+    """Request body for cancellation - requires reason."""
+    reason: str
 
 
 @router.post("/{req_id}/cancel")
 def cancel_requisition(
     req_id: int,
+    payload: RequisitionCancel,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("Manager", "Admin", "HR"))
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR")),
+    roles: List[str] = Depends(get_current_user_roles),
 ):
-    requisition = db.query(Requisition).filter(
-        Requisition.req_id == req_id
-    ).first()
+    """Cancel a requisition. Requires reason and ownership/HR permission."""
+    requisition = (
+        db.query(Requisition)
+        .filter(Requisition.req_id == req_id)
+        .with_for_update()
+        .first()
+    )
 
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    requisition.overall_status = "Closed"
-    db.commit()
-
-    return {"message": "Requisition cancelled"}
+    try:
+        RequisitionWorkflowEngine.cancel(
+            db=db,
+            requisition=requisition,
+            user_id=current_user.user_id,
+            user_roles=roles,
+            reason=payload.reason,
+        )
+        db.commit()
+        return {"message": "Requisition cancelled", "reason": payload.reason}
+    except WorkflowError as e:
+        db.rollback()
+        raise HTTPException(status_code=e.status_code, detail=e.message)

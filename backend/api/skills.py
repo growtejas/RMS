@@ -6,7 +6,7 @@ from db.models.auth import User
 from utils.dependencies import require_any_role
 from db.models.skill import Skill
 from db.models.audit_log import AuditLog
-from schemas.skill import SkillCreate, SkillResponse, SkillUpdate
+from schemas.skill import SkillCreate, SkillInstantCreate, SkillResponse, SkillUpdate
 
 router = APIRouter(prefix="/skills", tags=["Skills"])
 
@@ -33,6 +33,35 @@ def create_skill(
     )
     db.add(audit)
     db.commit()
+
+    return skill
+
+
+@router.post("/instant-add", response_model=SkillResponse)
+def instant_add_skill(
+    payload: SkillInstantCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee"))
+):
+    name = (payload.name or "").strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Skill name must be at least 2 characters")
+
+    normalized_name = name.lower()
+
+    existing = db.query(Skill).filter(Skill.normalized_name == normalized_name).first()
+    if existing:
+        return existing
+
+    skill = Skill(
+        skill_name=name,
+        normalized_name=normalized_name,
+        is_verified=False,
+        created_by=current_user.user_id,
+    )
+    db.add(skill)
+    db.commit()
+    db.refresh(skill)
 
     return skill
 @router.get("/", response_model=list[SkillResponse])

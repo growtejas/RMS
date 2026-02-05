@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    Boolean,
     Column,
     Integer,
     String,
@@ -23,8 +24,9 @@ class RequisitionItem(Base):
     # --------------------
     req_id = Column(
         Integer,
-        ForeignKey("requisitions.req_id", ondelete="CASCADE"),
-        nullable=False
+        ForeignKey("requisitions.req_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True
     )
 
     # --------------------
@@ -49,8 +51,28 @@ class RequisitionItem(Base):
     # --------------------
     assigned_emp_id = Column(
         String(20),
-        ForeignKey("employees.emp_id"),
+        ForeignKey("employees.emp_id", ondelete="RESTRICT"),
         nullable=True
+    )
+
+    replacement_hire = Column(
+        Boolean,
+        nullable=False,
+        default=False
+    )
+
+    replaced_emp_id = Column(
+        String(20),
+        ForeignKey("employees.emp_id", ondelete="RESTRICT"),
+        nullable=True
+    )
+
+    # Item-level TA assignment (Issue 5 fix)
+    assigned_ta_id = Column(
+        Integer,
+        ForeignKey("users.user_id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True
     )
 
     # --------------------
@@ -65,7 +87,8 @@ class RequisitionItem(Base):
     item_status = Column(
         String(20),
         nullable=False,
-        default="Pending"
+        default="Pending",
+        index=True
     )
 
     # --------------------

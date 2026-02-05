@@ -9,6 +9,8 @@ class RequisitionItemCreate(BaseModel):
     experience_years: Optional[Annotated[int, Field(ge=0)]] = None
     education_requirement: Optional[Annotated[str, Field(max_length=100)]] = None
     requirements: Optional[str] = None
+    replacement_hire: bool = False
+    replaced_emp_id: Optional[str] = None
 
 
 class RequisitionItemResponse(BaseModel):
@@ -21,6 +23,8 @@ class RequisitionItemResponse(BaseModel):
     job_description: str
     requirements: Optional[str] = None
     item_status: str
+    replacement_hire: bool = False
+    replaced_emp_id: Optional[str] = None
 
     class Config:
         from_attributes = True
