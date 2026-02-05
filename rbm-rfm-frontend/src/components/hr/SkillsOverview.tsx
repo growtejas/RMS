@@ -1,7 +1,9 @@
 // components/hr/SkillsOverview.tsx
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { apiClient } from "../../api/client";
 
 interface SkillCapability {
+  skillId: number;
   skillName: string;
   totalEmployees: number;
   proficiency: {
@@ -11,30 +13,69 @@ interface SkillCapability {
   };
 }
 
-const skillsData: SkillCapability[] = [
-  {
-    skillName: "React",
-    totalEmployees: 18,
-    proficiency: { junior: 6, mid: 8, senior: 4 },
-  },
-  {
-    skillName: "TypeScript",
-    totalEmployees: 14,
-    proficiency: { junior: 4, mid: 6, senior: 4 },
-  },
-  {
-    skillName: "Node.js",
-    totalEmployees: 11,
-    proficiency: { junior: 3, mid: 5, senior: 3 },
-  },
-  {
-    skillName: "QA Automation",
-    totalEmployees: 9,
-    proficiency: { junior: 2, mid: 5, senior: 2 },
-  },
-];
-
 const SkillsOverview: React.FC = () => {
+  const [skillsData, setSkillsData] = useState<SkillCapability[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const controller = new AbortController();
+
+    const fetchSkills = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const response = await apiClient.get<
+          {
+            skill_id: number;
+            skill_name: string;
+            total_employees: number;
+            proficiency: {
+              junior: number;
+              mid: number;
+              senior: number;
+            };
+          }[]
+        >("/hr/skills-summary", { signal: controller.signal });
+
+        if (!isMounted) return;
+        const rows = response.data ?? [];
+        setSkillsData(
+          rows.map((row) => ({
+            skillId: row.skill_id,
+            skillName: row.skill_name,
+            totalEmployees: row.total_employees,
+            proficiency: row.proficiency,
+          })),
+        );
+      } catch (err) {
+        if (!isMounted) return;
+        const message =
+          err instanceof Error ? err.message : "Failed to load skills";
+        setError(message);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    fetchSkills();
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
+  }, []);
+
+  const filteredSkills = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return skillsData;
+    return skillsData.filter((skill) =>
+      skill.skillName.toLowerCase().includes(query),
+    );
+  }, [skillsData, searchQuery]);
+
   return (
     <>
       {/* Page Header
@@ -52,6 +93,8 @@ const SkillsOverview: React.FC = () => {
             <input
               type="text"
               placeholder="Search skill (e.g. React, Java, QA)..."
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
             />
           </div>
         </div>
@@ -71,7 +114,7 @@ const SkillsOverview: React.FC = () => {
           </thead>
 
           <tbody>
-            {skillsData.map((skill) => (
+            {filteredSkills.map((skill) => (
               <tr key={skill.skillName}>
                 <td>
                   <strong>{skill.skillName}</strong>
@@ -87,7 +130,7 @@ const SkillsOverview: React.FC = () => {
               </tr>
             ))}
 
-            {skillsData.length === 0 && (
+            {!isLoading && !error && filteredSkills.length === 0 && (
               <tr>
                 <td colSpan={5}>
                   <div className="empty-state">No skills found.</div>
@@ -96,6 +139,21 @@ const SkillsOverview: React.FC = () => {
             )}
           </tbody>
         </table>
+
+        {isLoading && (
+          <div className="empty-state" style={{ paddingTop: "16px" }}>
+            Loading skills…
+          </div>
+        )}
+
+        {!isLoading && error && (
+          <div
+            className="empty-state"
+            style={{ color: "var(--error)", paddingTop: "16px" }}
+          >
+            {error}
+          </div>
+        )}
       </div>
     </>
   );

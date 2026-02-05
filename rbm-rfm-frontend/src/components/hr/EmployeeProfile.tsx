@@ -68,10 +68,16 @@ const EmployeeProfile: React.FC = () => {
 
         const [employeesResponse, departmentsResponse, skillsResponse] =
           await Promise.all([
-            apiClient.get<{ emp_id: string; full_name: string }[]>(
-              "/employees/employees",
-              { signal: controller.signal },
-            ),
+            apiClient.get<
+              {
+                emp_id: string;
+                full_name: string;
+                emp_status?: string | null;
+                department_name?: string | null;
+              }[]
+            >("/employees/employees", {
+              signal: controller.signal,
+            }),
             apiClient.get<Department[]>("/departments/", {
               signal: controller.signal,
             }),
@@ -90,6 +96,8 @@ const EmployeeProfile: React.FC = () => {
           list.map((emp) => ({
             emp_id: emp.emp_id,
             full_name: emp.full_name,
+            emp_status: emp.emp_status ?? null,
+            department_name: emp.department_name ?? null,
           })),
         );
       } catch (err) {

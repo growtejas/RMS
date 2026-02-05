@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from db.session import get_db
@@ -39,7 +40,11 @@ def _record_status_history(
     db.add(history)
 
 
-def _recalculate_requisition_status(db: Session, req_id: int) -> None:
+def recalculate_requisition_status(
+    db: Session,
+    req_id: int,
+    changed_by: int | None = None,
+) -> None:
     requisition = (
         db.query(Requisition)
         .filter(Requisition.req_id == req_id)
@@ -50,34 +55,74 @@ def _recalculate_requisition_status(db: Session, req_id: int) -> None:
     if not requisition:
         return
 
-    total_count = (
-        db.query(RequisitionItem)
+    db.flush()
+
+    open_like_statuses = [
+        "Open",
+        "In Progress",
+        "Pending",
+        "Sourcing",
+        "Shortlisted",
+    ]
+
+    counts = (
+        db.query(
+            func.count(RequisitionItem.item_id).label("total"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (RequisitionItem.item_status == "Fulfilled", 1),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("fulfilled"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (RequisitionItem.item_status == "Cancelled", 1),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("cancelled"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (RequisitionItem.item_status.in_(open_like_statuses), 1),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("open_like"),
+        )
         .filter(RequisitionItem.req_id == req_id)
-        .count()
+        .one()
     )
+
+    total_count = int(counts.total or 0)
     if total_count == 0:
         return
 
-    fulfilled_count = (
-        db.query(RequisitionItem)
-        .filter(
-            RequisitionItem.req_id == req_id,
-            RequisitionItem.item_status == "Fulfilled",
-        )
-        .count()
-    )
+    fulfilled_count = int(counts.fulfilled or 0)
+    cancelled_count = int(counts.cancelled or 0)
+    open_like_count = int(counts.open_like or 0)
 
     old_status = requisition.overall_status
     new_status = old_status
 
-    if fulfilled_count == total_count:
-        new_status = "Fulfilled"
-    elif fulfilled_count > 0 and old_status not in ("Fulfilled", "Closed"):
+    if open_like_count > 0:
         new_status = "Active"
+    elif fulfilled_count == total_count:
+        new_status = "Fulfilled"
+    elif cancelled_count == total_count:
+        new_status = "Closed"
+    elif fulfilled_count + cancelled_count == total_count:
+        new_status = "Closed (Partially Fulfilled)"
 
     if new_status != old_status:
         requisition.overall_status = new_status
-        _record_status_history(db, req_id, old_status, new_status)
+        _record_status_history(db, req_id, old_status, new_status, changed_by)
 
 # --------------------------------------------------
 # CREATE REQUISITION ITEM
@@ -108,6 +153,8 @@ def create_requisition_item(
     )
 
     db.add(item)
+    db.flush()
+    recalculate_requisition_status(db, req_id, current_user.user_id)
     db.commit()
     db.refresh(item)
 
@@ -135,6 +182,7 @@ def assign_employee_to_item(
     item_id: int,
     payload: AssignEmployeeRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "TA")),
 ):
     item = db.query(RequisitionItem).filter(
         RequisitionItem.item_id == item_id
@@ -175,7 +223,7 @@ def assign_employee_to_item(
     item.assigned_emp_id = payload.emp_id
     item.item_status = "Fulfilled"
 
-    _recalculate_requisition_status(db, item.req_id)
+    recalculate_requisition_status(db, item.req_id, current_user.user_id)
 
     db.commit()
     db.refresh(item)
@@ -190,6 +238,7 @@ def update_item_status(
     item_id: int,
     payload: UpdateItemStatusRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "TA")),
 ):
     if payload.status not in (
         "Pending",
@@ -209,7 +258,7 @@ def update_item_status(
 
     item.item_status = payload.status
 
-    _recalculate_requisition_status(db, item.req_id)
+    recalculate_requisition_status(db, item.req_id, current_user.user_id)
 
     db.commit()
     db.refresh(item)

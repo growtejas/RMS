@@ -122,6 +122,7 @@ class Requisition(Base):
                 'Active',
                 'Fulfilled',
                 'Closed',
+                'Closed (Partially Fulfilled)',
                 'Rejected'
             )
             """,

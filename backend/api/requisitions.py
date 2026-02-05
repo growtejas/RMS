@@ -428,6 +428,7 @@ def update_requisition(
         "Active",
         "Fulfilled",
         "Closed",
+        "Closed (Partially Fulfilled)",
         "Rejected",
     ):
         raise HTTPException(status_code=400, detail="Invalid status")
@@ -478,6 +479,7 @@ def update_requisition_status(
         "Active",
         "Fulfilled",
         "Closed",
+        "Closed (Partially Fulfilled)",
         "Rejected",
     ):
         raise HTTPException(status_code=400, detail="Invalid status")

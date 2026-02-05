@@ -225,6 +225,27 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
   };
 
+  const getOverallStatusClass = (status: string) => {
+    switch (status) {
+      case "Pending Budget Approval":
+      case "Pending HR Approval":
+      case "Approved & Unassigned":
+      case "Open":
+        return "ticket-status open";
+      case "Active":
+      case "In Progress":
+        return "ticket-status in-progress";
+      case "Fulfilled":
+        return "ticket-status fulfilled";
+      case "Closed":
+      case "Closed (Partially Fulfilled)":
+      case "Rejected":
+        return "ticket-status closed";
+      default:
+        return "ticket-status";
+    }
+  };
+
   const resolveUserName = (userId?: number | null) => {
     if (!userId) return "System";
     return usersById[userId] ?? `User #${userId}`;
@@ -818,9 +839,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
             >
               {ticket.ticketId}
             </div>
-            <span
-              className={`ticket-status ${ticket.overallStatus.toLowerCase().replace(" ", "-")}`}
-            >
+            <span className={getOverallStatusClass(ticket.overallStatus)}>
               {ticket.overallStatus}
             </span>
             <span

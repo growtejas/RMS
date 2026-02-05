@@ -206,17 +206,20 @@ const getStatusClass = (status: Requisition["overallStatus"]) => {
     case "Pending HR Approval":
       return "ticket-status open";
     case "Approved & Unassigned":
-      return "ticket-status fulfilled";
+      return "ticket-status in-progress";
+    case "Active":
+    case "In Progress":
     case "In-Progress":
       return "ticket-status in-progress";
+    case "Fulfilled":
+      return "ticket-status fulfilled";
     case "Closed":
+    case "Closed (Partially Fulfilled)":
       return "ticket-status closed";
     case "Rejected":
       return "ticket-status rejected";
     case "Open":
       return "ticket-status open";
-    case "In Progress":
-      return "ticket-status in-progress";
     default:
       return "";
   }
@@ -224,8 +227,14 @@ const getStatusClass = (status: Requisition["overallStatus"]) => {
 
 const getItemStatusClass = (status: RequisitionItem["itemStatus"]) => {
   switch (status) {
+    case "Open":
+      return "ticket-status open";
     case "Pending":
       return "ticket-status open";
+    case "Sourcing":
+    case "Shortlisted":
+    case "In Progress":
+      return "ticket-status in-progress";
     case "Fulfilled":
       return "ticket-status fulfilled";
     case "Cancelled":
@@ -258,9 +267,17 @@ const HrKpiCards: React.FC<{ requisitions: Requisition[] }> = ({
   requisitions,
 }) => {
   const stats = {
-    totalOpen: requisitions.filter((r) => r.overallStatus === "Open").length,
-    inProgress: requisitions.filter((r) => r.overallStatus === "In Progress")
-      .length,
+    totalOpen: requisitions.filter((r) =>
+      [
+        "Open",
+        "Pending Budget Approval",
+        "Pending HR Approval",
+        "Approved & Unassigned",
+      ].includes(r.overallStatus),
+    ).length,
+    inProgress: requisitions.filter((r) =>
+      ["In Progress", "In-Progress", "Active"].includes(r.overallStatus),
+    ).length,
     unassigned: requisitions.filter((r) => !r.assignedTAId).length,
     myAssignments: requisitions.filter((r) => r.assignedTAId !== null).length,
     totalPositions: requisitions.reduce(
@@ -917,17 +934,27 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
       ) {
         return false;
       }
-      if (statusFilter !== "All Status" && req.overallStatus !== statusFilter) {
-        return false;
+      if (statusFilter !== "All Status") {
+        if (
+          statusFilter === "Closed" &&
+          req.overallStatus === "Closed (Partially Fulfilled)"
+        ) {
+          // Treat partially fulfilled as closed in filters
+        } else if (req.overallStatus !== statusFilter) {
+          return false;
+        }
       }
-      if (
-        locationFilter !== "All Locations" &&
-        req.location !== locationFilter
-      ) {
-        return false;
+      if (locationFilter !== "All Locations") {
+        const reqLocation = req.location?.toLowerCase() ?? "";
+        if (!reqLocation.includes(locationFilter.toLowerCase())) {
+          return false;
+        }
       }
-      if (modeFilter !== "All Modes" && req.workMode !== modeFilter) {
-        return false;
+      if (modeFilter !== "All Modes") {
+        const reqMode = req.workMode?.toLowerCase() ?? "";
+        if (reqMode !== modeFilter.toLowerCase()) {
+          return false;
+        }
       }
 
       return true;
@@ -1299,8 +1326,15 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
             >
               <option>All Status</option>
               <option>Open</option>
+              <option>Pending Budget Approval</option>
+              <option>Pending HR Approval</option>
+              <option>Approved & Unassigned</option>
+              <option>Active</option>
               <option>In Progress</option>
+              <option>Fulfilled</option>
               <option>Closed</option>
+              <option>Closed (Partially Fulfilled)</option>
+              <option>Rejected</option>
             </select>
           </div>
           <div className="filter-item">
@@ -1310,10 +1344,21 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
               onChange={(e) => setLocationFilter(e.target.value)}
             >
               <option>All Locations</option>
-              <option>Bengaluru</option>
-              <option>Mumbai</option>
-              <option>Delhi</option>
-              <option>Pune</option>
+              {Array.from(
+                new Set(
+                  requisitions
+                    .map((req) => req.location)
+                    .filter((loc): loc is string =>
+                      Boolean(loc && loc !== "—"),
+                    ),
+                ),
+              )
+                .sort((a, b) => a.localeCompare(b))
+                .map((loc) => (
+                  <option key={loc} value={loc}>
+                    {loc}
+                  </option>
+                ))}
             </select>
           </div>
           <div className="filter-item">
@@ -1323,9 +1368,21 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
               onChange={(e) => setModeFilter(e.target.value)}
             >
               <option>All Modes</option>
-              <option>Remote</option>
-              <option>Hybrid</option>
-              <option>WFO</option>
+              {Array.from(
+                new Set(
+                  requisitions
+                    .map((req) => req.workMode)
+                    .filter((mode): mode is string =>
+                      Boolean(mode && mode !== "—"),
+                    ),
+                ),
+              )
+                .sort((a, b) => a.localeCompare(b))
+                .map((mode) => (
+                  <option key={mode} value={mode}>
+                    {mode}
+                  </option>
+                ))}
             </select>
           </div>
         </div>

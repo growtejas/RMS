@@ -3,6 +3,7 @@ from db.models.user_employee_map import UserEmployeeMap
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from db.session import get_db
@@ -10,6 +11,8 @@ from db.models.auth import User
 from utils.dependencies import require_any_role
 
 from db.models.employee import Employee
+from db.models.employee_assignment import EmployeeAssignment
+from db.models.department import Department
 from db.models.employee_skill import EmployeeSkill
 from db.models.employee_contact import EmployeeContact
 from db.models.employee_education import EmployeeEducation
@@ -92,18 +95,38 @@ def list_employees(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee"))
 ):
+    latest_assignment = (
+        db.query(
+            EmployeeAssignment.emp_id.label("emp_id"),
+            func.max(EmployeeAssignment.assignment_id).label("latest_assignment_id"),
+        )
+        .group_by(EmployeeAssignment.emp_id)
+        .subquery()
+    )
+
     results = (
-        db.query(Employee, UserEmployeeMap.user_id)
-        .outerjoin(UserEmployeeMap)
+        db.query(Employee, UserEmployeeMap.user_id, Department.department_name)
+        .outerjoin(UserEmployeeMap, UserEmployeeMap.emp_id == Employee.emp_id)
+        .outerjoin(
+            latest_assignment, latest_assignment.c.emp_id == Employee.emp_id
+        )
+        .outerjoin(
+            EmployeeAssignment,
+            EmployeeAssignment.assignment_id
+            == latest_assignment.c.latest_assignment_id,
+        )
+        .outerjoin(Department, Department.department_id == EmployeeAssignment.department_id)
         .all()
     )
 
     response = []
-    for emp, user_id in results:
+    for emp, user_id, department_name in results:
         response.append({
             "emp_id": emp.emp_id,
             "full_name": emp.full_name,
-            "user_id": user_id
+            "user_id": user_id,
+            "emp_status": emp.emp_status,
+            "department_name": department_name
         })
 
     return response

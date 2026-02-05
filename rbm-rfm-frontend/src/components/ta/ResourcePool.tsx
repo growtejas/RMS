@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { apiClient } from "../../api/client";
 
 /* ======================================================
    Types
@@ -12,43 +13,8 @@ interface Resource {
     level: "Junior" | "Mid" | "Senior";
     experience: number;
   }[];
-  availabilityPct: number;
-  benchDays: number;
+  availabilityPct?: number | null;
 }
-
-/* ======================================================
-   Mock Data (Replace with API later)
-   ====================================================== */
-
-const resources: Resource[] = [
-  {
-    empId: "RBM-021",
-    name: "Neha Kulkarni",
-    skills: [
-      { name: "React", level: "Senior", experience: 5 },
-      { name: "TypeScript", level: "Senior", experience: 4 },
-    ],
-    availabilityPct: 100,
-    benchDays: 18,
-  },
-  {
-    empId: "RBM-034",
-    name: "Amit Deshpande",
-    skills: [
-      { name: "Java", level: "Mid", experience: 3 },
-      { name: "Spring Boot", level: "Mid", experience: 3 },
-    ],
-    availabilityPct: 60,
-    benchDays: 7,
-  },
-  {
-    empId: "RBM-055",
-    name: "Pooja Nair",
-    skills: [{ name: "Python", level: "Senior", experience: 6 }],
-    availabilityPct: 40,
-    benchDays: 0,
-  },
-];
 
 /* ======================================================
    Component
@@ -56,14 +22,115 @@ const resources: Resource[] = [
 
 const ResourcePool: React.FC = () => {
   const [skillFilter, setSkillFilter] = useState("");
+  const [resources, setResources] = useState<Resource[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filteredResources = resources.filter((res) =>
-    skillFilter
-      ? res.skills.some((s) =>
-          s.name.toLowerCase().includes(skillFilter.toLowerCase()),
-        )
-      : true,
-  );
+  useEffect(() => {
+    let isMounted = true;
+    const controller = new AbortController();
+
+    const fetchResources = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+
+        const [employeesRes, skillsRes] = await Promise.all([
+          apiClient.get<{ emp_id: string; full_name: string }[]>(
+            "/employees/employees",
+            { signal: controller.signal },
+          ),
+          apiClient.get<{ skill_id: number; skill_name: string }[]>(
+            "/skills/",
+            { signal: controller.signal },
+          ),
+        ]);
+
+        const skillsById = new Map<number, string>(
+          (skillsRes.data ?? []).map((skill) => [
+            skill.skill_id,
+            skill.skill_name,
+          ]),
+        );
+
+        const employees = employeesRes.data ?? [];
+
+        const resourceList = await Promise.all(
+          employees.map(async (emp) => {
+            const [skillsResp, availabilityResp] = await Promise.all([
+              apiClient.get<
+                {
+                  skill_id: number;
+                  proficiency_level?: "Junior" | "Mid" | "Senior" | null;
+                  years_experience?: number | null;
+                }[]
+              >(`/employees/${emp.emp_id}/skills/`, {
+                signal: controller.signal,
+              }),
+              apiClient
+                .get<
+                  {
+                    availability_pct: number;
+                    effective_from: string;
+                  }[]
+                >(`/employees/${emp.emp_id}/availability`, {
+                  signal: controller.signal,
+                })
+                .catch(() => ({ data: [] })),
+            ]);
+
+            const skills = (skillsResp.data ?? []).map((skill) => ({
+              name:
+                skillsById.get(skill.skill_id) ?? `Skill #${skill.skill_id}`,
+              level: (skill.proficiency_level ?? "Junior") as
+                | "Junior"
+                | "Mid"
+                | "Senior",
+              experience: Number(skill.years_experience ?? 0),
+            }));
+
+            const availabilityHistory = availabilityResp.data ?? [];
+            const latestAvailability = availabilityHistory
+              .slice()
+              .sort((a, b) => a.effective_from.localeCompare(b.effective_from))
+              .slice(-1)[0];
+
+            return {
+              empId: emp.emp_id,
+              name: emp.full_name,
+              skills,
+              availabilityPct: latestAvailability?.availability_pct ?? null,
+            } as Resource;
+          }),
+        );
+
+        if (!isMounted) return;
+        setResources(resourceList);
+      } catch (err) {
+        if (!isMounted) return;
+        const message =
+          err instanceof Error ? err.message : "Failed to load resources";
+        setError(message);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    fetchResources();
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
+  }, []);
+
+  const filteredResources = useMemo(() => {
+    const query = skillFilter.trim().toLowerCase();
+    if (!query) return resources;
+    return resources.filter((res) =>
+      res.skills.some((s) => s.name.toLowerCase().includes(query)),
+    );
+  }, [resources, skillFilter]);
 
   return (
     <>
@@ -98,8 +165,6 @@ const ResourcePool: React.FC = () => {
               <th>Employee</th>
               <th>Skills</th>
               <th>Availability</th>
-              <th>Bench</th>
-              <th>Match</th>
             </tr>
           </thead>
 
@@ -135,48 +200,25 @@ const ResourcePool: React.FC = () => {
                 </td>
 
                 <td>
-                  <span
-                    className={`status-badge ${
-                      res.availabilityPct >= 80 ? "active" : "inactive"
-                    }`}
-                  >
-                    {res.availabilityPct}%
-                  </span>
-                </td>
-
-                <td>
-                  {res.benchDays > 0 ? (
-                    <span className="aging-indicator aging-8-30">
-                      {res.benchDays} days
+                  {res.availabilityPct === null ||
+                  res.availabilityPct === undefined ? (
+                    "—"
+                  ) : (
+                    <span
+                      className={`status-badge ${
+                        res.availabilityPct >= 80 ? "active" : "inactive"
+                      }`}
+                    >
+                      {res.availabilityPct}%
                     </span>
-                  ) : (
-                    <span className="status-badge inactive">Allocated</span>
-                  )}
-                </td>
-
-                <td>
-                  {res.availabilityPct >= 80 ? (
-                    <div className="hr-indicator bench-available">
-                      ✓
-                      <span className="indicator-tooltip">
-                        Good internal match
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="hr-indicator skills-pending">
-                      !
-                      <span className="indicator-tooltip">
-                        Partial availability
-                      </span>
-                    </div>
                   )}
                 </td>
               </tr>
             ))}
 
-            {filteredResources.length === 0 && (
+            {!isLoading && !error && filteredResources.length === 0 && (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={3}>
                   <div className="tickets-empty-state">
                     No matching resources found
                   </div>
@@ -185,6 +227,21 @@ const ResourcePool: React.FC = () => {
             )}
           </tbody>
         </table>
+
+        {isLoading && (
+          <div className="tickets-empty-state" style={{ paddingTop: "16px" }}>
+            Loading resources…
+          </div>
+        )}
+
+        {!isLoading && error && (
+          <div
+            className="tickets-empty-state"
+            style={{ color: "var(--error)", paddingTop: "16px" }}
+          >
+            {error}
+          </div>
+        )}
       </div>
     </>
   );

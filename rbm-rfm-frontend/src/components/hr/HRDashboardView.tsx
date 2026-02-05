@@ -399,12 +399,12 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
                 : undefined
             }
           />
-          <MetricCard
+          {/* <MetricCard
             icon={<Briefcase size={20} />}
             value={metrics.bench_employees}
             label="On Bench"
             colorClass="uptime"
-          />
+          /> */}
           <MetricCard
             icon={<Clock size={20} />}
             value={metrics.upcoming_probation_count}

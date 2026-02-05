@@ -11,7 +11,12 @@ import {
 } from "lucide-react";
 import { apiClient } from "../../api/client";
 
-type MasterDataType = "skill" | "location" | "department" | "technology";
+type MasterDataType =
+  | "skill"
+  | "location"
+  | "department"
+  | "company_role"
+  | "technology";
 
 interface MasterDataItem {
   id: number;
@@ -45,6 +50,14 @@ type LocationResponse = {
   created_at?: string | null;
 };
 
+type CompanyRoleResponse = {
+  role_id: number;
+  role_name: string;
+  role_description?: string | null;
+  is_active: boolean;
+  created_at?: string | null;
+};
+
 type NewItemState = {
   name: string;
   description: string;
@@ -71,11 +84,12 @@ const formatDate = (value?: string | null) => {
 
 const MasterDataManager: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
-    "skills" | "locations" | "departments"
+    "skills" | "locations" | "departments" | "company-roles"
   >("skills");
   const [skills, setSkills] = useState<MasterDataItem[]>([]);
   const [locations, setLocations] = useState<MasterDataItem[]>([]);
   const [departments, setDepartments] = useState<MasterDataItem[]>([]);
+  const [companyRoles, setCompanyRoles] = useState<MasterDataItem[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -166,6 +180,33 @@ const MasterDataManager: React.FC = () => {
     }
   };
 
+  const fetchCompanyRoles = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response =
+        await apiClient.get<CompanyRoleResponse[]>("/company-roles/");
+      const mapped = response.data.map((role) =>
+        normalizeItem({
+          id: role.role_id,
+          name: role.role_name,
+          type: "company_role",
+          description: role.role_description ?? "",
+          createdBy: "System",
+          createdAt: formatDate(role.created_at),
+          isActive: role.is_active ?? true,
+        }),
+      );
+      setCompanyRoles(mapped);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to load company roles";
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === "skills") {
       fetchSkills();
@@ -173,9 +214,12 @@ const MasterDataManager: React.FC = () => {
     } else if (activeTab === "locations") {
       fetchLocations();
       setNewItem((prev) => ({ ...prev, type: "location" }));
-    } else {
+    } else if (activeTab === "departments") {
       fetchDepartments();
       setNewItem((prev) => ({ ...prev, type: "department" }));
+    } else {
+      fetchCompanyRoles();
+      setNewItem((prev) => ({ ...prev, type: "company_role" }));
     }
   }, [activeTab]);
 
@@ -198,6 +242,12 @@ const MasterDataManager: React.FC = () => {
           department_name: newItem.name.trim(),
         });
         await fetchDepartments();
+      } else if (activeTab === "company-roles") {
+        await apiClient.post("/company-roles/", {
+          role_name: newItem.name.trim(),
+          role_description: newItem.description.trim() || null,
+        });
+        await fetchCompanyRoles();
       } else {
         await apiClient.post("/locations/", {
           city: newItem.name.trim(),
@@ -230,6 +280,9 @@ const MasterDataManager: React.FC = () => {
       } else if (activeTab === "departments") {
         await apiClient.delete(`/departments/${id}`);
         await fetchDepartments();
+      } else if (activeTab === "company-roles") {
+        await apiClient.delete(`/company-roles/${id}`);
+        await fetchCompanyRoles();
       } else {
         await apiClient.delete(`/locations/${id}`);
         await fetchLocations();
@@ -266,6 +319,12 @@ const MasterDataManager: React.FC = () => {
           department_name: editingItem.name.trim(),
         });
         await fetchDepartments();
+      } else if (editingItem.type === "company_role") {
+        await apiClient.patch(`/company-roles/${editingItem.id}`, {
+          role_name: editingItem.name.trim(),
+          role_description: editingItem.description.trim() || null,
+        });
+        await fetchCompanyRoles();
       } else {
         await apiClient.patch(`/locations/${editingItem.id}`, {
           city: editingItem.name.trim(),
@@ -289,7 +348,9 @@ const MasterDataManager: React.FC = () => {
       ? skills
       : activeTab === "locations"
         ? locations
-        : departments;
+        : activeTab === "company-roles"
+          ? companyRoles
+          : departments;
 
   const filteredItems = currentItems.filter((item) =>
     item.name.toLowerCase().includes(searchTerm.toLowerCase()),
@@ -301,7 +362,8 @@ const MasterDataManager: React.FC = () => {
         <div className="header-left">
           <h2>Master Data Management</h2>
           <p className="subtitle">
-            Manage dropdown options for Skills, Locations, Departments
+            Manage dropdown options for Skills, Locations, Departments, Company
+            Roles
           </p>
         </div>
         <button className="add-button" onClick={() => setShowAddModal(true)}>
@@ -329,6 +391,12 @@ const MasterDataManager: React.FC = () => {
           onClick={() => setActiveTab("departments")}
         >
           Departments ({departments.length})
+        </button>
+        <button
+          className={`tab-button ${activeTab === "company-roles" ? "" : ""}`}
+          onClick={() => setActiveTab("company-roles")}
+        >
+          Company Roles ({companyRoles.length})
         </button>
       </div>
 
@@ -467,6 +535,22 @@ const MasterDataManager: React.FC = () => {
                     />
                   </div>
                 )}
+                {activeTab === "company-roles" && (
+                  <div className="form-group">
+                    <label>Description</label>
+                    <input
+                      type="text"
+                      value={newItem.description}
+                      onChange={(e) =>
+                        setNewItem({
+                          ...newItem,
+                          description: e.target.value,
+                        })
+                      }
+                      placeholder="Enter role description"
+                    />
+                  </div>
+                )}
               </div>
             </div>
             <div className="modal-footer">
@@ -528,6 +612,22 @@ const MasterDataManager: React.FC = () => {
                       })
                     }
                     placeholder="Enter country"
+                  />
+                </div>
+              )}
+              {editingItem.type === "company_role" && (
+                <div className="form-group">
+                  <label>Description</label>
+                  <input
+                    type="text"
+                    value={editingItem.description}
+                    onChange={(e) =>
+                      setEditingItem({
+                        ...editingItem,
+                        description: e.target.value,
+                      })
+                    }
+                    placeholder="Enter role description"
                   />
                 </div>
               )}

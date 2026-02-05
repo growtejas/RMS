@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import case, distinct, func
 from sqlalchemy.orm import Session
 
 from db.session import get_db
@@ -8,8 +9,10 @@ from db.models.employee_contact import EmployeeContact
 from db.models.employee_skill import EmployeeSkill
 from db.models.employee_education import EmployeeEducation
 from db.models.employee_finance import EmployeeFinance
+from db.models.skill import Skill
 
 from schemas.hr_employee import HREmployeeProfile
+from schemas.skill_overview import SkillOverviewResponse
 from utils.dependencies import require_any_role
 
 
@@ -65,4 +68,66 @@ def hr_get_employee_profile(
         education=education,
         finance=finance,
     )
+
+
+@router.get("/skills-summary", response_model=list[SkillOverviewResponse])
+def hr_skills_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin"))
+):
+    rows = (
+        db.query(
+            Skill.skill_id,
+            Skill.skill_name,
+            func.count(distinct(EmployeeSkill.emp_id)).label("total_employees"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (EmployeeSkill.proficiency_level == "Junior", 1),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("junior"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (EmployeeSkill.proficiency_level == "Mid", 1),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("mid"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (EmployeeSkill.proficiency_level == "Senior", 1),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("senior"),
+        )
+        .outerjoin(EmployeeSkill, EmployeeSkill.skill_id == Skill.skill_id)
+        .group_by(Skill.skill_id, Skill.skill_name)
+        .order_by(Skill.skill_name)
+        .all()
+    )
+
+    response: list[SkillOverviewResponse] = []
+    for row in rows:
+        response.append(
+            SkillOverviewResponse(
+                skill_id=row.skill_id,
+                skill_name=row.skill_name,
+                total_employees=int(row.total_employees or 0),
+                proficiency={
+                    "junior": int(row.junior or 0),
+                    "mid": int(row.mid or 0),
+                    "senior": int(row.senior or 0),
+                },
+            )
+        )
+
+    return response
 

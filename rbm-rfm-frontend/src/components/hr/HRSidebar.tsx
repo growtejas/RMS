@@ -60,20 +60,20 @@ const HrSidebar: React.FC<HrSidebarProps> = ({
       label: "Employee Profile",
       icon: <UserCircle size={20} />,
     },
-    {
-      id: "onboarding",
-      label: "Onboarding",
-      icon: <ClipboardCheck size={20} />,
-    },
-    {
-      id: "bench-availability",
-      label: "Bench & Availability",
-      icon: <CalendarCheck size={20} />,
-    },
+    { id: "ticket", label: "Requisition", icon: <FileText size={20} /> },
+    // {
+    //   id: "onboarding",
+    //   label: "Onboarding",
+    //   icon: <ClipboardCheck size={20} />,
+    // },
+    // {
+    //   id: "bench-availability",
+    //   label: "Bench & Availability",
+    //   icon: <CalendarCheck size={20} />,
+    // },
     { id: "skills", label: "Skills", icon: <Award size={20} /> },
     { id: "reports", label: "Reports", icon: <BarChart3 size={20} /> },
     { id: "audit-logs", label: "Audit Logs", icon: <FileText size={20} /> },
-    { id: "ticket", label: "Requisition", icon: <FileText size={20} /> },
   ];
 
   return (

@@ -148,8 +148,10 @@ const getStatusClass = (status: Requisition["overallStatus"]) => {
       return "in-progress";
     case "Approved & Unassigned":
       return "in-progress";
-    case "Active":
-      return "in-progress";
+    case "Fulfilled":
+      return "fulfilled";
+    case "Closed (Partially Fulfilled)":
+      return "closed";
     case "Rejected":
       return "closed";
     case "Closed":
