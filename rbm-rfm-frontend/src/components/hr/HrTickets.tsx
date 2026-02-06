@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   Users,
   Target,
@@ -13,6 +13,19 @@ import {
 } from "lucide-react";
 import { apiClient } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
+import {
+  approveBudget,
+  approveHR,
+  rejectRequisition,
+  getWorkflowErrorMessage,
+  getRequisitionAllowedTransitions,
+  type AllowedTransitionsResponse,
+} from "../../api/workflowApi";
+import {
+  normalizeStatus,
+  getStatusLabel,
+  REQUISITION_STATUSES,
+} from "../../types/workflow";
 /* ======================================================
    Types
    ====================================================== */
@@ -198,45 +211,43 @@ const getPriorityClass = (priority: Requisition["priority"]) => {
   }
 };
 
-const getStatusClass = (status: Requisition["overallStatus"]) => {
-  switch (status) {
+/**
+ * Map a requisition status to a ticket-status CSS class.
+ * Normalizes legacy values via canonical types/workflow.ts.
+ */
+const getStatusClass = (status: string): string => {
+  const normalized = normalizeStatus(status);
+  switch (normalized) {
     case "Pending_Budget":
-    case "Pending Budget Approval":
-      return "ticket-status open";
     case "Pending_HR":
-    case "Pending HR Approval":
       return "ticket-status open";
-    case "Approved & Unassigned":
-      return "ticket-status in-progress";
     case "Active":
-    case "In Progress":
-    case "In-Progress":
       return "ticket-status in-progress";
     case "Fulfilled":
       return "ticket-status fulfilled";
-    case "Closed":
-    case "Closed (Partially Fulfilled)":
-      return "ticket-status closed";
-    case "Cancelled":
-      return "ticket-status closed";
     case "Rejected":
       return "ticket-status rejected";
-    case "Open":
+    case "Cancelled":
+      return "ticket-status closed";
+    case "Draft":
       return "ticket-status open";
     default:
       return "";
   }
 };
 
-const getItemStatusClass = (status: RequisitionItem["itemStatus"]) => {
+/**
+ * Map an item status to a ticket-status CSS class.
+ * Uses canonical item status values only.
+ */
+const getItemStatusClass = (status: string): string => {
   switch (status) {
-    case "Open":
-      return "ticket-status open";
     case "Pending":
       return "ticket-status open";
     case "Sourcing":
     case "Shortlisted":
-    case "In Progress":
+    case "Interviewing":
+    case "Offered":
       return "ticket-status in-progress";
     case "Fulfilled":
       return "ticket-status fulfilled";
@@ -270,19 +281,12 @@ const HrKpiCards: React.FC<{ requisitions: Requisition[] }> = ({
   requisitions,
 }) => {
   const stats = {
-    totalOpen: requisitions.filter((r) =>
-      [
-        "Open",
-        "Pending_Budget",
-        "Pending_HR",
-        "Active",
-        "Pending Budget Approval",
-        "Pending HR Approval",
-        "Approved & Unassigned",
-      ].includes(r.overallStatus),
-    ).length,
-    inProgress: requisitions.filter((r) =>
-      ["In Progress", "In-Progress", "Active"].includes(r.overallStatus),
+    totalOpen: requisitions.filter((r) => {
+      const s = normalizeStatus(r.overallStatus);
+      return ["Pending_Budget", "Pending_HR", "Active", "Draft"].includes(s);
+    }).length,
+    inProgress: requisitions.filter(
+      (r) => normalizeStatus(r.overallStatus) === "Active",
     ).length,
     unassigned: requisitions.filter((r) => !r.assignedTAId).length,
     myAssignments: requisitions.filter((r) => r.assignedTAId !== null).length,
@@ -788,6 +792,46 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
   const [expandedRejections, setExpandedRejections] = useState<
     Record<number, boolean>
   >({});
+  // Backend-driven workflow state: stores allowed transitions per requisition
+  const [allowedTransitionsMap, setAllowedTransitionsMap] = useState<
+    Record<number, AllowedTransitionsResponse>
+  >({});
+  const [transitionsLoading, setTransitionsLoading] = useState<
+    Record<number, boolean>
+  >({});
+
+  // Fetch allowed transitions for a single requisition from backend
+  const fetchAllowedTransitions = useCallback(async (reqId: number) => {
+    setTransitionsLoading((prev) => ({ ...prev, [reqId]: true }));
+    try {
+      const response = await getRequisitionAllowedTransitions(reqId);
+      setAllowedTransitionsMap((prev) => ({ ...prev, [reqId]: response }));
+    } catch {
+      // Silently fail - buttons won't appear for this requisition
+    } finally {
+      setTransitionsLoading((prev) => ({ ...prev, [reqId]: false }));
+    }
+  }, []);
+
+  // Check if a transition is allowed (backend-driven)
+  const canTransitionTo = useCallback(
+    (reqId: number, targetStatus: string): boolean => {
+      const transitions = allowedTransitionsMap[reqId];
+      if (!transitions) return false;
+      return transitions.allowed_transitions.some(
+        (t) => t.target_status === targetStatus && !t.is_system_only,
+      );
+    },
+    [allowedTransitionsMap],
+  );
+
+  // Refresh transitions after a successful workflow action
+  const refreshTransitions = useCallback(
+    async (reqId: number) => {
+      await fetchAllowedTransitions(reqId);
+    },
+    [fetchAllowedTransitions],
+  );
 
   const formatCurrency = (value?: number) => {
     if (value === undefined || Number.isNaN(value)) return "—";
@@ -904,24 +948,30 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
     });
   }, [requisitions]);
 
-  const approvalStatuses = [
-    "Pending_Budget",
-    "Pending_HR",
-    "Rejected",
-    // Legacy values retained for compatibility
-    "Pending Budget Approval",
-    "Pending HR Approval",
-  ];
+  const approvalStatuses = ["Pending_Budget", "Pending_HR", "Rejected"];
 
-  const pendingApprovals = requisitions.filter((req) =>
-    approvalStatuses.includes(req.overallStatus),
-  );
+  const pendingApprovals = requisitions.filter((req) => {
+    const normalized = normalizeStatus(req.overallStatus);
+    return approvalStatuses.includes(normalized);
+  });
+
+  // Fetch allowed transitions for all pending approvals from backend
+  useEffect(() => {
+    pendingApprovals.forEach((req) => {
+      if (!allowedTransitionsMap[req.reqId] && !transitionsLoading[req.reqId]) {
+        fetchAllowedTransitions(req.reqId);
+      }
+    });
+  }, [
+    pendingApprovals,
+    allowedTransitionsMap,
+    transitionsLoading,
+    fetchAllowedTransitions,
+  ]);
 
   const unassignedPool = requisitions.filter(
     (req) =>
-      !req.assignedTAId &&
-      (req.overallStatus === "Active" ||
-        req.overallStatus === "Approved & Unassigned"),
+      !req.assignedTAId && normalizeStatus(req.overallStatus) === "Active",
   );
 
   // Filter requisitions based on active filter
@@ -932,15 +982,12 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
         if (!req.assignedTAId) return false;
       } else if (activeFilter === "unassigned") {
         if (req.assignedTAId) return false;
-        if (
-          req.overallStatus !== "Active" &&
-          req.overallStatus !== "Approved & Unassigned"
-        )
-          return false;
+        if (normalizeStatus(req.overallStatus) !== "Active") return false;
       } else if (activeFilter === "my") {
         if (req.assignedTA !== currentUser) return false;
       } else if (activeFilter === "approvals") {
-        if (!approvalStatuses.includes(req.overallStatus)) return false;
+        if (!approvalStatuses.includes(normalizeStatus(req.overallStatus)))
+          return false;
       }
 
       // Secondary Dropdown Filters
@@ -951,14 +998,8 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
         return false;
       }
       if (statusFilter !== "All Status") {
-        if (statusFilter === "Fulfilled" && req.overallStatus === "Closed") {
-          // Legacy compatibility: treat Closed as Fulfilled
-        } else if (
-          statusFilter === "Cancelled" &&
-          req.overallStatus === "Closed (Partially Fulfilled)"
-        ) {
-          // Legacy compatibility: treat partially fulfilled as Cancelled
-        } else if (req.overallStatus !== statusFilter) {
+        const normalized = normalizeStatus(req.overallStatus);
+        if (normalized !== statusFilter) {
           return false;
         }
       }
@@ -988,7 +1029,9 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
     const employee = employees.find((emp) => emp.id === empId);
     if (!employee || !selectedRequisition) return;
 
-    // Update the requisition item
+    // NOTE: Assignment should go through the backend workflow API.
+    // The local state update below is optimistic; a full backend integration
+    // (e.g. calling the item fulfill endpoint) should be added.
     const updatedRequisitions = requisitions.map((req) => {
       if (req.id === selectedRequisition.id) {
         return {
@@ -997,7 +1040,6 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
             item.id === itemId
               ? {
                   ...item,
-                  itemStatus: "Fulfilled" as const,
                   assignedEmployeeId: empId,
                   assignedEmployeeName: employee.name,
                 }
@@ -1014,26 +1056,6 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
         null,
     );
     onAssignEmployee?.(itemId, empId);
-
-    // Check if all items are now fulfilled/cancelled
-    const updatedReq = updatedRequisitions.find(
-      (req) => req.id === selectedRequisition.id,
-    );
-    if (updatedReq) {
-      const allItemsDone = updatedReq.items.every(
-        (item) =>
-          item.itemStatus === "Fulfilled" || item.itemStatus === "Cancelled",
-      );
-      if (allItemsDone) {
-        setRequisitions((prev) =>
-          prev.map((req) =>
-            req.id === selectedRequisition.id
-              ? { ...req, overallStatus: "Closed" as const }
-              : req,
-          ),
-        );
-      }
-    }
   };
 
   const handleViewRequisition = (reqId: string) => {
@@ -1104,20 +1126,38 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
     setApprovalError(null);
 
     try {
-      await apiClient.patch(`/requisitions/${req.reqId}`, {
-        budget_amount: budgetValue,
-      });
+      // Update budget amount if specified
+      if (budgetValue !== undefined) {
+        await apiClient.patch(`/requisitions/${req.reqId}`, {
+          budget_amount: budgetValue,
+        });
+      }
 
-      await apiClient.patch(`/requisitions/${req.reqId}/approve-budget`);
-      await apiClient.patch(`/requisitions/${req.reqId}/approve-release`);
+      // Use backend workflow API for transitions
+      // Backend is single source of truth - check allowed transitions
+      const currentStatus = normalizeStatus(req.overallStatus);
 
+      if (currentStatus === "Pending_Budget") {
+        // Budget approval: Pending_Budget → Pending_HR
+        await approveBudget(req.reqId);
+        // Then HR approval: Pending_HR → Active
+        await approveHR(req.reqId);
+      } else if (currentStatus === "Pending_HR") {
+        // Just HR approval needed: Pending_HR → Active
+        await approveHR(req.reqId);
+      }
+
+      // Update local state to reflect new status
       updateRequisitionState(req.reqId, {
         budgetApprovedBy: approverId,
         budgetAmount: budgetValue,
         overallStatus: "Active",
       });
+
+      // Refresh allowed transitions from backend after successful transition
+      await refreshTransitions(req.reqId);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Approval failed";
+      const message = getWorkflowErrorMessage(err);
       setApprovalError(message);
     } finally {
       setApprovalLoading((prev) => ({ ...prev, [req.reqId]: false }));
@@ -1209,10 +1249,8 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
     }));
 
     try {
-      await apiClient.put(
-        `/requisitions/${rejectingRequisition.reqId}/reject`,
-        { reason },
-      );
+      // Use backend workflow API for rejection
+      await rejectRequisition(rejectingRequisition.reqId, reason);
 
       updateRequisitionState(rejectingRequisition.reqId, {
         overallStatus: "Rejected",
@@ -1224,9 +1262,12 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
         [rejectingRequisition.reqId]: true,
       }));
 
+      // Refresh allowed transitions from backend after successful rejection
+      await refreshTransitions(rejectingRequisition.reqId);
+
       closeRejectModal();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Rejection failed";
+      const message = getWorkflowErrorMessage(err);
       setRejectionError(message);
     } finally {
       setRejectionLoading((prev) => ({
@@ -1343,21 +1384,11 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
               onChange={(e) => setStatusFilter(e.target.value)}
             >
               <option>All Status</option>
-              <option>Open</option>
-              <option value="Pending_Budget">Pending Budget Approval</option>
-              <option value="Pending_HR">Pending HR Approval</option>
-              <option>Active</option>
-              <option>In Progress</option>
-              <option>Fulfilled</option>
-              <option>Cancelled</option>
-              <option value="Approved & Unassigned">
-                Approved & Unassigned (Legacy)
-              </option>
-              <option value="Closed">Closed (Legacy)</option>
-              <option value="Closed (Partially Fulfilled)">
-                Closed (Partially Fulfilled) (Legacy)
-              </option>
-              <option>Rejected</option>
+              {REQUISITION_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {getStatusLabel(s)}
+                </option>
+              ))}
             </select>
           </div>
           <div className="filter-item">
@@ -1472,12 +1503,18 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
               <tbody>
                 {sortedPendingApprovals.map((req) => {
                   const isEditing = editingBudget[req.reqId];
-                  const isRejected = req.overallStatus === "Rejected";
-                  const isApproved =
-                    req.overallStatus === "Active" ||
-                    req.overallStatus === "Approved & Unassigned";
+                  // Backend-driven: check if transitions are allowed via allowedTransitionsMap
+                  const canApprove =
+                    canTransitionTo(req.reqId, "Pending_HR") ||
+                    canTransitionTo(req.reqId, "Active");
+                  const canReject = canTransitionTo(req.reqId, "Rejected");
+                  const isTerminal =
+                    allowedTransitionsMap[req.reqId]?.is_terminal ?? false;
+                  const isTransitionsLoading = transitionsLoading[req.reqId];
                   const isActionLoading =
-                    approvalLoading[req.reqId] || rejectionLoading[req.reqId];
+                    approvalLoading[req.reqId] ||
+                    rejectionLoading[req.reqId] ||
+                    isTransitionsLoading;
                   return (
                     <React.Fragment key={req.reqId}>
                       <tr>
@@ -1539,7 +1576,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                         </td>
                         <td>
                           <span className={getStatusClass(req.overallStatus)}>
-                            {req.overallStatus}
+                            {getStatusLabel(req.overallStatus)}
                           </span>
                         </td>
                         <td>
@@ -1576,33 +1613,38 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                                       [req.reqId]: true,
                                     }))
                                   }
-                                  disabled={
-                                    isActionLoading || isRejected || isApproved
-                                  }
+                                  disabled={isActionLoading || isTerminal}
                                 >
                                   Edit Budget
                                 </button>
-                                {!isRejected && !isApproved && (
+                                {/* Backend-driven: only show buttons if transitions are allowed */}
+                                {(canApprove || canReject) && (
                                   <>
-                                    <button
-                                      className="action-button primary compact approval-approve"
-                                      disabled={isActionLoading}
-                                      onClick={() => handleApproveRelease(req)}
-                                    >
-                                      {approvalLoading[req.reqId]
-                                        ? "..."
-                                        : "Approve & Release"}
-                                    </button>
-                                    <button
-                                      className="action-button danger compact"
-                                      disabled={isActionLoading}
-                                      onClick={() => openRejectModal(req)}
-                                    >
-                                      Reject
-                                    </button>
+                                    {canApprove && (
+                                      <button
+                                        className="action-button primary compact approval-approve"
+                                        disabled={isActionLoading}
+                                        onClick={() =>
+                                          handleApproveRelease(req)
+                                        }
+                                      >
+                                        {approvalLoading[req.reqId]
+                                          ? "..."
+                                          : "Approve & Release"}
+                                      </button>
+                                    )}
+                                    {canReject && (
+                                      <button
+                                        className="action-button danger compact"
+                                        disabled={isActionLoading}
+                                        onClick={() => openRejectModal(req)}
+                                      >
+                                        Reject
+                                      </button>
+                                    )}
                                   </>
                                 )}
-                                {isRejected && req.rejectionReason && (
+                                {req.rejectionReason && (
                                   <button
                                     className="action-button compact"
                                     onClick={() =>
@@ -1708,7 +1750,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                       </div>
                     </div>
                     <span className={getStatusClass(req.overallStatus)}>
-                      {req.overallStatus}
+                      {getStatusLabel(req.overallStatus)}
                     </span>
                   </div>
 
@@ -1901,7 +1943,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
 
                           <td>
                             <span className={getStatusClass(req.overallStatus)}>
-                              {req.overallStatus}
+                              {getStatusLabel(req.overallStatus)}
                             </span>
                           </td>
 
@@ -1970,8 +2012,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
 
                           <td>
                             {!req.assignedTAId &&
-                            (req.overallStatus === "Active" ||
-                              req.overallStatus === "Approved & Unassigned") ? (
+                            normalizeStatus(req.overallStatus) === "Active" ? (
                               <div
                                 style={{
                                   display: "flex",

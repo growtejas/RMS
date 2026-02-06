@@ -30,8 +30,7 @@ const parseUserFromToken = (token: string | null): User | null => {
       username: decoded.username || "",
       roles,
     };
-  } catch (error) {
-    console.error("❌ Failed to parse token payload:", error);
+  } catch {
     return null;
   }
 };
@@ -54,8 +53,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
 
     try {
       const apiUrl = `${import.meta.env.VITE_API_BASE_URL}/auth/login`;
-      console.log("🔐 Login attempt to:", apiUrl);
-      console.log("📊 Credentials:", { username });
 
       const response = await fetch(apiUrl, {
         method: "POST",
@@ -65,26 +62,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
         body: JSON.stringify({ username, password }),
       });
 
-      console.log("📡 Response status:", response.status);
-
       if (!response.ok) {
         let errorMessage = "Login failed. Please try again.";
         try {
           const errorData = await response.json();
           errorMessage = errorData.detail || errorMessage;
-          console.error("❌ API Error:", errorData);
         } catch {
           // If response is not JSON, use default message
-          console.error("❌ Non-JSON error response");
         }
         throw new Error(errorMessage);
       }
 
       const data = await response.json();
-      console.log("✅ Login successful:", {
-        user_id: data.user_id,
-        username: data.username,
-      });
 
       // Normalize roles to lowercase for consistent RBAC checks
       const normalizedRoles = Array.isArray(data.roles)
@@ -106,7 +95,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "An unexpected error occurred";
-      console.error("💥 Login error:", message);
       setError(message);
       throw err;
     } finally {

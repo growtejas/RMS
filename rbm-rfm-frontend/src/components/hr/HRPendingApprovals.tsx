@@ -11,6 +11,8 @@ import {
   hrDashboardService,
   HRPendingApprovalItem,
 } from "../../api/hrDashboardService";
+import { approveHR, rejectRequisition } from "../../api/workflowApi";
+import { normalizeStatus } from "../../types/workflow";
 
 interface HRPendingApprovalsProps {
   onViewRequisition?: (reqId: number) => void;
@@ -75,14 +77,18 @@ const HRPendingApprovals: React.FC<HRPendingApprovalsProps> = ({
         controller.signal,
       );
       setPending(data);
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (controller.signal.aborted) return;
-      const detail = err?.response?.data?.detail;
+      const axiosErr = err as { response?: { data?: { detail?: unknown } } };
+      const detail = axiosErr?.response?.data?.detail;
       let messageText = "Failed to load pending approvals";
 
       if (Array.isArray(detail)) {
         messageText = detail
-          .map((item) => item?.msg || JSON.stringify(item))
+          .map(
+            (item: Record<string, unknown>) =>
+              (item?.msg as string) || JSON.stringify(item),
+          )
           .filter(Boolean)
           .join("\n");
       } else if (typeof detail === "string") {
@@ -116,11 +122,7 @@ const HRPendingApprovals: React.FC<HRPendingApprovalsProps> = ({
 
   const handleApprove = useCallback(
     async (approval: HRPendingApprovalItem) => {
-      if (
-        approval.status !== "Pending_HR" &&
-        approval.status !== "Pending HR Approval"
-      )
-        return;
+      if (normalizeStatus(approval.status) !== "Pending_HR") return;
 
       const key = approval.requisition_id;
       setActionState((prev) => ({
@@ -129,7 +131,7 @@ const HRPendingApprovals: React.FC<HRPendingApprovalsProps> = ({
       }));
 
       try {
-        await hrDashboardService.approveRequisition(approval.requisition_id);
+        await approveHR(Number(approval.requisition_id));
         setPending((prev) =>
           prev.filter(
             (item) => item.requisition_id !== approval.requisition_id,
@@ -137,13 +139,17 @@ const HRPendingApprovals: React.FC<HRPendingApprovalsProps> = ({
         );
         setMessage("Requisition approved successfully");
         onActionComplete?.();
-      } catch (err: any) {
-        const detail = err?.response?.data?.detail;
+      } catch (err: unknown) {
+        const axiosErr = err as { response?: { data?: { detail?: unknown } } };
+        const detail = axiosErr?.response?.data?.detail;
         let messageText = "Failed to approve requisition";
 
         if (Array.isArray(detail)) {
           messageText = detail
-            .map((item) => item?.msg || JSON.stringify(item))
+            .map(
+              (item: Record<string, unknown>) =>
+                (item?.msg as string) || JSON.stringify(item),
+            )
             .filter(Boolean)
             .join("\n");
         } else if (typeof detail === "string") {
@@ -187,21 +193,22 @@ const HRPendingApprovals: React.FC<HRPendingApprovalsProps> = ({
     }));
 
     try {
-      await hrDashboardService.rejectRequisition(
-        rejectModal.reqId,
-        rejectReason.trim(),
-      );
+      await rejectRequisition(rejectModal.reqId, rejectReason.trim());
       setPending((prev) => prev.filter((item) => item.requisition_id !== key));
       setMessage("Requisition rejected successfully");
       closeRejectModal();
       onActionComplete?.();
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail;
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: unknown } } };
+      const detail = axiosErr?.response?.data?.detail;
       let messageText = "Failed to reject requisition";
 
       if (Array.isArray(detail)) {
         messageText = detail
-          .map((item) => item?.msg || JSON.stringify(item))
+          .map(
+            (item: Record<string, unknown>) =>
+              (item?.msg as string) || JSON.stringify(item),
+          )
           .filter(Boolean)
           .join("\n");
       } else if (typeof detail === "string") {

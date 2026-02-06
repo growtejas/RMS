@@ -12,6 +12,11 @@ import ResourcePool from "./ResourcePool";
 import TAReports from "./TAReports";
 import TAAuditLog from "./TAAuditLog";
 import { apiClient } from "../../api/client";
+import {
+  normalizeStatus,
+  isTerminalStatus,
+  getStatusLabel,
+} from "../../types/workflow";
 
 /* ======================================================
    View Labels
@@ -78,8 +83,7 @@ const getSlaDaysRemaining = (dateValue?: string | null) => {
    ====================================================== */
 
 const isOpenStatus = (status?: string | null) =>
-  // F-002 FIX: Use spec-compliant status names
-  !["Fulfilled", "Rejected", "Cancelled"].includes(status ?? "");
+  !isTerminalStatus(normalizeStatus(status ?? ""));
 
 const TADashboard: React.FC = () => {
   const { user, logout } = useAuth();
@@ -129,14 +133,10 @@ const TADashboard: React.FC = () => {
       isOpenStatus(req.overall_status),
     ).length;
     const inProgress = requisitions.filter(
-      (req) => req.overall_status === "Active",
+      (req) => normalizeStatus(req.overall_status) === "Active",
     ).length;
     const assignedToMe = requisitions.filter(
       (req) => req.assigned_ta && req.assigned_ta === currentUserId,
-    ).length;
-    // F-002 FIX: Use "Fulfilled" instead of "Closed"
-    const fulfilled = requisitions.filter(
-      (req) => req.overall_status === "Fulfilled",
     ).length;
     const avgFulfillmentDays = 0;
 
@@ -149,7 +149,7 @@ const TADashboard: React.FC = () => {
       },
       {
         key: "inProgress",
-        label: "In Progress",
+        label: getStatusLabel("Active"),
         value: inProgress,
         variant: "warning",
       },

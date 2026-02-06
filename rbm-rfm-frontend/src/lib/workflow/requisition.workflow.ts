@@ -3,8 +3,18 @@
  * REQUISITION WORKFLOW - State Machine Definition
  * ============================================================================
  *
- * Defines all valid status transitions for the requisition lifecycle.
- * This is the single source of truth for requisition state management.
+ * @deprecated This module is superseded by the backend-driven Workflow Engine V2.
+ *
+ * For new code, use:
+ * - api/workflowApi.ts - API functions (approveBudget, approveHR, rejectRequisition, etc.)
+ * - api/workflowHooks.ts - React hooks (useRequisitionWorkflow)
+ * - components/workflow/ - UI components (WorkflowTransitionButtons)
+ *
+ * The backend is the SINGLE SOURCE OF TRUTH. Do not use this module to decide
+ * if a transition is allowed - fetch allowed transitions from the backend API.
+ *
+ * See: docs/WORKFLOW_SPECIFICATION.md
+ * ============================================================================
  */
 
 import {

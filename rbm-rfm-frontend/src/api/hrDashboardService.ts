@@ -113,24 +113,6 @@ export const hrDashboardService = {
     );
     return response.data;
   },
-
-  /**
-   * Approve a requisition (convenience wrapper)
-   */
-  approveRequisition: async (reqId: number | string) => {
-    const response = await apiClient.put(`/requisitions/${reqId}/approve`);
-    return response.data;
-  },
-
-  /**
-   * Reject a requisition with reason
-   */
-  rejectRequisition: async (reqId: number | string, reason: string) => {
-    const response = await apiClient.put(`/requisitions/${reqId}/reject`, {
-      reason,
-    });
-    return response.data;
-  },
 };
 
 export default hrDashboardService;

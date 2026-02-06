@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
+import { normalizeStatus, getStatusLabel } from "../../types/workflow";
 
 /* ======================================================
    Types
@@ -46,14 +47,18 @@ interface MyRequisitionsProps {
    ====================================================== */
 
 const getStatusClass = (status: MyRequisition["status"]) => {
-  switch (status) {
-    case "Approved & Unassigned":
+  const normalized = normalizeStatus(status);
+  switch (normalized) {
+    case "Draft":
       return "open";
+    case "Pending_Budget":
+    case "Pending_HR":
     case "Active":
-    case "Pending HR Approval":
-    case "Pending Budget Approval":
       return "in-progress";
-    case "Closed":
+    case "Fulfilled":
+      return "fulfilled";
+    case "Cancelled":
+    case "Rejected":
       return "closed";
     default:
       return "";
@@ -187,7 +192,7 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
                   <span
                     className={`ticket-status ${getStatusClass(req.status)}`}
                   >
-                    {req.status}
+                    {getStatusLabel(req.status)}
                   </span>
                 </td>
 

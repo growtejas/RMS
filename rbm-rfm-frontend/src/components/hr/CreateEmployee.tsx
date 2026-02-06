@@ -55,8 +55,9 @@ const extractErrorMessage = (error: unknown) => {
     }
   }
   if (error && typeof error === "object" && "response" in error) {
-    const response = (error as { response?: { status?: number; data?: any } })
-      .response;
+    const response = (
+      error as { response?: { status?: number; data?: { detail?: string } } }
+    ).response;
     const status = response?.status ? ` (${response.status})` : "";
     const detail = response?.data?.detail;
     if (typeof detail === "string") {
@@ -296,9 +297,7 @@ const CreateEmployee: React.FC = () => {
   };
 
   useEffect(() => {
-    console.log("[CreateEmployee] currentStep changed:", currentStep);
-    console.log("[CreateEmployee] steps.length:", steps.length);
-    console.log("[CreateEmployee] isLastStep:", isLastStep);
+    // Step state tracked for form navigation
   }, [currentStep, steps.length, isLastStep]);
 
   const updateCoreField = (
@@ -376,12 +375,6 @@ const CreateEmployee: React.FC = () => {
   const handleNext = () => {
     if (isSubmitting) return;
 
-    console.log("[CreateEmployee] handleNext BEFORE", {
-      currentStep,
-      stepsLength: steps.length,
-      isLastStep,
-    });
-
     if (!currentStepId) return;
     const validation = validateStep(currentStepId);
     if (!validation.isValid) {
@@ -392,11 +385,6 @@ const CreateEmployee: React.FC = () => {
     setErrors({});
     setCurrentStep((prev) => {
       const next = Math.min(prev + 1, steps.length - 1);
-      console.log("[CreateEmployee] handleNext AFTER", {
-        prev,
-        next,
-        stepsLength: steps.length,
-      });
       return next;
     });
   };
@@ -414,13 +402,6 @@ const CreateEmployee: React.FC = () => {
   };
 
   const handleFormKeyDown = (event: React.KeyboardEvent<HTMLFormElement>) => {
-    if (event.key === "Enter") {
-      console.log("[CreateEmployee] Enter key pressed", {
-        currentStep,
-        stepsLength: steps.length,
-        isLastStep,
-      });
-    }
     if (event.key === "Enter" && !isLastStep) {
       event.preventDefault();
       handleNext();
@@ -429,11 +410,6 @@ const CreateEmployee: React.FC = () => {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    console.log("[CreateEmployee] handleSubmit called", {
-      currentStep,
-      stepsLength: steps.length,
-      isLastStep,
-    });
     if (submitInFlight.current || isSubmitting) {
       return;
     }
@@ -441,10 +417,6 @@ const CreateEmployee: React.FC = () => {
     setSuccess(null);
 
     if (!isLastStep) {
-      console.warn("[CreateEmployee] Blocked submit before final step", {
-        currentStep,
-        stepsLength: steps.length,
-      });
       return;
     }
 

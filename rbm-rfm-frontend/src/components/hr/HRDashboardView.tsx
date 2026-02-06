@@ -284,7 +284,6 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
       } catch (error) {
         if (controller.signal.aborted) return;
 
-        console.error("Failed to fetch HR dashboard data:", error);
         const errMsg =
           error instanceof Error
             ? error.message

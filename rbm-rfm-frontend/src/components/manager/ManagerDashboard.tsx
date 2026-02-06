@@ -5,6 +5,8 @@ import Header from "../Header";
 import ManagerHeader from "./ManagerHeader";
 import ManagerSidebar, { ManagerDashboardView } from "./ManagerSidebar";
 import "../../styles/hr/hr-dashboard.css";
+import "../../styles/manager/manager-dashboard.css";
+import { getStatusLabel } from "../../types/workflow";
 import RaiseRequisition from "./RaiseRequisition";
 import MyRequisitions from "./MyRequisitions";
 import RequisitionAudit from "./RequisitionAudit";
@@ -54,15 +56,19 @@ const ManagerDashboard: React.FC = () => {
           controller.signal,
         );
         setMetrics(data);
-      } catch (err: any) {
-        if (err?.name === "CanceledError") return;
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === "CanceledError") return;
 
-        const detail = err?.response?.data?.detail;
         let message = "Failed to load manager metrics";
+        const axiosErr = err as { response?: { data?: { detail?: unknown } } };
+        const detail = axiosErr?.response?.data?.detail;
 
         if (Array.isArray(detail)) {
           message = detail
-            .map((item) => item?.msg || JSON.stringify(item))
+            .map(
+              (item: Record<string, unknown>) =>
+                (item?.msg as string) || JSON.stringify(item),
+            )
             .filter(Boolean)
             .join("\n");
         } else if (typeof detail === "string") {
@@ -91,9 +97,9 @@ const ManagerDashboard: React.FC = () => {
         label: "Total Requisitions",
         value: metrics?.total_requisitions ?? 0,
       },
-      { label: "Open", value: metrics?.open ?? 0 },
-      { label: "In Progress", value: metrics?.in_progress ?? 0 },
-      { label: "Closed", value: metrics?.closed ?? 0 },
+      { label: getStatusLabel("Active"), value: metrics?.open ?? 0 },
+      { label: getStatusLabel("Pending_HR"), value: metrics?.in_progress ?? 0 },
+      { label: getStatusLabel("Fulfilled"), value: metrics?.closed ?? 0 },
       { label: "Pending Positions", value: metrics?.pending_positions ?? 0 },
       { label: "Avg Fulfillment (Days)", value: avgLabel },
     ];
@@ -140,7 +146,7 @@ const ManagerDashboard: React.FC = () => {
           </div>
 
           {/* Alerts */}
-          <div className="audit-log-viewer mt-6">
+          <div className="audit-log-viewer" style={{ marginTop: "24px" }}>
             <div className="viewer-header">
               <h2>Alerts & Attention</h2>
               <p className="subtitle">Requisitions requiring review</p>
@@ -151,27 +157,27 @@ const ManagerDashboard: React.FC = () => {
             metrics.pending_positions_alerts.length === 0 ? (
               <div className="empty-logs">No alerts at this time.</div>
             ) : (
-              <div className="space-y-3">
+              <div className="alert-row">
                 {metrics?.sla_risks.map((risk) => (
                   <div
                     key={`sla-${risk.requisition_id}`}
-                    className="flex items-center justify-between p-3 bg-slate-50 rounded-lg cursor-pointer"
+                    className="alert-card"
                     onClick={() =>
                       navigate(`/manager/requisitions/${risk.requisition_id}`)
                     }
                   >
-                    <div className="flex items-center gap-3">
-                      <AlertTriangle className="text-red-600" size={18} />
+                    <div className="alert-card-left">
+                      <AlertTriangle className="alert-icon--danger" size={18} />
                       <div>
-                        <div className="font-medium">SLA Risk</div>
-                        <div className="text-sm text-slate-600">
+                        <div className="alert-card-title">SLA Risk</div>
+                        <div className="alert-card-detail">
                           REQ-{risk.requisition_id} open for {risk.days_open}{" "}
                           days
                         </div>
                       </div>
                     </div>
                     <button
-                      className="text-xs text-slate-500"
+                      className="alert-card-action"
                       onClick={(event) => {
                         event.stopPropagation();
                         navigate(
@@ -187,23 +193,25 @@ const ManagerDashboard: React.FC = () => {
                 {metrics?.pending_positions_alerts.map((alert) => (
                   <div
                     key={`pending-${alert.requisition_id}`}
-                    className="flex items-center justify-between p-3 bg-slate-50 rounded-lg cursor-pointer"
+                    className="alert-card"
                     onClick={() =>
                       navigate(`/manager/requisitions/${alert.requisition_id}`)
                     }
                   >
-                    <div className="flex items-center gap-3">
-                      <Clock className="text-amber-600" size={18} />
+                    <div className="alert-card-left">
+                      <Clock className="alert-icon--warning" size={18} />
                       <div>
-                        <div className="font-medium">Pending Positions</div>
-                        <div className="text-sm text-slate-600">
+                        <div className="alert-card-title">
+                          Pending Positions
+                        </div>
+                        <div className="alert-card-detail">
                           {alert.pending_count} positions pending in REQ-
                           {alert.requisition_id}
                         </div>
                       </div>
                     </div>
                     <button
-                      className="text-xs text-slate-500"
+                      className="alert-card-action"
                       onClick={(event) => {
                         event.stopPropagation();
                         navigate(
@@ -220,12 +228,12 @@ const ManagerDashboard: React.FC = () => {
           </div>
 
           {/* Insight Footer */}
-          <div className="mt-6 p-4 bg-slate-50 border rounded-lg">
-            <div className="flex items-center gap-3">
+          <div className="insight-footer">
+            <div className="insight-footer-inner">
               <TrendingUp size={18} />
               <div>
-                <div className="font-medium">Insight</div>
-                <div className="text-sm text-slate-600">
+                <div className="insight-footer-title">Insight</div>
+                <div className="insight-footer-text">
                   Most requisitions are progressing normally. SLA risks and
                   pending positions highlight items needing attention.
                 </div>

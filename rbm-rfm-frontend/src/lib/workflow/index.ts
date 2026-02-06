@@ -3,8 +3,19 @@
  * WORKFLOW MODULE - Public Exports
  * ============================================================================
  *
- * Central export point for all workflow-related functionality.
- * Import from 'lib/workflow' in components.
+ * @deprecated This module contains frontend-side workflow logic which is now
+ * superseded by the backend-driven Workflow Engine V2.
+ *
+ * For new code, use the backend-driven workflow API:
+ * - Import from 'api/workflowApi' for API functions and types
+ * - Import from 'api/workflowHooks' for React hooks
+ * - Import from 'components/workflow' for UI components
+ *
+ * The backend is the SINGLE SOURCE OF TRUTH for workflow state and transitions.
+ * Frontend must NEVER decide if a transition is allowed.
+ *
+ * See: docs/WORKFLOW_SPECIFICATION.md
+ * ============================================================================
  */
 
 // Core engine

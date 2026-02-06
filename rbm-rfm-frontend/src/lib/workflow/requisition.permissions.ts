@@ -3,13 +3,19 @@
  * REQUISITION PERMISSIONS - Spec-Compliant Status Definitions
  * ============================================================================
  *
- * F-002/F-003 FIX: Aligned with backend workflow_matrix.py
+ * @deprecated This module is superseded by the backend-driven Workflow Engine V2.
  *
- * Backend source: services/requisition/workflow_matrix.py
- * DB migration: alembic/versions/wf_spec_v1_constraints.py
+ * For new code, use api/workflowApi.ts which provides:
+ * - getRequisitionAllowedTransitions() - fetches allowed transitions from backend
+ * - normalizeStatus() - converts legacy status values
+ * - isWorkflowError() - error handling utilities
  *
- * IMPORTANT: Use the requisition.workflow.ts workflow engine for
- * transition validation. These functions are deprecated helpers.
+ * The backend is the SINGLE SOURCE OF TRUTH. Do not use this module to decide
+ * if a transition is allowed - the backend returns authorized_roles and
+ * allowed transitions dynamically.
+ *
+ * See: docs/WORKFLOW_SPECIFICATION.md
+ * ============================================================================
  */
 
 // Import from canonical source

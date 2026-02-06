@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { apiClient } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
+import { normalizeStatus, getStatusLabel } from "../../types/workflow";
 
 /* ======================================================
    Types
@@ -133,39 +134,19 @@ const getAgingClass = (days: number) => {
 };
 
 const getStatusClass = (status: Requisition["overallStatus"]) => {
-  switch (status) {
+  const normalized = normalizeStatus(status);
+  switch (normalized) {
     case "Draft":
       return "open";
     case "Pending_Budget":
-    case "Pending Budget":
-      return "in-progress";
     case "Pending_HR":
-    case "Approved":
-      return "in-progress";
     case "Active":
-      return "in-progress";
-    case "Pending Budget Approval":
-      return "open";
-    case "Pending HR Approval":
-      return "in-progress";
-    case "Approved & Unassigned":
       return "in-progress";
     case "Fulfilled":
       return "fulfilled";
     case "Cancelled":
-      return "closed";
-    case "Closed (Partially Fulfilled)":
-      return "closed";
     case "Rejected":
       return "closed";
-    case "Closed":
-      return "closed";
-    case "Expired":
-      return "closed";
-    case "Open":
-      return "open";
-    case "In Progress":
-      return "in-progress";
     default:
       return "";
   }
@@ -469,9 +450,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
   }, [activeFilter]);
 
   const visibleRequisitions = requisitions.filter(
-    (req) =>
-      req.overallStatus === "Active" ||
-      req.overallStatus === "Approved & Unassigned",
+    (req) => normalizeStatus(req.overallStatus) === "Active",
   );
 
   // Filter requisitions
@@ -963,7 +942,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                         <span
                           className={`ticket-status ${getStatusClass(req.overallStatus)}`}
                         >
-                          {req.overallStatus}
+                          {getStatusLabel(req.overallStatus)}
                         </span>
                       </td>
 

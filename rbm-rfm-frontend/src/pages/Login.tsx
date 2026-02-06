@@ -33,9 +33,11 @@ const Login: React.FC = () => {
       const target =
         fromState && fromState !== "/login" ? fromState : defaultRedirect;
       navigate(target, { replace: true });
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
       setError(
-        err?.response?.data?.detail || "Invalid credentials. Please try again.",
+        axiosErr?.response?.data?.detail ||
+          "Invalid credentials. Please try again.",
       );
     } finally {
       setIsLoading(false);

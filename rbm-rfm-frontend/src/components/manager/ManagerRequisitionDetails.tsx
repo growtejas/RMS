@@ -7,28 +7,26 @@ import {
   X,
   FileText,
   Calendar,
-  User,
   Briefcase,
   DollarSign,
   Clock,
   AlertCircle,
   Download,
   CheckCircle,
-  XCircle,
-  ClockIcon,
-  Eye,
   Lock,
-  Unlock,
   History,
-  ChevronRight,
 } from "lucide-react";
 import { apiClient } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
+import type { RequisitionStatus } from "../../types/workflow";
 import {
-  canEditRequisition,
-  RequisitionStatus,
-} from "../../lib/workflow/requisition.permissions";
+  normalizeStatus,
+  getStatusLabel,
+  getStatusClass,
+} from "../../types/workflow";
+import { StatusBadge } from "../common/StatusBadge";
 import "../../styles/hr/hr-dashboard.css";
+import "../../styles/manager/manager-detail.css";
 
 // Types
 interface RequisitionItem {
@@ -105,50 +103,41 @@ interface RequisitionFormData {
   items: ItemFormData[];
 }
 
-// Status badge styling
-const getStatusBadgeClass = (status: RequisitionStatus) => {
-  const statusMap: Record<string, string> = {
-    Draft: "status-badge draft",
-    "Pending Budget Approval": "status-badge pending",
-    "Budget Approved": "status-badge approved",
-    "Budget Rejected": "status-badge rejected",
-    "Pending HR Approval": "status-badge pending",
-    "HR Approved": "status-badge approved",
-    "HR Rejected": "status-badge rejected",
-    "Released to TA": "status-badge released",
-    Active: "status-badge active",
-    "On Hold": "status-badge hold",
-    Closed: "status-badge closed",
+/** Axios-shaped error for typed catch blocks. */
+interface ApiError {
+  response?: {
+    data?: {
+      detail?: string | Array<{ msg?: string }>;
+      [key: string]: unknown;
+    };
   };
+}
 
-  return statusMap[status] || "status-badge inactive";
-};
+/** Extract a user-facing message from an Axios error. */
+function extractErrorMessage(err: unknown, fallback: string): string {
+  const apiErr = err as ApiError;
+  const detail = apiErr?.response?.data?.detail;
 
-const getStatusIcon = (status: RequisitionStatus) => {
-  switch (status) {
-    case "Draft":
-      return <FileText size={16} />;
-    case "Pending Budget Approval":
-    case "Pending HR Approval":
-      return <ClockIcon size={16} />;
-    case "Budget Approved":
-    case "HR Approved":
-      return <CheckCircle size={16} />;
-    case "Budget Rejected":
-    case "HR Rejected":
-      return <XCircle size={16} />;
-    case "Released to TA":
-      return <ChevronRight size={16} />;
-    case "Active":
-      return <Briefcase size={16} />;
-    case "On Hold":
-      return <AlertCircle size={16} />;
-    case "Closed":
-      return <Lock size={16} />;
-    default:
-      return <FileText size={16} />;
+  if (Array.isArray(detail)) {
+    return (
+      detail
+        .map((item) => item?.msg || JSON.stringify(item))
+        .filter(Boolean)
+        .join("\n") || fallback
+    );
   }
-};
+  if (typeof detail === "string") {
+    return detail;
+  }
+  if (apiErr?.response?.data) {
+    try {
+      return JSON.stringify(apiErr.response.data);
+    } catch {
+      // keep fallback
+    }
+  }
+  return fallback;
+}
 
 // Date formatting
 const formatDate = (value?: string | null) => {
@@ -191,19 +180,14 @@ interface TimelineProps {
 }
 
 const Timeline: React.FC<TimelineProps> = ({ history }) => {
-  const getTimelineIcon = (status: string) => {
-    if (status.includes("Approved")) return "✓";
-    if (status.includes("Rejected")) return "✗";
-    if (status.includes("Pending")) return "⏱";
-    if (status.includes("Draft")) return "📝";
-    if (status.includes("Released")) return "🚀";
-    return "•";
-  };
-
-  const getTimelineColor = (status: string) => {
-    if (status.includes("Approved")) return "var(--success)";
-    if (status.includes("Rejected")) return "var(--error)";
-    if (status.includes("Pending")) return "var(--warning)";
+  const getTimelineColor = (status: string): string => {
+    const normalized = normalizeStatus(status);
+    const cls = getStatusClass(normalized);
+    if (cls.includes("rejected") || cls.includes("cancelled"))
+      return "var(--error)";
+    if (cls.includes("fulfilled") || cls.includes("active"))
+      return "var(--success)";
+    if (cls.includes("pending")) return "var(--warning)";
     return "var(--primary-accent)";
   };
 
@@ -217,13 +201,13 @@ const Timeline: React.FC<TimelineProps> = ({ history }) => {
               style={{
                 backgroundColor: getTimelineColor(entry.new_status),
               }}
-            >
-              {getTimelineIcon(entry.new_status)}
-            </div>
+            />
             {index < history.length - 1 && <div className="milestone-line" />}
           </div>
           <div className="milestone-card">
-            <div className="milestone-title">{entry.new_status}</div>
+            <div className="milestone-title">
+              {getStatusLabel(entry.new_status)}
+            </div>
             <div className="milestone-meta">
               <div className="milestone-avatar">
                 {entry.changed_by_name?.charAt(0) || "U"}
@@ -277,7 +261,8 @@ const ManagerRequisitionDetails: React.FC = () => {
   const [isRemovingJd, setIsRemovingJd] = useState(false);
   const [jdInputKey, setJdInputKey] = useState(0);
 
-  // Permission check
+  // Permission check - Backend is single source of truth
+  // Only Draft status allows editing by the creator
   const canEdit = useMemo(() => {
     if (!requisition || !user) return false;
 
@@ -285,8 +270,9 @@ const ManagerRequisitionDetails: React.FC = () => {
     const isCreator = user.user_id === requisition.raised_by;
     if (!isCreator) return false;
 
-    // Check workflow permissions
-    return canEditRequisition(requisition.overall_status);
+    // Only Draft status allows editing (backend-aligned rule)
+    const status = normalizeStatus(requisition.overall_status);
+    return status === "Draft";
   }, [requisition, user]);
 
   // Fetch data
@@ -311,9 +297,11 @@ const ManagerRequisitionDetails: React.FC = () => {
 
         setRequisition(requisitionRes.data);
         setStatusHistory(historyRes.data || []);
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const axiosErr = err as { response?: { data?: { detail?: string } } };
         setError(
-          err.response?.data?.detail || "Failed to load requisition details",
+          axiosErr.response?.data?.detail ||
+            "Failed to load requisition details",
         );
       } finally {
         setIsLoading(false);
@@ -534,28 +522,10 @@ const ManagerRequisitionDetails: React.FC = () => {
 
       // Clear success message after 5 seconds
       setTimeout(() => setSaveMessage(null), 5000);
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail;
-      let errorMessage = "Failed to update requisition";
-
-      if (Array.isArray(detail)) {
-        errorMessage = detail
-          .map((item) => item?.msg || JSON.stringify(item))
-          .filter(Boolean)
-          .join("\n");
-      } else if (typeof detail === "string") {
-        errorMessage = detail;
-      } else if (err?.response?.data) {
-        try {
-          errorMessage = JSON.stringify(err.response.data);
-        } catch {
-          // keep default
-        }
-      }
-
+    } catch (err: unknown) {
       setSaveMessage({
         type: "error",
-        message: errorMessage,
+        message: extractErrorMessage(err, "Failed to update requisition"),
       });
     } finally {
       setIsSaving(false);
@@ -648,22 +618,10 @@ const ManagerRequisitionDetails: React.FC = () => {
           : "Job description uploaded",
       });
       setTimeout(() => setSaveMessage(null), 5000);
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail;
-      let errorMessage = "Failed to upload job description";
-
-      if (Array.isArray(detail)) {
-        errorMessage = detail
-          .map((item) => item?.msg || JSON.stringify(item))
-          .filter(Boolean)
-          .join("\n");
-      } else if (typeof detail === "string") {
-        errorMessage = detail;
-      }
-
+    } catch (err: unknown) {
       setSaveMessage({
         type: "error",
-        message: errorMessage,
+        message: extractErrorMessage(err, "Failed to upload job description"),
       });
     } finally {
       setIsUploadingJd(false);
@@ -686,22 +644,10 @@ const ManagerRequisitionDetails: React.FC = () => {
         message: "Job description removed",
       });
       setTimeout(() => setSaveMessage(null), 5000);
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail;
-      let errorMessage = "Failed to remove job description";
-
-      if (Array.isArray(detail)) {
-        errorMessage = detail
-          .map((item) => item?.msg || JSON.stringify(item))
-          .filter(Boolean)
-          .join("\n");
-      } else if (typeof detail === "string") {
-        errorMessage = detail;
-      }
-
+    } catch (err: unknown) {
       setSaveMessage({
         type: "error",
-        message: errorMessage,
+        message: extractErrorMessage(err, "Failed to remove job description"),
       });
     } finally {
       setIsRemovingJd(false);
@@ -744,8 +690,8 @@ const ManagerRequisitionDetails: React.FC = () => {
     <div className="admin-content-area">
       {/* Sticky Header */}
       <div className="manager-header sticky-header">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+        <div className="manager-header-row">
+          <div className="manager-header-left">
             <button
               className="action-button"
               onClick={() => navigate(-1)}
@@ -759,21 +705,16 @@ const ManagerRequisitionDetails: React.FC = () => {
               <h1 style={{ fontSize: "24px", marginBottom: "4px" }}>
                 REQ-{requisition.req_id}
               </h1>
-              <div className="flex items-center gap-2">
-                <span
-                  className={getStatusBadgeClass(requisition.overall_status)}
-                >
-                  {getStatusIcon(requisition.overall_status)}
-                  {requisition.overall_status}
-                </span>
-                <span className="text-xs text-slate-500">
+              <div className="manager-header-meta">
+                <StatusBadge status={requisition.overall_status} />
+                <span className="meta-text">
                   Created: {formatDate(requisition.created_at)}
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="manager-header-actions">
             {!isEditing ? (
               <button
                 className={`action-button ${canEdit ? "primary" : ""}`}
@@ -789,9 +730,9 @@ const ManagerRequisitionDetails: React.FC = () => {
                 {canEdit ? "Edit Requisition" : "Editing Locked"}
               </button>
             ) : (
-              <div className="flex items-center gap-2">
+              <div className="manager-header-actions">
                 {hasUnsavedChanges && (
-                  <span className="text-xs text-warning flex items-center gap-1">
+                  <span className="unsaved-indicator">
                     <AlertCircle size={12} />
                     Unsaved changes
                   </span>
@@ -829,9 +770,9 @@ const ManagerRequisitionDetails: React.FC = () => {
         {/* Save message */}
         {saveMessage && (
           <div
-            className={`mt-3 p-3 rounded-lg ${saveMessage.type === "success" ? "bg-green-50 border border-green-200 text-green-800" : "bg-red-50 border border-red-200 text-red-800"}`}
+            className={`save-message ${saveMessage.type === "success" ? "save-message--success" : "save-message--error"}`}
           >
-            <div className="flex items-center gap-2">
+            <div className="save-message-content">
               {saveMessage.type === "success" ? (
                 <CheckCircle size={16} />
               ) : (
@@ -844,8 +785,8 @@ const ManagerRequisitionDetails: React.FC = () => {
 
         {/* Permission warning */}
         {!canEdit && !isEditing && (
-          <div className="mt-3 p-3 rounded-lg bg-orange-50 border border-orange-200 text-orange-800">
-            <div className="flex items-center gap-2">
+          <div className="save-message save-message--warning">
+            <div className="save-message-content">
               <Lock size={16} />
               <span>
                 <strong>Editing is locked.</strong> This requisition has
@@ -895,9 +836,9 @@ const ManagerRequisitionDetails: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+      <div className="manager-detail-grid">
         {/* Left Column - Main Details */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="manager-detail-main">
           {/* Basic Information */}
           <div className="master-data-manager">
             <div className="data-manager-header">
@@ -906,24 +847,28 @@ const ManagerRequisitionDetails: React.FC = () => {
             </div>
 
             {!isEditing ? (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="field-grid">
                 <div>
-                  <div className="text-xs text-slate-500">Project Name</div>
-                  <div className="font-medium">
+                  <div className="field-label">Project Name</div>
+                  <div className="field-value--bold">
                     {requisition.project_name || "—"}
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-slate-500">Client Name</div>
-                  <div>{requisition.client_name || "—"}</div>
+                  <div className="field-label">Client Name</div>
+                  <div className="field-value">
+                    {requisition.client_name || "—"}
+                  </div>
                 </div>
                 <div>
-                  <div className="text-xs text-slate-500">Required By Date</div>
-                  <div>{formatDate(requisition.required_by_date)}</div>
+                  <div className="field-label">Required By Date</div>
+                  <div className="field-value">
+                    {formatDate(requisition.required_by_date)}
+                  </div>
                 </div>
                 <div>
-                  <div className="text-xs text-slate-500">Priority</div>
-                  <div className="flex items-center gap-2">
+                  <div className="field-label">Priority</div>
+                  <div>
                     <span
                       className={`priority-indicator priority-${requisition.priority?.toLowerCase()}`}
                     >
@@ -934,7 +879,7 @@ const ManagerRequisitionDetails: React.FC = () => {
               </div>
             ) : (
               formData && (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="field-grid">
                   <div className="form-field">
                     <label>Project Name *</label>
                     <input
@@ -993,29 +938,35 @@ const ManagerRequisitionDetails: React.FC = () => {
             </div>
 
             {!isEditing ? (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="field-grid">
                 <div>
-                  <div className="text-xs text-slate-500">Work Mode</div>
-                  <div>{requisition.work_mode || "—"}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Office Location</div>
-                  <div>{requisition.office_location || "—"}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Duration</div>
-                  <div>{requisition.duration || "—"}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">
-                    Replacement Position
+                  <div className="field-label">Work Mode</div>
+                  <div className="field-value">
+                    {requisition.work_mode || "—"}
                   </div>
-                  <div>{requisition.is_replacement ? "Yes" : "No"}</div>
+                </div>
+                <div>
+                  <div className="field-label">Office Location</div>
+                  <div className="field-value">
+                    {requisition.office_location || "—"}
+                  </div>
+                </div>
+                <div>
+                  <div className="field-label">Duration</div>
+                  <div className="field-value">
+                    {requisition.duration || "—"}
+                  </div>
+                </div>
+                <div>
+                  <div className="field-label">Replacement Position</div>
+                  <div className="field-value">
+                    {requisition.is_replacement ? "Yes" : "No"}
+                  </div>
                 </div>
               </div>
             ) : (
               formData && (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="field-grid">
                   <div className="form-field">
                     <label>Work Mode</label>
                     <select
@@ -1083,49 +1034,46 @@ const ManagerRequisitionDetails: React.FC = () => {
                   <p>No positions added</p>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="position-card-list">
                   {requisition.items.map((item, index) => (
-                    <div
-                      key={item.item_id}
-                      className="p-4 border border-slate-200 rounded-lg hover:border-slate-300 transition-colors"
-                    >
-                      <div className="flex justify-between items-start mb-2">
+                    <div key={item.item_id} className="position-card">
+                      <div className="position-card-header">
                         <div>
-                          <h4 className="font-semibold text-slate-800">
+                          <h4 className="position-card-title">
                             {item.role_position}
                           </h4>
-                          <div className="flex items-center gap-3 mt-1">
-                            <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded">
+                          <div className="position-card-meta">
+                            <span className="position-badge">
                               {item.skill_level || "Not specified"}
                             </span>
-                            <span className="text-xs text-slate-500">
+                            <span className="meta-text">
                               {item.experience_years || "—"} years experience
                             </span>
-                            <span className="text-xs text-slate-500">
+                            <span className="meta-text">
                               {item.education_requirement || "—"}
                             </span>
                           </div>
                         </div>
-                        <span className="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded">
+                        <span className="position-number">
                           Position {index + 1}
                         </span>
                       </div>
 
-                      <div className="mt-3">
-                        <div className="text-xs text-slate-500 mb-1">
+                      <div className="position-section">
+                        <div className="position-section-label">
                           Job Description
                         </div>
-                        <p className="text-sm text-slate-700">
+                        <p className="position-section-text">
                           {item.job_description}
                         </p>
                       </div>
 
                       {item.requirements && (
-                        <div className="mt-3">
-                          <div className="text-xs text-slate-500 mb-1">
+                        <div className="position-section">
+                          <div className="position-section-label">
                             Additional Requirements
                           </div>
-                          <p className="text-sm text-slate-700">
+                          <p className="position-section-text">
                             {item.requirements}
                           </p>
                         </div>
@@ -1136,20 +1084,20 @@ const ManagerRequisitionDetails: React.FC = () => {
               )
             ) : (
               formData && (
-                <div className="space-y-6">
+                <div className="position-card-list">
                   {formData.items.map((item, index) => (
                     <div
                       key={index}
-                      className="p-4 border border-slate-200 rounded-lg bg-slate-50"
+                      className="position-card position-card--editing"
                     >
-                      <div className="flex justify-between items-center mb-4">
-                        <h4 className="font-semibold text-slate-800">
+                      <div className="position-edit-header">
+                        <h4 className="position-edit-title">
                           Position {index + 1}
                         </h4>
                         {formData.items.length > 1 && (
                           <button
                             type="button"
-                            className="text-xs text-red-600 hover:text-red-800"
+                            className="position-remove-btn"
                             onClick={() => handleRemoveItem(index)}
                           >
                             Remove
@@ -1157,7 +1105,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                         )}
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="field-grid">
                         <div className="form-field">
                           <label>Role / Position *</label>
                           <input
@@ -1278,46 +1226,44 @@ const ManagerRequisitionDetails: React.FC = () => {
             </div>
 
             {!isEditing ? (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+              <div className="budget-section-stack">
+                <div className="field-grid">
                   <div>
-                    <div className="text-xs text-slate-500">Budget Amount</div>
-                    <div className="font-medium">
+                    <div className="field-label">Budget Amount</div>
+                    <div className="field-value--bold">
                       {formatCurrency(requisition.budget_amount)}
                     </div>
                   </div>
                   <div>
-                    <div className="text-xs text-slate-500">Replacement</div>
-                    <div>{requisition.is_replacement ? "Yes" : "No"}</div>
+                    <div className="field-label">Replacement</div>
+                    <div className="field-value">
+                      {requisition.is_replacement ? "Yes" : "No"}
+                    </div>
                   </div>
                 </div>
 
                 <div>
-                  <div className="text-xs text-slate-500 mb-2">
-                    Justification
-                  </div>
-                  <div className="p-3 bg-slate-50 rounded-lg">
+                  <div className="field-label">Justification</div>
+                  <div className="text-block">
                     {requisition.justification || "No justification provided"}
                   </div>
                 </div>
 
                 <div>
-                  <div className="text-xs text-slate-500 mb-2">
-                    Manager Notes
-                  </div>
-                  <div className="p-3 bg-slate-50 rounded-lg">
+                  <div className="field-label">Manager Notes</div>
+                  <div className="text-block">
                     {requisition.manager_notes || "No additional notes"}
                   </div>
                 </div>
               </div>
             ) : (
               formData && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                <div className="budget-section-stack">
+                  <div className="field-grid">
                     <div className="form-field">
                       <label>Budget Amount</label>
-                      <div className="flex items-center">
-                        <span className="mr-2 text-slate-500">₹</span>
+                      <div className="currency-input-wrapper">
+                        <span className="currency-symbol">₹</span>
                         <input
                           type="number"
                           min="0"
@@ -1376,7 +1322,7 @@ const ManagerRequisitionDetails: React.FC = () => {
         </div>
 
         {/* Right Column - Timeline & Attachments */}
-        <div className="space-y-6">
+        <div className="manager-detail-sidebar">
           {/* Job Description PDF */}
           <div className="master-data-manager">
             <div className="data-manager-header">
@@ -1385,13 +1331,13 @@ const ManagerRequisitionDetails: React.FC = () => {
             </div>
 
             {requisition.jd_file_key ? (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <FileText size={20} className="text-slate-400" />
+              <div>
+                <div className="jd-file-row">
+                  <div className="jd-file-info">
+                    <FileText size={20} />
                     <div>
-                      <div className="font-medium">Job Description.pdf</div>
-                      <div className="text-xs text-slate-500">
+                      <div className="jd-file-name">Job Description.pdf</div>
+                      <div className="jd-file-sub">
                         Uploaded with requisition
                       </div>
                     </div>
@@ -1413,7 +1359,7 @@ const ManagerRequisitionDetails: React.FC = () => {
             )}
 
             {canEdit && (
-              <div className="mt-3 space-y-2">
+              <div className="jd-upload-controls">
                 <input
                   key={jdInputKey}
                   type="file"
@@ -1421,10 +1367,8 @@ const ManagerRequisitionDetails: React.FC = () => {
                   onChange={handleJdFileChange}
                   disabled={isUploadingJd || isRemovingJd}
                 />
-                {jdError && (
-                  <div className="text-xs text-red-600">{jdError}</div>
-                )}
-                <div className="flex gap-2 flex-wrap">
+                {jdError && <div className="jd-upload-error">{jdError}</div>}
+                <div className="jd-upload-buttons">
                   <button
                     className="action-button primary"
                     onClick={handleUploadJD}
@@ -1446,7 +1390,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                     </button>
                   )}
                 </div>
-                <p className="text-xs text-slate-500">PDF only. Max 10MB.</p>
+                <p className="jd-upload-hint">PDF only. Max 10MB.</p>
               </div>
             )}
           </div>
@@ -1476,16 +1420,16 @@ const ManagerRequisitionDetails: React.FC = () => {
                 <p className="subtitle">Review and approval information</p>
               </div>
 
-              <div className="space-y-4">
+              <div className="approval-stack">
                 {requisition.budget_approved_at && (
-                  <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                    <div className="flex items-center gap-2 mb-1">
-                      <CheckCircle size={16} className="text-green-600" />
-                      <span className="font-medium text-green-800">
+                  <div className="approval-card">
+                    <div className="approval-card-header">
+                      <CheckCircle size={16} />
+                      <span className="approval-card-title">
                         Budget Approved
                       </span>
                     </div>
-                    <div className="text-xs text-green-700">
+                    <div className="approval-card-date">
                       Approved on:{" "}
                       {formatDateTime(requisition.budget_approved_at)}
                     </div>
@@ -1493,14 +1437,12 @@ const ManagerRequisitionDetails: React.FC = () => {
                 )}
 
                 {requisition.hr_approved_at && (
-                  <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                    <div className="flex items-center gap-2 mb-1">
-                      <CheckCircle size={16} className="text-green-600" />
-                      <span className="font-medium text-green-800">
-                        HR Approved
-                      </span>
+                  <div className="approval-card">
+                    <div className="approval-card-header">
+                      <CheckCircle size={16} />
+                      <span className="approval-card-title">HR Approved</span>
                     </div>
-                    <div className="text-xs text-green-700">
+                    <div className="approval-card-date">
                       Approved on: {formatDateTime(requisition.hr_approved_at)}
                     </div>
                   </div>
@@ -1550,22 +1492,5 @@ const ManagerRequisitionDetails: React.FC = () => {
     </div>
   );
 };
-
-// Add this icon component
-const LinkIcon: React.FC<{ size: number }> = ({ size }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-  </svg>
-);
 
 export default ManagerRequisitionDetails;

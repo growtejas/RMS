@@ -8,7 +8,7 @@ import MasterDataManager from "../../components/admin/MasterDataManager";
 import AuditLogViewer from "../../components/admin/AuditLogViewer";
 import UserManager from "./UserManager";
 import "../../styles/admin/Dashboard.css";
-import { DashboardView } from "../../types/dashboard";
+import type { DashboardView } from "../../types/dashboard.ts";
 
 const getViewTitle = (view: DashboardView): string => {
   const titles: Record<DashboardView, string> = {
@@ -18,7 +18,7 @@ const getViewTitle = (view: DashboardView): string => {
     users: "User Management",
   };
 
-  return titles[view];
+  return titles[view] ?? "Admin Dashboard";
 };
 
 const AdminDashboard: React.FC = () => {

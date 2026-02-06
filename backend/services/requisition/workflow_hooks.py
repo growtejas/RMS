@@ -120,11 +120,12 @@ class TransitionHookRegistry:
     
     _instance: Optional["TransitionHookRegistry"] = None
     _lock = asyncio.Lock() if hasattr(asyncio, 'Lock') else None
+    _hooks: Dict[str, HookRegistration]
     
     def __new__(cls) -> "TransitionHookRegistry":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._hooks = {}  # type: Dict[str, HookRegistration]
+            cls._instance._hooks = {}
             cls._instance._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="hook_")
         return cls._instance
     
