@@ -501,12 +501,13 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       });
     });
 
-    if (ticket.overallStatus === "Closed") {
+    // F-002 FIX: Use "Fulfilled" instead of "Closed"
+    if (ticket.overallStatus === "Fulfilled") {
       steps.push({
-        id: "closed",
-        title: "Requisition Closed",
-        actor: resolveUserName(statusHistoryByStatus["Closed"]?.changed_by),
-        time: statusHistoryByStatus["Closed"]?.changed_at ?? null,
+        id: "fulfilled",
+        title: "Requisition Fulfilled",
+        actor: resolveUserName(statusHistoryByStatus["Fulfilled"]?.changed_by),
+        time: statusHistoryByStatus["Fulfilled"]?.changed_at ?? null,
       });
     }
 
@@ -572,12 +573,15 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
     setTicket({ ...ticket, items: updatedItems });
 
     // Update overall status if all items are done
+    // F-002 FIX: Use "Fulfilled" instead of "Closed"
     const allItemsDone = updatedItems.every(
       (item) =>
         item.itemStatus === "Fulfilled" || item.itemStatus === "Cancelled",
     );
     if (allItemsDone) {
-      setTicket((prev) => (prev ? { ...prev, overallStatus: "Closed" } : prev));
+      setTicket((prev) =>
+        prev ? { ...prev, overallStatus: "Fulfilled" } : prev,
+      );
     }
   };
 
@@ -2255,7 +2259,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       </div>
 
       {/* Workflow Guidance */}
-      {ticket.overallStatus !== "Closed" && (
+      {ticket.overallStatus !== "Fulfilled" && (
         <div
           style={{
             marginTop: "24px",
@@ -2545,7 +2549,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
         </div>
 
         <div style={{ display: "flex", gap: "12px" }}>
-          {ticket.overallStatus !== "Closed" && (
+          {ticket.overallStatus !== "Fulfilled" && (
             <>
               {/* <button
                 className="action-button"
@@ -2569,11 +2573,11 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                 onClick={() => {
                   if (
                     window.confirm(
-                      "Are you sure you want to close this requisition? This action cannot be undone.",
+                      "Are you sure you want to mark this requisition as fulfilled? This action cannot be undone.",
                     )
                   ) {
                     setTicket((prev) =>
-                      prev ? { ...prev, overallStatus: "Closed" } : prev,
+                      prev ? { ...prev, overallStatus: "Fulfilled" } : prev,
                     );
                   }
                 }}
@@ -2586,7 +2590,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                 }}
               >
                 <CheckCircle size={14} />
-                Close Requisition
+                Mark as Fulfilled
               </button>
             </>
           )}

@@ -12,12 +12,31 @@ from db.base import Base
 
 
 class RequisitionItem(Base):
+    """
+    Requisition Item Model
+    
+    RBM Resource Fulfillment Module — Workflow Specification v1.0.0
+    
+    Status Values (Section 4.1):
+    - Pending: Item created, awaiting TA assignment
+    - Sourcing: TA assigned, candidate search in progress
+    - Shortlisted: Candidates identified for review
+    - Interviewing: Interview process active
+    - Offered: Offer extended to candidate
+    - Fulfilled: Position filled, employee assigned (Terminal)
+    - Cancelled: Item cancelled (Terminal)
+    """
     __tablename__ = "requisition_items"
 
     # --------------------
     # Primary Key
     # --------------------
     item_id = Column(Integer, primary_key=True)
+
+    # --------------------
+    # Optimistic Locking
+    # --------------------
+    version = Column(Integer, nullable=False, default=1, server_default='1')
 
     # --------------------
     # Parent Requisition
@@ -67,8 +86,10 @@ class RequisitionItem(Base):
         nullable=True
     )
 
-    # Item-level TA assignment (Issue 5 fix)
-    assigned_ta_id = Column(
+    # Item-level TA assignment (GC-003: triggers PENDING → SOURCING)
+    # Note: Column is named 'assigned_ta' in DB to match header-level convention
+    assigned_ta = Column(
+        "assigned_ta",  # Explicit DB column name
         Integer,
         ForeignKey("users.user_id", ondelete="RESTRICT"),
         nullable=True,
@@ -82,7 +103,7 @@ class RequisitionItem(Base):
     ta_notes = Column(Text, nullable=True)
 
     # --------------------
-    # Workflow
+    # Workflow (Specification v1.0.0)
     # --------------------
     item_status = Column(
         String(20),
@@ -92,7 +113,7 @@ class RequisitionItem(Base):
     )
 
     # --------------------
-    # Constraints
+    # Constraints (Specification v1.0.0)
     # --------------------
     __table_args__ = (
         CheckConstraint(
@@ -101,10 +122,17 @@ class RequisitionItem(Base):
                 'Pending',
                 'Sourcing',
                 'Shortlisted',
+                'Interviewing',
+                'Offered',
                 'Fulfilled',
                 'Cancelled'
             )
             """,
             name="chk_requisition_item_status"
+        ),
+        # GC-004: FULFILLED items must have employee assigned
+        CheckConstraint(
+            "item_status != 'Fulfilled' OR assigned_emp_id IS NOT NULL",
+            name="chk_fulfilled_has_employee"
         ),
     )

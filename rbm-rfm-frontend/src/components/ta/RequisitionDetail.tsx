@@ -227,7 +227,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
 
   const getOverallStatusClass = (status: string) => {
     switch (status) {
+      case "Pending_Budget":
       case "Pending Budget Approval":
+      case "Pending_HR":
       case "Pending HR Approval":
       case "Approved & Unassigned":
       case "Open":
@@ -239,6 +241,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         return "ticket-status fulfilled";
       case "Closed":
       case "Closed (Partially Fulfilled)":
+      case "Cancelled":
       case "Rejected":
         return "ticket-status closed";
       default:
@@ -467,6 +470,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     if (ticket.budgetApprovedBy) {
       const budgetLog = auditLogs.find((log) => log.action === "BUDGET_UPDATE");
       const budgetTime =
+        statusHistoryByStatus["Pending_HR"]?.changed_at ??
         statusHistoryByStatus["Pending HR Approval"]?.changed_at ??
         budgetLog?.performed_at ??
         ticket.createdAt ??
@@ -516,12 +520,21 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       });
     });
 
-    if (ticket.overallStatus === "Closed") {
+    if (
+      ticket.overallStatus === "Fulfilled" ||
+      ticket.overallStatus === "Closed"
+    ) {
       steps.push({
-        id: "closed",
-        title: "Requisition Closed",
-        actor: resolveUserName(statusHistoryByStatus["Closed"]?.changed_by),
-        time: statusHistoryByStatus["Closed"]?.changed_at ?? null,
+        id: "fulfilled",
+        title: "Requisition Fulfilled",
+        actor: resolveUserName(
+          statusHistoryByStatus["Fulfilled"]?.changed_by ??
+            statusHistoryByStatus["Closed"]?.changed_by,
+        ),
+        time:
+          statusHistoryByStatus["Fulfilled"]?.changed_at ??
+          statusHistoryByStatus["Closed"]?.changed_at ??
+          null,
       });
     }
 
@@ -728,12 +741,12 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     },
     {
       id: "items" as const,
-      label: "Requisition Items",
+      label: "Items",
       icon: <Briefcase size={16} />,
     },
     {
       id: "employees" as const,
-      label: "Available Employees",
+      label: "Employees",
       icon: <Users size={16} />,
     },
     { id: "timeline" as const, label: "Timeline", icon: <History size={16} /> },
@@ -2299,258 +2312,259 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       </div>
 
       {/* Workflow Guidance */}
-      {ticket.overallStatus !== "Closed" && (
-        <div
-          style={{
-            marginTop: "24px",
-            padding: "20px",
-            backgroundColor: "rgba(59, 130, 246, 0.05)",
-            borderRadius: "12px",
-            border: "1px solid rgba(59, 130, 246, 0.1)",
-          }}
-        >
+      {ticket.overallStatus !== "Fulfilled" &&
+        ticket.overallStatus !== "Closed" && (
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "12px",
-              marginBottom: "16px",
-            }}
-          >
-            <AlertCircle size={20} color="var(--primary-accent)" />
-            <div>
-              <h3
-                style={{
-                  fontSize: "15px",
-                  fontWeight: 600,
-                  color: "var(--text-primary)",
-                }}
-              >
-                HR Workflow Guidance
-              </h3>
-              <p style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-                Recommended steps to process this requisition
-              </p>
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-              gap: "16px",
+              marginTop: "24px",
+              padding: "20px",
+              backgroundColor: "rgba(59, 130, 246, 0.05)",
+              borderRadius: "12px",
+              border: "1px solid rgba(59, 130, 246, 0.1)",
             }}
           >
             <div
               style={{
-                padding: "12px",
-                backgroundColor: "white",
-                borderRadius: "8px",
-                border: "1px solid var(--border-subtle)",
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                marginBottom: "16px",
               }}
             >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  marginBottom: "8px",
-                }}
-              >
-                <div
+              <AlertCircle size={20} color="var(--primary-accent)" />
+              <div>
+                <h3
                   style={{
-                    width: "24px",
-                    height: "24px",
-                    borderRadius: "6px",
-                    backgroundColor: "rgba(59, 130, 246, 0.1)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
+                    fontSize: "15px",
+                    fontWeight: 600,
+                    color: "var(--text-primary)",
                   }}
                 >
-                  <span
-                    style={{
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      color: "var(--primary-accent)",
-                    }}
-                  >
-                    1
-                  </span>
-                </div>
-                <span style={{ fontSize: "13px", fontWeight: 600 }}>
-                  Review Open Items
-                </span>
+                  HR Workflow Guidance
+                </h3>
+                <p style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                  Recommended steps to process this requisition
+                </p>
               </div>
-              <p
-                style={{
-                  fontSize: "12px",
-                  color: "var(--text-secondary)",
-                  lineHeight: 1.4,
-                }}
-              >
-                Check all pending positions in the "Requisition Items" tab
-              </p>
             </div>
 
             <div
               style={{
-                padding: "12px",
-                backgroundColor: "white",
-                borderRadius: "8px",
-                border: "1px solid var(--border-subtle)",
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+                gap: "16px",
               }}
             >
               <div
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  marginBottom: "8px",
+                  padding: "12px",
+                  backgroundColor: "white",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-subtle)",
                 }}
               >
                 <div
                   style={{
-                    width: "24px",
-                    height: "24px",
-                    borderRadius: "6px",
-                    backgroundColor: "rgba(59, 130, 246, 0.1)",
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "center",
+                    gap: "8px",
+                    marginBottom: "8px",
                   }}
                 >
-                  <span
+                  <div
                     style={{
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      color: "var(--primary-accent)",
+                      width: "24px",
+                      height: "24px",
+                      borderRadius: "6px",
+                      backgroundColor: "rgba(59, 130, 246, 0.1)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
                     }}
                   >
-                    2
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        color: "var(--primary-accent)",
+                      }}
+                    >
+                      1
+                    </span>
+                  </div>
+                  <span style={{ fontSize: "13px", fontWeight: 600 }}>
+                    Review Open Items
                   </span>
                 </div>
-                <span style={{ fontSize: "13px", fontWeight: 600 }}>
-                  Match Resources
-                </span>
+                <p
+                  style={{
+                    fontSize: "12px",
+                    color: "var(--text-secondary)",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Check all pending positions in the "Requisition Items" tab
+                </p>
               </div>
-              <p
-                style={{
-                  fontSize: "12px",
-                  color: "var(--text-secondary)",
-                  lineHeight: 1.4,
-                }}
-              >
-                Use the "Available Employees" tab to find and assign matches
-              </p>
-            </div>
 
-            <div
-              style={{
-                padding: "12px",
-                backgroundColor: "white",
-                borderRadius: "8px",
-                border: "1px solid var(--border-subtle)",
-              }}
-            >
               <div
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  marginBottom: "8px",
+                  padding: "12px",
+                  backgroundColor: "white",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-subtle)",
                 }}
               >
                 <div
                   style={{
-                    width: "24px",
-                    height: "24px",
-                    borderRadius: "6px",
-                    backgroundColor: "rgba(59, 130, 246, 0.1)",
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "center",
+                    gap: "8px",
+                    marginBottom: "8px",
                   }}
                 >
-                  <span
+                  <div
                     style={{
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      color: "var(--primary-accent)",
+                      width: "24px",
+                      height: "24px",
+                      borderRadius: "6px",
+                      backgroundColor: "rgba(59, 130, 246, 0.1)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
                     }}
                   >
-                    3
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        color: "var(--primary-accent)",
+                      }}
+                    >
+                      2
+                    </span>
+                  </div>
+                  <span style={{ fontSize: "13px", fontWeight: 600 }}>
+                    Match Resources
                   </span>
                 </div>
-                <span style={{ fontSize: "13px", fontWeight: 600 }}>
-                  Update Status
-                </span>
+                <p
+                  style={{
+                    fontSize: "12px",
+                    color: "var(--text-secondary)",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Use the "Available Employees" tab to find and assign matches
+                </p>
               </div>
-              <p
-                style={{
-                  fontSize: "12px",
-                  color: "var(--text-secondary)",
-                  lineHeight: 1.4,
-                }}
-              >
-                Mark items as fulfilled or cancelled as you work through them
-              </p>
-            </div>
 
-            <div
-              style={{
-                padding: "12px",
-                backgroundColor: "white",
-                borderRadius: "8px",
-                border: "1px solid var(--border-subtle)",
-              }}
-            >
               <div
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  marginBottom: "8px",
+                  padding: "12px",
+                  backgroundColor: "white",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-subtle)",
                 }}
               >
                 <div
                   style={{
-                    width: "24px",
-                    height: "24px",
-                    borderRadius: "6px",
-                    backgroundColor: "rgba(59, 130, 246, 0.1)",
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "center",
+                    gap: "8px",
+                    marginBottom: "8px",
                   }}
                 >
-                  <span
+                  <div
                     style={{
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      color: "var(--primary-accent)",
+                      width: "24px",
+                      height: "24px",
+                      borderRadius: "6px",
+                      backgroundColor: "rgba(59, 130, 246, 0.1)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
                     }}
                   >
-                    4
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        color: "var(--primary-accent)",
+                      }}
+                    >
+                      3
+                    </span>
+                  </div>
+                  <span style={{ fontSize: "13px", fontWeight: 600 }}>
+                    Update Status
                   </span>
                 </div>
-                <span style={{ fontSize: "13px", fontWeight: 600 }}>
-                  Document Progress
-                </span>
+                <p
+                  style={{
+                    fontSize: "12px",
+                    color: "var(--text-secondary)",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Mark items as fulfilled or cancelled as you work through them
+                </p>
               </div>
-              <p
+
+              <div
                 style={{
-                  fontSize: "12px",
-                  color: "var(--text-secondary)",
-                  lineHeight: 1.4,
+                  padding: "12px",
+                  backgroundColor: "white",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-subtle)",
                 }}
               >
-                Add notes in the timeline section to track your progress
-              </p>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    marginBottom: "8px",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: "24px",
+                      height: "24px",
+                      borderRadius: "6px",
+                      backgroundColor: "rgba(59, 130, 246, 0.1)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        color: "var(--primary-accent)",
+                      }}
+                    >
+                      4
+                    </span>
+                  </div>
+                  <span style={{ fontSize: "13px", fontWeight: 600 }}>
+                    Document Progress
+                  </span>
+                </div>
+                <p
+                  style={{
+                    fontSize: "12px",
+                    color: "var(--text-secondary)",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Add notes in the timeline section to track your progress
+                </p>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
       {/* Action Buttons Footer */}
       <div
@@ -2589,9 +2603,10 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         </div>
 
         <div style={{ display: "flex", gap: "12px" }}>
-          {ticket.overallStatus !== "Closed" && (
-            <>
-              {/* <button
+          {ticket.overallStatus !== "Fulfilled" &&
+            ticket.overallStatus !== "Closed" && (
+              <>
+                {/* <button
                 className="action-button"
                 onClick={() => {
                   setTicket((prev) => ({ ...prev, priority: "High" }));
@@ -2608,32 +2623,32 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 Mark as Urgent
               </button> */}
 
-              <button
-                className="action-button primary"
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      "Are you sure you want to close this requisition? This action cannot be undone.",
-                    )
-                  ) {
-                    setTicket((prev) =>
-                      prev ? { ...prev, overallStatus: "Closed" } : prev,
-                    );
-                  }
-                }}
-                style={{
-                  fontSize: "12px",
-                  padding: "8px 16px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-              >
-                <CheckCircle size={14} />
-                Close Requisition
-              </button>
-            </>
-          )}
+                <button
+                  className="action-button primary"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "Are you sure you want to mark this requisition as fulfilled? This action cannot be undone.",
+                      )
+                    ) {
+                      setTicket((prev) =>
+                        prev ? { ...prev, overallStatus: "Fulfilled" } : prev,
+                      );
+                    }
+                  }}
+                  style={{
+                    fontSize: "12px",
+                    padding: "8px 16px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <CheckCircle size={14} />
+                  Mark as Fulfilled
+                </button>
+              </>
+            )}
 
           {/* <button
             className="action-button"

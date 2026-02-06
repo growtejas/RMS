@@ -19,13 +19,25 @@ import {
 // Status Types
 // ============================================================================
 
+/**
+ * F-002 FIX: Status values must match backend workflow_matrix.py exactly
+ *
+ * Backend enum: services/requisition/workflow_matrix.py - RequisitionStatus
+ * DB migration: alembic/versions/wf_spec_v1_constraints.py
+ *
+ * CRITICAL: These values are the spec-compliant format with underscores.
+ * The migration wf_spec_v1_constraints.py converts:
+ *   - "Pending Budget Approval" → "Pending_Budget"
+ *   - "Pending HR Approval" → "Pending_HR"
+ *   - "Approved & Unassigned" → merged into "Active"
+ *   - "Closed" → renamed to "Fulfilled" or "Cancelled"
+ */
 export const REQUISITION_STATUSES = [
   "Draft",
-  "Pending Budget Approval",
-  "Pending HR Approval",
-  "Approved & Unassigned",
-  "Active",
-  "Closed",
+  "Pending_Budget", // F-002: Was "Pending Budget Approval"
+  "Pending_HR", // F-002: Was "Pending HR Approval"
+  "Active", // F-002: "Approved & Unassigned" merged into this
+  "Fulfilled", // F-002: Was "Closed"
   "Rejected",
   "Cancelled",
 ] as const;
@@ -110,9 +122,11 @@ export const requisitionWorkflow = new Workflow<
     description: "Resource requisition approval and fulfillment workflow",
   },
   {
+    // F-002 FIX: All status names now match backend workflow_matrix.py
+
     // Draft state - initial state
     Draft: {
-      "Pending Budget Approval": {
+      Pending_Budget: {
         description: "Submit requisition for budget approval",
         guards: [isRequesterOrAdmin],
       },
@@ -122,9 +136,9 @@ export const requisitionWorkflow = new Workflow<
       },
     },
 
-    // Pending Budget Approval - waiting for finance
-    "Pending Budget Approval": {
-      "Pending HR Approval": {
+    // Pending_Budget - waiting for finance
+    Pending_Budget: {
+      Pending_HR: {
         description: "Approve budget and send to HR",
         guards: [isBudgetManager],
       },
@@ -132,45 +146,33 @@ export const requisitionWorkflow = new Workflow<
         description: "Reject due to budget constraints",
         guards: [isBudgetManager, hasRejectionReason],
       },
-      Draft: {
-        description: "Return to requester for edits",
-        guards: [isBudgetManager],
+      Cancelled: {
+        description: "Cancel during budget review",
+        guards: [isBudgetManager, hasCancellationReason],
       },
     },
 
-    // Pending HR Approval - waiting for HR review
-    "Pending HR Approval": {
-      "Approved & Unassigned": {
-        description: "Approve requisition for hiring",
+    // Pending_HR - waiting for HR review
+    Pending_HR: {
+      Active: {
+        description: "Approve requisition (transitions to Active)",
         guards: [isHRUser],
       },
       Rejected: {
         description: "Reject due to HR policy",
         guards: [isHRUser, hasRejectionReason],
       },
-      "Pending Budget Approval": {
-        description: "Return to budget review",
-        guards: [isHRUser],
-      },
-    },
-
-    // Approved & Unassigned - ready for assignment
-    "Approved & Unassigned": {
-      Active: {
-        description: "Activate when assignments begin",
-        guards: [isHRUser, hasPositionsAssigned],
-      },
       Cancelled: {
-        description: "Cancel approved requisition",
+        description: "Cancel during HR review",
         guards: [isHRUser, hasCancellationReason],
       },
     },
 
     // Active - hiring in progress
     Active: {
-      Closed: {
-        description: "Close when all positions filled",
-        guards: [isHRUser],
+      Fulfilled: {
+        description: "Complete when all positions filled (SYSTEM only)",
+        guards: [], // SYSTEM-only transition - no user guards
       },
       Cancelled: {
         description: "Cancel active requisition",
@@ -178,9 +180,16 @@ export const requisitionWorkflow = new Workflow<
       },
     },
 
-    // Terminal states - no outgoing transitions
-    Closed: {},
-    Rejected: {},
+    // F-004: Rejected is no longer terminal - can resubmit
+    Rejected: {
+      Draft: {
+        description: "Reopen for revision and resubmission",
+        guards: [isRequesterOrAdmin],
+      },
+    },
+
+    // Terminal states - truly final, no outgoing transitions
+    Fulfilled: {},
     Cancelled: {},
   },
 );
@@ -233,11 +242,10 @@ export function isTerminalRequisitionStatus(
  */
 export const REQUISITION_STATUS_LABELS: Record<RequisitionStatus, string> = {
   Draft: "Draft",
-  "Pending Budget Approval": "Pending Budget Approval",
-  "Pending HR Approval": "Pending HR Approval",
-  "Approved & Unassigned": "Approved & Unassigned",
+  Pending_Budget: "Pending Budget Approval",
+  Pending_HR: "Pending HR Approval",
   Active: "Active",
-  Closed: "Closed",
+  Fulfilled: "Fulfilled",
   Rejected: "Rejected",
   Cancelled: "Cancelled",
 };
@@ -247,11 +255,10 @@ export const REQUISITION_STATUS_LABELS: Record<RequisitionStatus, string> = {
  */
 export const REQUISITION_STATUS_CLASSES: Record<RequisitionStatus, string> = {
   Draft: "status-draft",
-  "Pending Budget Approval": "status-pending-budget",
-  "Pending HR Approval": "status-pending-hr",
-  "Approved & Unassigned": "status-approved",
+  Pending_Budget: "status-pending-budget",
+  Pending_HR: "status-pending-hr",
   Active: "status-active",
-  Closed: "status-closed",
+  Fulfilled: "status-fulfilled",
   Rejected: "status-rejected",
   Cancelled: "status-cancelled",
 };

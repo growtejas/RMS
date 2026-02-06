@@ -16,12 +16,31 @@ from db.base import Base
 
 
 class Requisition(Base):
+    """
+    Requisition Header Model
+    
+    RBM Resource Fulfillment Module — Workflow Specification v1.0.0
+    
+    Status Values (Section 3.1):
+    - Draft: Created but not submitted
+    - Pending_Budget: Submitted, awaiting budget/manager approval
+    - Pending_HR: Budget approved, awaiting HR approval
+    - Active: Fully approved, TA work in progress
+    - Fulfilled: All items fulfilled (Terminal)
+    - Rejected: Rejected during approval (Terminal)
+    - Cancelled: Cancelled by authorized actor (Terminal)
+    """
     __tablename__ = "requisitions"
 
     # --------------------
     # Primary Key
     # --------------------
     req_id = Column(Integer, primary_key=True)
+
+    # --------------------
+    # Optimistic Locking
+    # --------------------
+    version = Column(Integer, nullable=False, default=1, server_default='1')
 
     # --------------------
     # Ownership
@@ -77,12 +96,12 @@ class Requisition(Base):
     required_by_date = Column(Date, nullable=True)
 
     # --------------------
-    # Workflow
+    # Workflow (Specification v1.0.0)
     # --------------------
     overall_status = Column(
         String(30),
         nullable=False,
-        default="Pending Budget Approval",
+        default="Draft",  # Specification: Initial state is Draft
         index=True
     )
     approval_history = Column(TIMESTAMP, nullable=True)
@@ -107,7 +126,7 @@ class Requisition(Base):
     )
 
     # --------------------
-    # Constraints
+    # Constraints (Specification v1.0.0)
     # --------------------
     __table_args__ = (
         CheckConstraint(
@@ -117,14 +136,13 @@ class Requisition(Base):
         CheckConstraint(
             """
             overall_status IN (
-                'Pending Budget Approval',
-                'Pending HR Approval',
-                'Approved & Unassigned',
+                'Draft',
+                'Pending_Budget',
+                'Pending_HR',
                 'Active',
                 'Fulfilled',
-                'Closed',
-                'Closed (Partially Fulfilled)',
-                'Rejected'
+                'Rejected',
+                'Cancelled'
             )
             """,
             name="chk_requisition_status"

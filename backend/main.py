@@ -9,6 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 # ---- Create app ----
 app = FastAPI(title="RBM Resource Fulfillment Module")
 
+# ---- Status Protection (GC-001 Enforcement) ----
+# Register SQLAlchemy event listeners to block direct status mutations
+from services.requisition import register_status_protection
+register_status_protection()
+
 # ---- CORS Configuration ----
 app.add_middleware(
     CORSMiddleware,
@@ -39,6 +44,12 @@ from api.employee_education import router as employee_education_router
 from api.requisitions import router as requisitions_router
 from api.requisition_items import router as requisition_items_router
 from api.requisition_status_history import router as requisition_status_history_router
+
+# ---- Workflow (Specification v1.0.0) ----
+from api.workflow_routes import requisition_workflow_router, item_workflow_router
+
+# ---- Workflow Audit & Observability ----
+from api.workflow_audit import router as workflow_audit_router
 
 # ---- Audit ----
 from api.audit_log import router as audit_log_router
@@ -77,6 +88,11 @@ app.include_router(employee_education_router, prefix="/api")
 app.include_router(requisitions_router, prefix="/api")
 app.include_router(requisition_items_router, prefix="/api")
 app.include_router(requisition_status_history_router, prefix="/api")
+
+# ---- Workflow API (Specification v1.0.0) ----
+app.include_router(requisition_workflow_router, prefix="/api")
+app.include_router(item_workflow_router, prefix="/api")
+app.include_router(workflow_audit_router, prefix="/api")
 
 app.include_router(audit_log_router, prefix="/api")
 app.include_router(hr_router, prefix="/api")

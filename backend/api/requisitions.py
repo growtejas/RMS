@@ -28,13 +28,13 @@ from schemas.requisition_item import RequisitionItemCreate
 from schemas.requisition_item import RequisitionItemResponse
 from utils.storage import get_storage_service, StorageService
 
-# Workflow engine imports
+# Workflow engine imports (V2 - migrated from legacy engine per F-001 remediation)
 from services.requisition import (
-    RequisitionWorkflowEngine,
     RequisitionEvents,
     RequisitionPermissions,
 )
-from services.requisition.workflow_engine import WorkflowError
+from services.requisition.workflow_engine_v2 import RequisitionWorkflowEngine
+from services.requisition.workflow_exceptions import WorkflowException
 from services.notification_service import send as notify
 
 router = APIRouter(
@@ -102,11 +102,35 @@ async def create_requisition(
             budget_amount=parsed_budget,
             required_by_date=parsed_required_by,
             raised_by=current_user.user_id,
-            overall_status="Pending Budget Approval",
+            overall_status="Pending_Budget",
         )
 
         db.add(requisition)
         db.flush()
+
+        # F-006: Audit and status history on creation
+        RequisitionEvents.log_audit(
+            db=db,
+            entity_name="requisition",
+            entity_id=str(requisition.req_id),
+            action="REQUISITION_CREATED",
+            performed_by=current_user.user_id,
+            new_value={
+                "project_name": requisition.project_name,
+                "client_name": requisition.client_name,
+                "priority": requisition.priority,
+                "overall_status": requisition.overall_status,
+                "is_replacement": requisition.is_replacement,
+            },
+        )
+        RequisitionEvents.record_status_history(
+            db=db,
+            req_id=requisition.req_id,
+            old_status=None,
+            new_status=requisition.overall_status,
+            changed_by=current_user.user_id,
+            justification="Created",
+        )
 
         if items_payload:
             for item in items_payload:
@@ -122,6 +146,19 @@ async def create_requisition(
                     item_status="Pending",
                 )
                 db.add(db_item)
+                db.flush()
+                RequisitionEvents.log_audit(
+                    db=db,
+                    entity_name="requisition_item",
+                    entity_id=str(db_item.item_id),
+                    action="ITEM_CREATED",
+                    performed_by=current_user.user_id,
+                    new_value={
+                        "req_id": requisition.req_id,
+                        "role_position": db_item.role_position,
+                        "item_status": db_item.item_status,
+                    },
+                )
 
         if jd_file:
             if jd_file.content_type != "application/pdf":
@@ -458,95 +495,91 @@ def update_requisition_status(
 def approve_budget(
     req_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("Admin", "HR"))
+    current_user: User = Depends(require_any_role("Admin", "HR")),
+    roles: List[str] = Depends(get_current_user_roles),
 ):
-    """Approve budget for a requisition. Transitions to Pending HR Approval."""
-    requisition = db.query(Requisition).filter(
-        Requisition.req_id == req_id
-    ).first()
-
-    if not requisition:
-        raise HTTPException(status_code=404, detail="Requisition not found")
-
+    """Approve budget for a requisition. Transitions to Pending_HR."""
     try:
         RequisitionWorkflowEngine.approve_budget(
             db=db,
-            requisition=requisition,
+            req_id=req_id,
             user_id=current_user.user_id,
+            user_roles=roles,
         )
         db.commit()
-        notify(
-            requisition.raised_by,
-            f"HEADER_APPROVED: Requisition {req_id} budget approved",
-        )
+        # Fetch requisition for notification
+        requisition = db.query(Requisition).filter(Requisition.req_id == req_id).first()
+        if requisition:
+            notify(
+                requisition.raised_by,
+                f"HEADER_APPROVED: Requisition {req_id} budget approved",
+            )
         return {"message": "Budget approved"}
-    except WorkflowError as e:
+    except WorkflowException as e:
         db.rollback()
-        raise HTTPException(status_code=e.status_code, detail=e.message)
+        raise HTTPException(status_code=e.http_status, detail=e.message)
 
 
 @router.put("/{req_id}/approve")
 def approve_requisition(
     req_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("HR"))
+    current_user: User = Depends(require_any_role("HR")),
+    roles: List[str] = Depends(get_current_user_roles),
 ):
-    """HR approval of a requisition. Transitions to Approved & Unassigned."""
-    requisition = (
-        db.query(Requisition)
-        .filter(Requisition.req_id == req_id)
-        .with_for_update()
-        .first()
-    )
-
-    if not requisition:
-        raise HTTPException(status_code=404, detail="Requisition not found")
-
+    """HR approval of a requisition. Transitions to Active."""
     try:
         RequisitionWorkflowEngine.approve_hr(
             db=db,
-            requisition=requisition,
+            req_id=req_id,
             user_id=current_user.user_id,
+            user_roles=roles,
         )
         db.commit()
-        notify(
-            requisition.raised_by,
-            f"HEADER_APPROVED: Requisition {req_id} approved",
-        )
+        # Fetch requisition for notification
+        requisition = db.query(Requisition).filter(Requisition.req_id == req_id).first()
+        if requisition:
+            notify(
+                requisition.raised_by,
+                f"HEADER_APPROVED: Requisition {req_id} approved",
+            )
         return {"message": "Requisition approved"}
-    except WorkflowError as e:
+    except WorkflowException as e:
         db.rollback()
-        raise HTTPException(status_code=e.status_code, detail=e.message)
+        raise HTTPException(status_code=e.http_status, detail=e.message)
 
 
 @router.patch("/{req_id}/approve-release")
 def approve_and_release(
     req_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("Admin", "HR"))
+    current_user: User = Depends(require_any_role("Admin", "HR")),
+    roles: List[str] = Depends(get_current_user_roles),
 ):
-    """Combined approval (budget + HR). Transitions to Approved & Unassigned."""
-    requisition = db.query(Requisition).filter(
-        Requisition.req_id == req_id
-    ).first()
-
+    """Combined approval (budget + HR). Transitions to Active."""
+    # First check the current status to determine workflow path
+    requisition = db.query(Requisition).filter(Requisition.req_id == req_id).first()
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
     try:
-        # This endpoint allows approval from either Pending Budget or Pending HR status
-        if requisition.overall_status == "Pending Budget Approval":
-            RequisitionWorkflowEngine.approve_budget(db, requisition, current_user.user_id)
-        RequisitionWorkflowEngine.approve_hr(db, requisition, current_user.user_id)
+        # This endpoint allows approval from either Pending_Budget or Pending_HR status
+        if requisition.overall_status == "Pending_Budget":
+            RequisitionWorkflowEngine.approve_budget(
+                db=db, req_id=req_id, user_id=current_user.user_id, user_roles=roles
+            )
+        RequisitionWorkflowEngine.approve_hr(
+            db=db, req_id=req_id, user_id=current_user.user_id, user_roles=roles
+        )
         db.commit()
         notify(
             requisition.raised_by,
             f"HEADER_APPROVED: Requisition {req_id} approved and released",
         )
         return {"message": "Requisition approved and released"}
-    except WorkflowError as e:
+    except WorkflowException as e:
         db.rollback()
-        raise HTTPException(status_code=e.status_code, detail=e.message)
+        raise HTTPException(status_code=e.http_status, detail=e.message)
 
 
 @router.patch("/{req_id}/assign-ta")
@@ -554,9 +587,18 @@ def assign_ta(
     req_id: int,
     payload: RequisitionAssign,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("Admin", "HR"))
+    current_user: User = Depends(require_any_role("Admin", "HR")),
+    roles: List[str] = Depends(get_current_user_roles),
 ):
-    """Assign a TA to a requisition. Transitions to Active."""
+    """
+    Assign a TA to a requisition header.
+    
+    NOTE: In the V2 workflow model, TAs are assigned at item level.
+    This endpoint is maintained for backward compatibility.
+    For new integrations, use POST /api/requisition-items/{item_id}/workflow/assign-ta
+    """
+    from services.requisition.status_protection import workflow_transition_context
+    
     requisition = (
         db.query(Requisition)
         .filter(Requisition.req_id == req_id)
@@ -567,22 +609,29 @@ def assign_ta(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
 
-    try:
-        RequisitionWorkflowEngine.assign_ta(
-            db=db,
-            requisition=requisition,
-            ta_user_id=payload.ta_user_id,
-            performed_by=current_user.user_id,
+    # Validate status allows assignment
+    allowed_statuses = ["Active", "Approved & Unassigned"]
+    if requisition.overall_status not in allowed_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot assign TA in status '{requisition.overall_status}'. "
+                   f"Allowed: {', '.join(allowed_statuses)}"
         )
-        db.commit()
-        notify(
-            payload.ta_user_id,
-            f"ITEM_ASSIGNED_TA: Requisition {req_id} assigned to you",
-        )
-        return {"message": "TA assigned", "assigned_ta": payload.ta_user_id}
-    except WorkflowError as e:
-        db.rollback()
-        raise HTTPException(status_code=e.status_code, detail=e.message)
+
+    # Assign TA at header level
+    requisition.assigned_ta = payload.ta_user_id
+    
+    # Transition to Active if currently legacy Approved & Unassigned
+    if requisition.overall_status == "Approved & Unassigned":
+        with workflow_transition_context():
+            requisition.overall_status = "Active"
+
+    db.commit()
+    notify(
+        payload.ta_user_id,
+        f"HEADER_ASSIGNED_TA: Requisition {req_id} assigned to you",
+    )
+    return {"message": "TA assigned", "assigned_ta": payload.ta_user_id}
 
 
 @router.put("/{req_id}/reject")
@@ -590,35 +639,30 @@ def reject_requisition(
     req_id: int,
     payload: RequisitionReject,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("HR"))
+    current_user: User = Depends(require_any_role("HR")),
+    roles: List[str] = Depends(get_current_user_roles),
 ):
     """Reject a requisition. Requires reason."""
-    requisition = (
-        db.query(Requisition)
-        .filter(Requisition.req_id == req_id)
-        .with_for_update()
-        .first()
-    )
-
-    if not requisition:
-        raise HTTPException(status_code=404, detail="Requisition not found")
-
     try:
         RequisitionWorkflowEngine.reject(
             db=db,
-            requisition=requisition,
+            req_id=req_id,
             user_id=current_user.user_id,
+            user_roles=roles,
             reason=payload.reason,
         )
         db.commit()
-        notify(
-            requisition.raised_by,
-            f"HEADER_REJECTED: Requisition {req_id} rejected",
-        )
+        # Fetch requisition for notification
+        requisition = db.query(Requisition).filter(Requisition.req_id == req_id).first()
+        if requisition:
+            notify(
+                requisition.raised_by,
+                f"HEADER_REJECTED: Requisition {req_id} rejected",
+            )
         return {"message": "Requisition rejected"}
-    except WorkflowError as e:
+    except WorkflowException as e:
         db.rollback()
-        raise HTTPException(status_code=e.status_code, detail=e.message)
+        raise HTTPException(status_code=e.http_status, detail=e.message)
 
 
 class RequisitionCancel(BaseModel):
@@ -635,26 +679,16 @@ def cancel_requisition(
     roles: List[str] = Depends(get_current_user_roles),
 ):
     """Cancel a requisition. Requires reason and ownership/HR permission."""
-    requisition = (
-        db.query(Requisition)
-        .filter(Requisition.req_id == req_id)
-        .with_for_update()
-        .first()
-    )
-
-    if not requisition:
-        raise HTTPException(status_code=404, detail="Requisition not found")
-
     try:
         RequisitionWorkflowEngine.cancel(
             db=db,
-            requisition=requisition,
+            req_id=req_id,
             user_id=current_user.user_id,
             user_roles=roles,
             reason=payload.reason,
         )
         db.commit()
         return {"message": "Requisition cancelled", "reason": payload.reason}
-    except WorkflowError as e:
+    except WorkflowException as e:
         db.rollback()
-        raise HTTPException(status_code=e.status_code, detail=e.message)
+        raise HTTPException(status_code=e.http_status, detail=e.message)

@@ -78,7 +78,8 @@ const getSlaDaysRemaining = (dateValue?: string | null) => {
    ====================================================== */
 
 const isOpenStatus = (status?: string | null) =>
-  !["Closed", "Rejected", "Expired", "Cancelled"].includes(status ?? "");
+  // F-002 FIX: Use spec-compliant status names
+  !["Fulfilled", "Rejected", "Cancelled"].includes(status ?? "");
 
 const TADashboard: React.FC = () => {
   const { user, logout } = useAuth();
@@ -133,8 +134,9 @@ const TADashboard: React.FC = () => {
     const assignedToMe = requisitions.filter(
       (req) => req.assigned_ta && req.assigned_ta === currentUserId,
     ).length;
-    const closed = requisitions.filter(
-      (req) => req.overall_status === "Closed",
+    // F-002 FIX: Use "Fulfilled" instead of "Closed"
+    const fulfilled = requisitions.filter(
+      (req) => req.overall_status === "Fulfilled",
     ).length;
     const avgFulfillmentDays = 0;
 

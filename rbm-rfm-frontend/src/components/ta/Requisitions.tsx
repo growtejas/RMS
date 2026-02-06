@@ -136,8 +136,10 @@ const getStatusClass = (status: Requisition["overallStatus"]) => {
   switch (status) {
     case "Draft":
       return "open";
+    case "Pending_Budget":
     case "Pending Budget":
       return "in-progress";
+    case "Pending_HR":
     case "Approved":
       return "in-progress";
     case "Active":
@@ -150,6 +152,8 @@ const getStatusClass = (status: Requisition["overallStatus"]) => {
       return "in-progress";
     case "Fulfilled":
       return "fulfilled";
+    case "Cancelled":
+      return "closed";
     case "Closed (Partially Fulfilled)":
       return "closed";
     case "Rejected":
@@ -464,8 +468,10 @@ const Requisitions: React.FC<RequisitionsProps> = ({
     };
   }, [activeFilter]);
 
-  const visibleRequisitions = requisitions.filter((req) =>
-    ["Approved & Unassigned", "Active"].includes(req.overallStatus),
+  const visibleRequisitions = requisitions.filter(
+    (req) =>
+      req.overallStatus === "Active" ||
+      req.overallStatus === "Approved & Unassigned",
   );
 
   // Filter requisitions
@@ -751,7 +757,8 @@ const Requisitions: React.FC<RequisitionsProps> = ({
               <option>All Status</option>
               <option>Open</option>
               <option>In Progress</option>
-              <option>Closed</option>
+              <option>Fulfilled</option>
+              <option>Cancelled</option>
             </select>
           </div>
           <div className="filter-item">
@@ -1466,8 +1473,9 @@ const Requisitions: React.FC<RequisitionsProps> = ({
             style={{ fontSize: "20px", fontWeight: 700, color: "var(--error)" }}
           >
             {
+              // F-002 FIX: Use "Fulfilled" instead of "Closed"
               requisitions.filter(
-                (r) => r.priority === "High" && r.overallStatus !== "Closed",
+                (r) => r.priority === "High" && r.overallStatus !== "Fulfilled",
               ).length
             }
           </div>

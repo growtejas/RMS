@@ -19,34 +19,46 @@ class RequisitionPermissions:
 
     # Status sets for permission checks
     TERMINAL_STATUSES: Set[str] = {
+        "Fulfilled",
+        "Cancelled",
+        # Legacy values (pre-spec) retained for compatibility
         "Closed",
-        "Fulfilled", 
         "Closed (Partially Fulfilled)",
     }
 
     EDITABLE_STATUSES: Set[str] = {
         "Draft",
+        "Pending_Budget",
+        "Pending_HR",
+        # Legacy values retained for compatibility
         "Pending Budget Approval",
         "Pending HR Approval",
     }
 
     JD_EDITABLE_STATUSES: Set[str] = {
         "Draft",
+        "Pending_Budget",
+        "Pending_HR",
+        # Legacy values retained for compatibility
         "Pending Budget Approval",
         "Pending HR Approval",
         "Budget Rejected",
     }
 
     ITEM_BLOCKED_STATUSES: Set[str] = {
-        "Closed",
         "Rejected",
         "Fulfilled",
+        "Cancelled",
+        # Legacy values retained for compatibility
+        "Closed",
         "Closed (Partially Fulfilled)",
     }
 
     ITEM_MUTATION_BLOCKED_STATUSES: Set[str] = {
-        "Closed",
         "Rejected",
+        "Cancelled",
+        # Legacy values retained for compatibility
+        "Closed",
         "Closed (Partially Fulfilled)",
     }
 
@@ -125,7 +137,7 @@ class RequisitionPermissions:
         Returns:
             Tuple of (allowed, error_message)
         """
-        if requisition.overall_status != "Pending Budget Approval":
+        if requisition.overall_status not in {"Pending_Budget", "Pending Budget Approval"}:
             return (
                 False,
                 f"Cannot approve budget. Current status: {requisition.overall_status}",
@@ -140,7 +152,7 @@ class RequisitionPermissions:
         Returns:
             Tuple of (allowed, error_message)
         """
-        if requisition.overall_status != "Pending HR Approval":
+        if requisition.overall_status not in {"Pending_HR", "Pending HR Approval"}:
             return (False, "Requisition is not pending HR approval")
         return (True, None)
 

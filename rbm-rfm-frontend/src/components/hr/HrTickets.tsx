@@ -6,14 +6,13 @@ import {
   CheckCircle,
   AlertCircle,
   UserPlus,
+  Briefcase,
   Filter,
   Search,
   BarChart3,
-  Briefcase,
 } from "lucide-react";
 import { apiClient } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
-
 /* ======================================================
    Types
    ====================================================== */
@@ -201,8 +200,10 @@ const getPriorityClass = (priority: Requisition["priority"]) => {
 
 const getStatusClass = (status: Requisition["overallStatus"]) => {
   switch (status) {
+    case "Pending_Budget":
     case "Pending Budget Approval":
       return "ticket-status open";
+    case "Pending_HR":
     case "Pending HR Approval":
       return "ticket-status open";
     case "Approved & Unassigned":
@@ -215,6 +216,8 @@ const getStatusClass = (status: Requisition["overallStatus"]) => {
       return "ticket-status fulfilled";
     case "Closed":
     case "Closed (Partially Fulfilled)":
+      return "ticket-status closed";
+    case "Cancelled":
       return "ticket-status closed";
     case "Rejected":
       return "ticket-status rejected";
@@ -270,6 +273,9 @@ const HrKpiCards: React.FC<{ requisitions: Requisition[] }> = ({
     totalOpen: requisitions.filter((r) =>
       [
         "Open",
+        "Pending_Budget",
+        "Pending_HR",
+        "Active",
         "Pending Budget Approval",
         "Pending HR Approval",
         "Approved & Unassigned",
@@ -849,10 +855,10 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
       try {
         const response = await apiClient.get<BackendUser[]>("/users");
         if (!isMounted) return;
-        const filtered = response.data.filter((user) => {
+        const filtered = response.data.filter((user: BackendUser) => {
           const roles = user.roles ?? [];
           return roles.some(
-            (role) =>
+            (role: string) =>
               role === "TA" || role.toLowerCase() === "talent acquisition",
           );
         });
@@ -899,9 +905,12 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
   }, [requisitions]);
 
   const approvalStatuses = [
+    "Pending_Budget",
+    "Pending_HR",
+    "Rejected",
+    // Legacy values retained for compatibility
     "Pending Budget Approval",
     "Pending HR Approval",
-    "Rejected",
   ];
 
   const pendingApprovals = requisitions.filter((req) =>
@@ -909,7 +918,10 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
   );
 
   const unassignedPool = requisitions.filter(
-    (req) => req.overallStatus === "Approved & Unassigned" && !req.assignedTAId,
+    (req) =>
+      !req.assignedTAId &&
+      (req.overallStatus === "Active" ||
+        req.overallStatus === "Approved & Unassigned"),
   );
 
   // Filter requisitions based on active filter
@@ -919,7 +931,11 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
       if (activeFilter === "assigned") {
         if (!req.assignedTAId) return false;
       } else if (activeFilter === "unassigned") {
-        if (req.overallStatus !== "Approved & Unassigned" || req.assignedTAId)
+        if (req.assignedTAId) return false;
+        if (
+          req.overallStatus !== "Active" &&
+          req.overallStatus !== "Approved & Unassigned"
+        )
           return false;
       } else if (activeFilter === "my") {
         if (req.assignedTA !== currentUser) return false;
@@ -935,11 +951,13 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
         return false;
       }
       if (statusFilter !== "All Status") {
-        if (
-          statusFilter === "Closed" &&
+        if (statusFilter === "Fulfilled" && req.overallStatus === "Closed") {
+          // Legacy compatibility: treat Closed as Fulfilled
+        } else if (
+          statusFilter === "Cancelled" &&
           req.overallStatus === "Closed (Partially Fulfilled)"
         ) {
-          // Treat partially fulfilled as closed in filters
+          // Legacy compatibility: treat partially fulfilled as Cancelled
         } else if (req.overallStatus !== statusFilter) {
           return false;
         }
@@ -1096,7 +1114,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
       updateRequisitionState(req.reqId, {
         budgetApprovedBy: approverId,
         budgetAmount: budgetValue,
-        overallStatus: "Approved & Unassigned",
+        overallStatus: "Active",
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Approval failed";
@@ -1326,14 +1344,19 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
             >
               <option>All Status</option>
               <option>Open</option>
-              <option>Pending Budget Approval</option>
-              <option>Pending HR Approval</option>
-              <option>Approved & Unassigned</option>
+              <option value="Pending_Budget">Pending Budget Approval</option>
+              <option value="Pending_HR">Pending HR Approval</option>
               <option>Active</option>
               <option>In Progress</option>
               <option>Fulfilled</option>
-              <option>Closed</option>
-              <option>Closed (Partially Fulfilled)</option>
+              <option>Cancelled</option>
+              <option value="Approved & Unassigned">
+                Approved & Unassigned (Legacy)
+              </option>
+              <option value="Closed">Closed (Legacy)</option>
+              <option value="Closed (Partially Fulfilled)">
+                Closed (Partially Fulfilled) (Legacy)
+              </option>
               <option>Rejected</option>
             </select>
           </div>
@@ -1451,6 +1474,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                   const isEditing = editingBudget[req.reqId];
                   const isRejected = req.overallStatus === "Rejected";
                   const isApproved =
+                    req.overallStatus === "Active" ||
                     req.overallStatus === "Approved & Unassigned";
                   const isActionLoading =
                     approvalLoading[req.reqId] || rejectionLoading[req.reqId];
@@ -1946,7 +1970,8 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
 
                           <td>
                             {!req.assignedTAId &&
-                            req.overallStatus === "Approved & Unassigned" ? (
+                            (req.overallStatus === "Active" ||
+                              req.overallStatus === "Approved & Unassigned") ? (
                               <div
                                 style={{
                                   display: "flex",

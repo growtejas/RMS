@@ -116,7 +116,11 @@ const HRPendingApprovals: React.FC<HRPendingApprovalsProps> = ({
 
   const handleApprove = useCallback(
     async (approval: HRPendingApprovalItem) => {
-      if (approval.status !== "Pending HR Approval") return;
+      if (
+        approval.status !== "Pending_HR" &&
+        approval.status !== "Pending HR Approval"
+      )
+        return;
 
       const key = approval.requisition_id;
       setActionState((prev) => ({
@@ -283,7 +287,8 @@ const HRPendingApprovals: React.FC<HRPendingApprovalsProps> = ({
                   rejecting: false,
                 };
                 const isDisabled =
-                  approval.status !== "Pending HR Approval" ||
+                  (approval.status !== "Pending_HR" &&
+                    approval.status !== "Pending HR Approval") ||
                   action.approving ||
                   action.rejecting;
 
