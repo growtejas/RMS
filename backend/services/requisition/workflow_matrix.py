@@ -196,6 +196,7 @@ HEADER_TRANSITION_AUTHORITY: Dict[
     (RequisitionStatus.PENDING_BUDGET, RequisitionStatus.PENDING_HR): frozenset({
         SystemRole.MANAGER,
         SystemRole.ADMIN,
+        SystemRole.HR,
     }),
     (RequisitionStatus.PENDING_BUDGET, RequisitionStatus.REJECTED): frozenset({
         SystemRole.MANAGER,

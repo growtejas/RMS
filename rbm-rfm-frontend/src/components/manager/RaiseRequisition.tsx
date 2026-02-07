@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   Plus,
   Trash2,
@@ -13,9 +13,19 @@ import {
   AlertCircle,
   Save,
   Send,
+  Loader2,
 } from "lucide-react";
 import { apiClient } from "../../api/client";
-import { submitRequisition } from "../../api/workflowApi";
+import {
+  submitRequisition,
+  getWorkflowErrorMessage,
+  WorkflowTransitionResponse,
+} from "../../api/workflowApi";
+import {
+  RequisitionWizard,
+  WizardStep,
+  WizardNavigation,
+} from "./RequisitionWizard";
 
 interface RequisitionItem {
   id: number;
@@ -27,6 +37,30 @@ interface RequisitionItem {
   education: string;
   quantity: number;
   description: string;
+}
+
+interface RequisitionItemPayload {
+  role_position: string;
+  job_description: string;
+  skill_level: "Lead" | "Senior" | "Mid" | "Junior";
+  experience_years: number;
+  education_requirement?: string;
+  requirements?: string;
+}
+
+interface RequisitionManagerUpdatePayload {
+  project_name?: string;
+  client_name?: string;
+  office_location?: string;
+  work_mode?: string;
+  required_by_date?: string;
+  priority?: string;
+  justification?: string;
+  budget_amount?: number;
+  duration?: string;
+  is_replacement?: boolean;
+  manager_notes?: string;
+  items?: RequisitionItemPayload[];
 }
 
 interface RequisitionFormData {
@@ -184,10 +218,29 @@ const RaiseRequisition: React.FC = () => {
     if (activeStep > 0) setActiveStep(activeStep - 1);
   };
 
-  /**
-   * Build the FormData payload for creating/updating a requisition.
-   */
-  const buildPayload = (): FormData | null => {
+  const getApiErrorMessage = (error: unknown): string => {
+    const axiosError = error as {
+      response?: { data?: { detail?: string; message?: string } };
+      message?: string;
+    };
+
+    return (
+      axiosError.response?.data?.detail ||
+      axiosError.response?.data?.message ||
+      axiosError.message ||
+      "Request failed"
+    );
+  };
+
+  const uploadJdFile = async (reqId: number, file: File) => {
+    const fd = new FormData();
+    fd.append("jd_file", file);
+    await apiClient.post(`/requisitions/${reqId}/jd`, fd, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  };
+
+  const buildItemsPayload = (): RequisitionItemPayload[] | null => {
     const invalidItem = formData.items.find((item) => {
       const roleText = item.role.trim();
       const descriptionText = item.description.trim();
@@ -205,18 +258,7 @@ const RaiseRequisition: React.FC = () => {
       return null;
     }
 
-    const trimmedBudget = formData.budget.replace(/,/g, "").trim();
-    const budgetValue = trimmedBudget ? Number(trimmedBudget) : undefined;
-
-    if (
-      trimmedBudget &&
-      (budgetValue === undefined || !Number.isFinite(budgetValue))
-    ) {
-      setSubmitError("Budget must be a valid number.");
-      return null;
-    }
-
-    const itemsPayload = formData.items.flatMap((item) => {
+    return formData.items.flatMap((item) => {
       const roleText = item.role.trim();
       const descriptionText = item.description.trim();
       const primarySkill = getSkillName(item.primarySkillId);
@@ -232,7 +274,7 @@ const RaiseRequisition: React.FC = () => {
 
       const requirementsText = requirementParts.join(" | ") || undefined;
 
-      const payloadItem = {
+      const payloadItem: RequisitionItemPayload = {
         role_position: roleText,
         job_description: descriptionText,
         skill_level: item.level,
@@ -244,6 +286,25 @@ const RaiseRequisition: React.FC = () => {
       const quantity = Math.max(item.quantity || 1, 1);
       return Array.from({ length: quantity }, () => payloadItem);
     });
+  };
+
+  /**
+   * Build the FormData payload for creating/updating a requisition.
+   */
+  const buildPayload = (): FormData | null => {
+    const itemsPayload = buildItemsPayload();
+    if (!itemsPayload) return null;
+
+    const trimmedBudget = formData.budget.replace(/,/g, "").trim();
+    const budgetValue = trimmedBudget ? Number(trimmedBudget) : undefined;
+
+    if (
+      trimmedBudget &&
+      (budgetValue === undefined || !Number.isFinite(budgetValue))
+    ) {
+      setSubmitError("Budget must be a valid number.");
+      return null;
+    }
 
     const workModePayload =
       formData.workMode === "Remote" ? "WFH" : formData.workMode;
@@ -275,7 +336,50 @@ const RaiseRequisition: React.FC = () => {
   };
 
   /**
+   * Build JSON payload for updating a draft requisition (PUT /requisitions/{id}).
+   * This endpoint expects a JSON body, not multipart/form-data.
+   */
+  const buildUpdatePayload = (): RequisitionManagerUpdatePayload | null => {
+    const itemsPayload = buildItemsPayload();
+    if (!itemsPayload) return null;
+
+    const trimmedBudget = formData.budget.replace(/,/g, "").trim();
+    const budgetValue = trimmedBudget ? Number(trimmedBudget) : undefined;
+
+    if (
+      trimmedBudget &&
+      (budgetValue === undefined || !Number.isFinite(budgetValue))
+    ) {
+      setSubmitError("Budget must be a valid number.");
+      return null;
+    }
+
+    const workModePayload =
+      formData.workMode === "Remote" ? "WFH" : formData.workMode;
+
+    return {
+      project_name: formData.projectName || undefined,
+      client_name: formData.clientName.trim() || undefined,
+      office_location: formData.officeLocation || undefined,
+      work_mode: workModePayload || undefined,
+      required_by_date: formData.requiredBy || undefined,
+      priority: formData.priority || undefined,
+      justification: formData.justification || undefined,
+      budget_amount: budgetValue,
+      duration: formData.projectDuration.trim() || undefined,
+      is_replacement: formData.isReplacement,
+      manager_notes: formData.additionalNotes || undefined,
+      items: itemsPayload,
+    };
+  };
+
+  /**
    * Save as Draft - creates the requisition in DRAFT status without submitting to workflow
+   *
+   * WORKFLOW ENGINE V2 COMPLIANCE:
+   * - POST /api/requisitions creates requisition in DRAFT status ONLY
+   * - Status remains DRAFT until workflow/submit is called
+   * - No client-side status mutations
    */
   const handleSaveDraft = async () => {
     if (!validateStep(0)) {
@@ -301,7 +405,7 @@ const RaiseRequisition: React.FC = () => {
       const payload = buildPayload();
       if (!payload && formData.items.length > 0) return;
 
-      // If no items yet, create minimal payload
+      // Build minimal payload if no items yet
       const finalPayload =
         payload ||
         (() => {
@@ -324,16 +428,19 @@ const RaiseRequisition: React.FC = () => {
         })();
 
       if (draftRequisitionId) {
-        // Update existing draft
+        // Update existing draft (JSON payload required)
+        const updatePayload = buildUpdatePayload();
+        if (!updatePayload) return;
         await apiClient.put(
           `/requisitions/${draftRequisitionId}`,
-          finalPayload,
-          {
-            headers: { "Content-Type": "multipart/form-data" },
-          },
+          updatePayload,
         );
+
+        if (jdFile) {
+          await uploadJdFile(draftRequisitionId, jdFile);
+        }
       } else {
-        // Create new draft
+        // Create new draft (backend sets status to DRAFT)
         const response = await apiClient.post<{ req_id: number }>(
           "/requisitions/",
           finalPayload,
@@ -342,24 +449,17 @@ const RaiseRequisition: React.FC = () => {
           },
         );
         setDraftRequisitionId(response.data.req_id);
+
+        if (jdFile) {
+          await uploadJdFile(response.data.req_id, jdFile);
+        }
       }
 
       setDraftSaved(true);
       setTimeout(() => setDraftSaved(false), 3000);
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to save draft";
-      const apiMessage =
-        typeof error === "object" &&
-        error !== null &&
-        "response" in error &&
-        (error as { response?: { data?: { detail?: string } } }).response?.data
-          ?.detail
-          ? (error as { response?: { data?: { detail?: string } } }).response
-              ?.data?.detail
-          : null;
-
-      setSubmitError(apiMessage ?? errorMessage);
+      const errorMessage = getApiErrorMessage(error);
+      setSubmitError(errorMessage);
     } finally {
       setIsSavingDraft(false);
     }
@@ -367,6 +467,11 @@ const RaiseRequisition: React.FC = () => {
 
   /**
    * Submit Requisition - saves draft if needed, then calls workflow/submit
+   *
+   * WORKFLOW ENGINE V2 COMPLIANCE:
+   * 1. POST /api/requisitions creates requisition in DRAFT status
+   * 2. POST /api/requisitions/{id}/workflow/submit transitions to Pending_Budget
+   * 3. No client-side status mutations - backend is source of truth
    */
   const handleSubmit = async () => {
     if (!validateStep(2)) {
@@ -385,17 +490,20 @@ const RaiseRequisition: React.FC = () => {
     setIsSubmitting(true);
     setSubmitError(null);
 
-    try {
-      let reqId = draftRequisitionId;
+    let reqId = draftRequisitionId;
+    let draftCreated = false;
 
-      // Step 1: Create or update the draft requisition
+    try {
+      // Step 1: Create or update the draft requisition (remains in DRAFT)
       if (reqId) {
-        // Update existing draft
-        await apiClient.put(`/requisitions/${reqId}`, payload, {
-          headers: { "Content-Type": "multipart/form-data" },
-        });
+        const updatePayload = buildUpdatePayload();
+        if (!updatePayload) return;
+        await apiClient.put(`/requisitions/${reqId}`, updatePayload);
+
+        if (jdFile) {
+          await uploadJdFile(reqId, jdFile);
+        }
       } else {
-        // Create new draft
         const response = await apiClient.post<{ req_id: number }>(
           "/requisitions/",
           payload,
@@ -405,55 +513,78 @@ const RaiseRequisition: React.FC = () => {
         );
         reqId = response.data.req_id;
         setDraftRequisitionId(reqId);
+        draftCreated = true;
+
+        if (jdFile) {
+          await uploadJdFile(reqId, jdFile);
+        }
       }
 
-      // Step 2: Submit via workflow endpoint (DRAFT -> Pending_Budget)
-      await submitRequisition(reqId!);
+      // Step 2: Submit via WORKFLOW endpoint (DRAFT → Pending_Budget)
+      // This is the ONLY way to transition status per Workflow Engine V2
+      const transitionResult: WorkflowTransitionResponse =
+        await submitRequisition(reqId);
 
-      alert(
-        "Requisition submitted successfully! It is now pending budget approval.",
-      );
+      // Verify transition succeeded (backend confirmation)
+      if (
+        transitionResult.success &&
+        transitionResult.new_status === "Pending_Budget"
+      ) {
+        alert(
+          `Requisition #${reqId} submitted successfully!\n\nStatus: ${transitionResult.new_status}\nIt is now pending budget approval.`,
+        );
 
-      // Reset form
-      setFormData({
-        projectName: "",
-        clientName: "",
-        officeLocation: "",
-        workMode: "Hybrid",
-        requiredBy: "",
-        justification: "",
-        priority: "Medium",
-        items: [],
-        budget: "",
-        projectDuration: "",
-        isReplacement: false,
-        additionalNotes: "",
-      });
-      setSkillSearch({});
-      setSecondarySkillPick({});
-      setActiveStep(0);
-      setJdFile(null);
-      setJdError(null);
-      setDraftRequisitionId(null);
-      setDraftSaved(false);
+        // Reset form only after confirmed workflow transition
+        resetForm();
+      } else {
+        // Unexpected response - should not happen if API contract is correct
+        throw new Error(
+          `Unexpected workflow response: ${JSON.stringify(transitionResult)}`,
+        );
+      }
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to submit requisition";
-      const apiMessage =
-        typeof error === "object" &&
-        error !== null &&
-        "response" in error &&
-        (error as { response?: { data?: { detail?: string } } }).response?.data
-          ?.detail
-          ? (error as { response?: { data?: { detail?: string } } }).response
-              ?.data?.detail
-          : null;
+      // Use workflow error utility for consistent error messaging
+      const errorMessage = getWorkflowErrorMessage(error);
 
-      setSubmitError(apiMessage ?? errorMessage);
+      // If draft was just created but workflow failed, inform user
+      if (draftCreated && reqId) {
+        setSubmitError(
+          `Draft #${reqId} was saved, but workflow submission failed: ${errorMessage}\n\nYou can try submitting again.`,
+        );
+      } else {
+        setSubmitError(errorMessage);
+      }
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  /**
+   * Reset form to initial state after successful submission
+   */
+  const resetForm = useCallback(() => {
+    setFormData({
+      projectName: "",
+      clientName: "",
+      officeLocation: "",
+      workMode: "Hybrid",
+      requiredBy: "",
+      justification: "",
+      priority: "Medium",
+      items: [],
+      budget: "",
+      projectDuration: "",
+      isReplacement: false,
+      additionalNotes: "",
+    });
+    setSkillSearch({});
+    setSecondarySkillPick({});
+    setActiveStep(0);
+    setJdFile(null);
+    setJdError(null);
+    setDraftRequisitionId(null);
+    setDraftSaved(false);
+  }, []);
 
   // ================= ITEM HANDLERS =================
   const addItem = () => {
@@ -516,7 +647,27 @@ const RaiseRequisition: React.FC = () => {
 
   const canProceed = validateStep(activeStep);
   const canSubmit = canProceed && !isSubmitting && !jdError;
-  const steps = ["Project Scope", "Resource Details", "Budget & Finalize"];
+
+  // Wizard step definitions
+  const wizardSteps: WizardStep[] = [
+    { id: "scope", label: "Project Scope", description: "Define requirements" },
+    {
+      id: "resources",
+      label: "Resource Details",
+      description: "Add positions",
+    },
+    {
+      id: "finalize",
+      label: "Budget & Finalize",
+      description: "Review & submit",
+    },
+  ];
+
+  // Track completed steps for navigation
+  const completedSteps = new Set<number>();
+  if (validateStep(0)) completedSteps.add(0);
+  if (validateStep(1)) completedSteps.add(1);
+  if (validateStep(2)) completedSteps.add(2);
 
   // ================= STEP 1: PROJECT SCOPE =================
   const renderStep1 = () => (
@@ -1631,74 +1782,24 @@ const RaiseRequisition: React.FC = () => {
         </p>
       </div>
 
-      {/* Stepper Navigation */}
-      <div style={{ marginBottom: "32px" }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "20px",
-          }}
-        >
-          <div style={{ display: "flex", gap: "8px" }}>
-            {steps.map((step, index) => (
-              <button
-                key={step}
-                type="button"
-                onClick={() => setActiveStep(index)}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: "20px",
-                  border: "none",
-                  background:
-                    activeStep === index
-                      ? "var(--primary-accent)"
-                      : "var(--bg-tertiary)",
-                  color:
-                    activeStep === index ? "white" : "var(--text-tertiary)",
-                  fontSize: "13px",
-                  fontWeight: 500,
-                  cursor: "pointer",
-                  transition:
-                    "all var(--transition-duration) var(--transition-smooth)",
-                }}
-              >
-                {step}
-              </button>
-            ))}
-          </div>
-
-          <div style={{ fontSize: "13px", color: "var(--text-tertiary)" }}>
-            Step {activeStep + 1} of {steps.length}
-          </div>
-        </div>
-
-        {/* Progress Bar */}
-        <div
-          style={{
-            height: "4px",
-            background: "var(--border-subtle)",
-            borderRadius: "2px",
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              width: `${((activeStep + 1) / steps.length) * 100}%`,
-              height: "100%",
-              background:
-                "linear-gradient(135deg, var(--primary-accent), var(--primary-accent-dark))",
-              transition: "width 0.3s ease",
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Step Content */}
-      {activeStep === 0 && renderStep1()}
-      {activeStep === 1 && renderStep2()}
-      {activeStep === 2 && renderStep3()}
+      {/* Wizard with Step Indicators */}
+      <RequisitionWizard
+        steps={wizardSteps}
+        activeStep={activeStep}
+        completedSteps={completedSteps}
+        allowStepNavigation={true}
+        onStepClick={(index) => {
+          // Only allow navigation to completed or current steps
+          if (index <= activeStep || completedSteps.has(index - 1)) {
+            setActiveStep(index);
+          }
+        }}
+      >
+        {/* Step Content */}
+        {activeStep === 0 && renderStep1()}
+        {activeStep === 1 && renderStep2()}
+        {activeStep === 2 && renderStep3()}
+      </RequisitionWizard>
 
       {/* Navigation Buttons */}
       <div
@@ -1711,6 +1812,7 @@ const RaiseRequisition: React.FC = () => {
         }}
       >
         <button
+          type="button"
           className="action-button"
           onClick={handleBack}
           disabled={activeStep === 0}
@@ -1755,6 +1857,7 @@ const RaiseRequisition: React.FC = () => {
 
           {/* Save Draft Button */}
           <button
+            type="button"
             className="action-button"
             onClick={handleSaveDraft}
             disabled={isSavingDraft || !validateStep(0)}
@@ -1763,21 +1866,31 @@ const RaiseRequisition: React.FC = () => {
               cursor: !validateStep(0) ? "not-allowed" : "pointer",
             }}
           >
-            <Save size={16} style={{ marginRight: "6px" }} />
+            {isSavingDraft ? (
+              <Loader2
+                size={16}
+                className="spin"
+                style={{ marginRight: "6px" }}
+              />
+            ) : (
+              <Save size={16} style={{ marginRight: "6px" }} />
+            )}
             {isSavingDraft ? "Saving..." : "Save Draft"}
           </button>
 
-          {activeStep < steps.length - 1 ? (
+          {activeStep < wizardSteps.length - 1 ? (
             <button
+              type="button"
               className="action-button primary"
               onClick={handleNext}
               disabled={!canProceed}
               style={{ minWidth: "140px" }}
             >
-              Continue to {steps[activeStep + 1]} →
+              Continue to {wizardSteps[activeStep + 1]?.label ?? "Next"} →
             </button>
           ) : (
             <button
+              type="button"
               className="action-button primary"
               onClick={handleSubmit}
               disabled={!canSubmit}
@@ -1788,30 +1901,40 @@ const RaiseRequisition: React.FC = () => {
                   : "var(--bg-tertiary)",
               }}
             >
-              <Send size={16} style={{ marginRight: "8px" }} />
+              {isSubmitting ? (
+                <Loader2
+                  size={16}
+                  className="spin"
+                  style={{ marginRight: "8px" }}
+                />
+              ) : (
+                <Send size={16} style={{ marginRight: "8px" }} />
+              )}
               {isSubmitting ? "Submitting..." : "Submit for Approval"}
             </button>
           )}
         </div>
       </div>
 
+      {/* Error Display */}
       {submitError && (
         <div
+          className="save-message save-message--error"
           style={{
             marginTop: "16px",
             padding: "12px 16px",
             borderRadius: "10px",
-            background: "rgba(239, 68, 68, 0.08)",
-            color: "var(--error)",
-            fontSize: "13px",
-            border: "1px solid rgba(239, 68, 68, 0.2)",
           }}
         >
-          {submitError}
+          <AlertCircle
+            size={16}
+            style={{ marginRight: "8px", flexShrink: 0 }}
+          />
+          <span>{submitError}</span>
         </div>
       )}
 
-      {/* Workflow Legend */}
+      {/* Workflow Legend - Backend-Driven Status Transitions */}
       <div
         style={{
           marginTop: "40px",
@@ -1833,30 +1956,62 @@ const RaiseRequisition: React.FC = () => {
             size={16}
             style={{ marginRight: "8px", verticalAlign: "middle" }}
           />
-          Workflow Summary
+          Workflow Engine V2 — Status Transitions
         </h4>
         <div
           style={{
             fontSize: "12px",
             color: "var(--text-secondary)",
-            lineHeight: 1.6,
+            lineHeight: 1.8,
           }}
         >
           <p>
-            <strong>Save Draft:</strong> Creates or updates the requisition in
-            DRAFT status. You can return to edit it later.
+            <strong>1. Save Draft:</strong> Creates requisition in{" "}
+            <code
+              style={{
+                background: "var(--bg-secondary)",
+                padding: "2px 6px",
+                borderRadius: "4px",
+              }}
+            >
+              DRAFT
+            </code>{" "}
+            status. You can edit and return later.
           </p>
           <p>
-            <strong>Submit for Approval:</strong> Saves the requisition and
-            submits it for budget approval (DRAFT → Pending_Budget).
+            <strong>2. Submit for Approval:</strong> Triggers workflow
+            transition{" "}
+            <code
+              style={{
+                background: "var(--bg-secondary)",
+                padding: "2px 6px",
+                borderRadius: "4px",
+              }}
+            >
+              DRAFT → Pending_Budget
+            </code>
           </p>
           <p>
-            <strong>Approval Flow:</strong> Budget Owner approves → HR reviews
-            (Pending_HR) → TA assigned → Positions filled.
+            <strong>3. Approval Flow:</strong>{" "}
+            <code
+              style={{
+                background: "var(--bg-secondary)",
+                padding: "2px 6px",
+                borderRadius: "4px",
+              }}
+            >
+              Pending_Budget → Pending_HR → Active
+            </code>
           </p>
-          <p style={{ marginTop: "8px", color: "var(--text-tertiary)" }}>
-            Each position becomes a separate requisition item that HR/TA will
-            work on independently.
+          <p
+            style={{
+              marginTop: "12px",
+              color: "var(--text-tertiary)",
+              fontStyle: "italic",
+            }}
+          >
+            All status transitions are handled by the backend workflow engine.
+            Frontend does not modify status directly.
           </p>
         </div>
       </div>

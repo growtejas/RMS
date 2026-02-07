@@ -276,7 +276,7 @@ async def submit_requisition(
     req_id: int,
     request: WorkflowTransitionRequest = WorkflowTransitionRequest(),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("Manager", "Admin")),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR")),
     user_roles: List[str] = Depends(get_current_user_roles),
 ):
     """
@@ -322,14 +322,14 @@ async def approve_budget(
     req_id: int,
     request: WorkflowTransitionRequest = WorkflowTransitionRequest(),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("Manager", "Admin")),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR")),
     user_roles: List[str] = Depends(get_current_user_roles),
 ):
     """
     Approve budget for requisition.
     
     Transition: PENDING_BUDGET → PENDING_HR
-    Authorized: Manager, Admin
+    Authorized: Manager, Admin, HR
     """
     try:
         old_status = RequisitionStatus.PENDING_BUDGET.value

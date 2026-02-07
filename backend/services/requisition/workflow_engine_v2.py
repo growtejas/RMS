@@ -451,33 +451,34 @@ class RequisitionWorkflowEngine:
         cls._validate_version(requisition, expected_version)
         cls._validate_transition(current_status, target_status, user_roles)
         
-        # Perform transition
-        old_status = requisition.overall_status
-        version_before = getattr(requisition, 'version', 1) or 1
-        cls._set_status(requisition, target_status.value)
-        cls._increment_version(requisition)
-        version_after = getattr(requisition, 'version', 1) or 1
-        
-        # Audit
-        WorkflowAuditLogger.log_transition(
-            db=db,
-            entity_type="requisition",
-            entity_id=req_id,
-            action="SUBMIT",
-            prev_status=old_status,
-            new_status=target_status.value,
-            performed_by=user_id,
-            version_before=version_before,
-            version_after=version_after,
-            user_roles=user_roles,
-        )
-        WorkflowAuditLogger.log_status_history(
-            db=db,
-            req_id=req_id,
-            old_status=old_status,
-            new_status=target_status.value,
-            changed_by=user_id,
-        )
+        # Perform transition + audit within workflow context
+        with workflow_transition_context():
+            old_status = requisition.overall_status
+            version_before = getattr(requisition, 'version', 1) or 1
+            cls._set_status(requisition, target_status.value)
+            cls._increment_version(requisition)
+            version_after = getattr(requisition, 'version', 1) or 1
+            
+            # Audit
+            WorkflowAuditLogger.log_transition(
+                db=db,
+                entity_type="requisition",
+                entity_id=req_id,
+                action="SUBMIT",
+                prev_status=old_status,
+                new_status=target_status.value,
+                performed_by=user_id,
+                version_before=version_before,
+                version_after=version_after,
+                user_roles=user_roles,
+            )
+            WorkflowAuditLogger.log_status_history(
+                db=db,
+                req_id=req_id,
+                old_status=old_status,
+                new_status=target_status.value,
+                changed_by=user_id,
+            )
         
         return requisition
     
@@ -511,31 +512,32 @@ class RequisitionWorkflowEngine:
         cls._validate_version(requisition, expected_version)
         cls._validate_transition(current_status, target_status, user_roles)
         
-        # Perform transition
-        old_status = requisition.overall_status
-        cls._set_status(requisition, target_status.value)
-        requisition.budget_approved_by = user_id
-        if hasattr(requisition, 'budget_approved_at'):
-            requisition.budget_approved_at = datetime.now(timezone.utc)
-        cls._increment_version(requisition)
-        
-        # Audit
-        WorkflowAuditLogger.log_transition(
-            db=db,
-            entity_type="requisition",
-            entity_id=req_id,
-            action="APPROVE_BUDGET",
-            prev_status=old_status,
-            new_status=target_status.value,
-            performed_by=user_id,
-        )
-        WorkflowAuditLogger.log_status_history(
-            db=db,
-            req_id=req_id,
-            old_status=old_status,
-            new_status=target_status.value,
-            changed_by=user_id,
-        )
+        # Perform transition + audit within workflow context
+        with workflow_transition_context():
+            old_status = requisition.overall_status
+            cls._set_status(requisition, target_status.value)
+            requisition.budget_approved_by = user_id
+            if hasattr(requisition, 'budget_approved_at'):
+                requisition.budget_approved_at = datetime.now(timezone.utc)
+            cls._increment_version(requisition)
+            
+            # Audit
+            WorkflowAuditLogger.log_transition(
+                db=db,
+                entity_type="requisition",
+                entity_id=req_id,
+                action="APPROVE_BUDGET",
+                prev_status=old_status,
+                new_status=target_status.value,
+                performed_by=user_id,
+            )
+            WorkflowAuditLogger.log_status_history(
+                db=db,
+                req_id=req_id,
+                old_status=old_status,
+                new_status=target_status.value,
+                changed_by=user_id,
+            )
         
         return requisition
     
@@ -569,32 +571,33 @@ class RequisitionWorkflowEngine:
         cls._validate_version(requisition, expected_version)
         cls._validate_transition(current_status, target_status, user_roles)
         
-        # Perform transition
-        old_status = requisition.overall_status
-        cls._set_status(requisition, target_status.value)
-        requisition.approved_by = user_id
-        if hasattr(requisition, 'hr_approved_at'):
-            requisition.hr_approved_at = datetime.now(timezone.utc)
-        requisition.approval_history = datetime.now(timezone.utc)
-        cls._increment_version(requisition)
-        
-        # Audit
-        WorkflowAuditLogger.log_transition(
-            db=db,
-            entity_type="requisition",
-            entity_id=req_id,
-            action="APPROVE_HR",
-            prev_status=old_status,
-            new_status=target_status.value,
-            performed_by=user_id,
-        )
-        WorkflowAuditLogger.log_status_history(
-            db=db,
-            req_id=req_id,
-            old_status=old_status,
-            new_status=target_status.value,
-            changed_by=user_id,
-        )
+        # Perform transition + audit within workflow context
+        with workflow_transition_context():
+            old_status = requisition.overall_status
+            cls._set_status(requisition, target_status.value)
+            requisition.approved_by = user_id
+            if hasattr(requisition, 'hr_approved_at'):
+                requisition.hr_approved_at = datetime.now(timezone.utc)
+            requisition.approval_history = datetime.now(timezone.utc)
+            cls._increment_version(requisition)
+            
+            # Audit
+            WorkflowAuditLogger.log_transition(
+                db=db,
+                entity_type="requisition",
+                entity_id=req_id,
+                action="APPROVE_HR",
+                prev_status=old_status,
+                new_status=target_status.value,
+                performed_by=user_id,
+            )
+            WorkflowAuditLogger.log_status_history(
+                db=db,
+                req_id=req_id,
+                old_status=old_status,
+                new_status=target_status.value,
+                changed_by=user_id,
+            )
         
         return requisition
     
@@ -639,31 +642,32 @@ class RequisitionWorkflowEngine:
         cls._validate_version(requisition, expected_version)
         cls._validate_transition(current_status, target_status, user_roles)
         
-        # Perform transition
-        old_status = requisition.overall_status
-        cls._set_status(requisition, target_status.value)
-        requisition.rejection_reason = reason
-        cls._increment_version(requisition)
-        
-        # Audit
-        WorkflowAuditLogger.log_transition(
-            db=db,
-            entity_type="requisition",
-            entity_id=req_id,
-            action="REJECT",
-            prev_status=old_status,
-            new_status=target_status.value,
-            performed_by=user_id,
-            reason=reason,
-        )
-        WorkflowAuditLogger.log_status_history(
-            db=db,
-            req_id=req_id,
-            old_status=old_status,
-            new_status=target_status.value,
-            changed_by=user_id,
-            justification=reason,
-        )
+        # Perform transition + audit within workflow context
+        with workflow_transition_context():
+            old_status = requisition.overall_status
+            cls._set_status(requisition, target_status.value)
+            requisition.rejection_reason = reason
+            cls._increment_version(requisition)
+            
+            # Audit
+            WorkflowAuditLogger.log_transition(
+                db=db,
+                entity_type="requisition",
+                entity_id=req_id,
+                action="REJECT",
+                prev_status=old_status,
+                new_status=target_status.value,
+                performed_by=user_id,
+                reason=reason,
+            )
+            WorkflowAuditLogger.log_status_history(
+                db=db,
+                req_id=req_id,
+                old_status=old_status,
+                new_status=target_status.value,
+                changed_by=user_id,
+                justification=reason,
+            )
         
         return requisition
     
@@ -724,36 +728,36 @@ class RequisitionWorkflowEngine:
             .all()
         )
         
-        # Cancel all non-terminal items using protected context
+        # Cancel items + transition + audit within workflow context
         with workflow_transition_context():
             for item in items:
                 item.item_status = RequisitionItemStatus.CANCELLED.value
-        
-        # Perform transition
-        old_status = requisition.overall_status
-        cls._set_status(requisition, target_status.value)
-        cls._increment_version(requisition)
-        
-        # Audit
-        WorkflowAuditLogger.log_transition(
-            db=db,
-            entity_type="requisition",
-            entity_id=req_id,
-            action="CANCEL",
-            prev_status=old_status,
-            new_status=target_status.value,
-            performed_by=user_id,
-            reason=reason,
-            metadata={"cancelled_items": len(items)},
-        )
-        WorkflowAuditLogger.log_status_history(
-            db=db,
-            req_id=req_id,
-            old_status=old_status,
-            new_status=target_status.value,
-            changed_by=user_id,
-            justification=reason,
-        )
+            
+            # Perform transition
+            old_status = requisition.overall_status
+            cls._set_status(requisition, target_status.value)
+            cls._increment_version(requisition)
+            
+            # Audit
+            WorkflowAuditLogger.log_transition(
+                db=db,
+                entity_type="requisition",
+                entity_id=req_id,
+                action="CANCEL",
+                prev_status=old_status,
+                new_status=target_status.value,
+                performed_by=user_id,
+                reason=reason,
+                metadata={"cancelled_items": len(items)},
+            )
+            WorkflowAuditLogger.log_status_history(
+                db=db,
+                req_id=req_id,
+                old_status=old_status,
+                new_status=target_status.value,
+                changed_by=user_id,
+                justification=reason,
+            )
         
         return requisition
     
@@ -795,35 +799,36 @@ class RequisitionWorkflowEngine:
         cls._validate_version(requisition, expected_version)
         cls._validate_transition(current_status, target_status, user_roles)
         
-        # Perform transition
-        old_status = requisition.overall_status
-        cls._set_status(requisition, target_status.value)
-        cls._increment_version(requisition)
-        
-        # Clear previous approval fields for fresh submission cycle
-        requisition.budget_approved_by = None
-        requisition.approved_by = None
-        
-        # Audit
-        WorkflowAuditLogger.log_transition(
-            db=db,
-            entity_type="requisition",
-            entity_id=req_id,
-            action="REOPEN_FOR_REVISION",
-            prev_status=old_status,
-            new_status=target_status.value,
-            performed_by=user_id,
-            reason=reason,
-            metadata={"resubmission": True},
-        )
-        WorkflowAuditLogger.log_status_history(
-            db=db,
-            req_id=req_id,
-            old_status=old_status,
-            new_status=target_status.value,
-            changed_by=user_id,
-            justification=reason or "Reopened for revision after rejection",
-        )
+        # Perform transition + audit within workflow context
+        with workflow_transition_context():
+            old_status = requisition.overall_status
+            cls._set_status(requisition, target_status.value)
+            cls._increment_version(requisition)
+            
+            # Clear previous approval fields for fresh submission cycle
+            requisition.budget_approved_by = None
+            requisition.approved_by = None
+            
+            # Audit
+            WorkflowAuditLogger.log_transition(
+                db=db,
+                entity_type="requisition",
+                entity_id=req_id,
+                action="REOPEN_FOR_REVISION",
+                prev_status=old_status,
+                new_status=target_status.value,
+                performed_by=user_id,
+                reason=reason,
+                metadata={"resubmission": True},
+            )
+            WorkflowAuditLogger.log_status_history(
+                db=db,
+                req_id=req_id,
+                old_status=old_status,
+                new_status=target_status.value,
+                changed_by=user_id,
+                justification=reason or "Reopened for revision after rejection",
+            )
         
         return requisition
     
@@ -902,29 +907,30 @@ class RequisitionWorkflowEngine:
         
         # Apply if changed (using SYSTEM for automatic transition)
         if new_status != current_status:
-            old_status = requisition.overall_status
-            cls._set_status(requisition, new_status.value)
-            cls._increment_version(requisition)
-            
-            # Audit (SYSTEM triggered)
-            WorkflowAuditLogger.log_transition(
-                db=db,
-                entity_type="requisition",
-                entity_id=req_id,
-                action="AUTO_RECALCULATE",
-                prev_status=old_status,
-                new_status=new_status.value,
-                performed_by=changed_by or 0,  # 0 indicates system
-                metadata={"trigger": "item_status_change"},
-            )
-            WorkflowAuditLogger.log_status_history(
-                db=db,
-                req_id=req_id,
-                old_status=old_status,
-                new_status=new_status.value,
-                changed_by=changed_by,
-                justification="Automatic status recalculation based on item statuses",
-            )
+            with workflow_transition_context():
+                old_status = requisition.overall_status
+                cls._set_status(requisition, new_status.value)
+                cls._increment_version(requisition)
+                
+                # Audit (SYSTEM triggered)
+                WorkflowAuditLogger.log_transition(
+                    db=db,
+                    entity_type="requisition",
+                    entity_id=req_id,
+                    action="AUTO_RECALCULATE",
+                    prev_status=old_status,
+                    new_status=new_status.value,
+                    performed_by=changed_by or 0,  # 0 indicates system
+                    metadata={"trigger": "item_status_change"},
+                )
+                WorkflowAuditLogger.log_status_history(
+                    db=db,
+                    req_id=req_id,
+                    old_status=old_status,
+                    new_status=new_status.value,
+                    changed_by=changed_by,
+                    justification="Automatic status recalculation based on item statuses",
+                )
             
             return new_status
         
@@ -1174,33 +1180,34 @@ class RequisitionItemWorkflowEngine:
         item.assigned_ta = ta_user_id
         
         # GC-003: Auto-transition PENDING → SOURCING
-        if current_status == RequisitionItemStatus.PENDING:
-            old_status = item.item_status
-            cls._set_item_status(item, RequisitionItemStatus.SOURCING.value)
-            
-            # Audit (SYSTEM triggered transition)
-            WorkflowAuditLogger.log_transition(
-                db=db,
-                entity_type="requisition_item",
-                entity_id=item_id,
-                action="TA_ASSIGN_AUTO_SOURCING",
-                prev_status=old_status,
-                new_status=RequisitionItemStatus.SOURCING.value,
-                performed_by=performed_by,
-                metadata={"ta_user_id": ta_user_id, "trigger": "GC-003"},
-            )
-        else:
-            # Just log the assignment without status change
-            WorkflowAuditLogger.log_transition(
-                db=db,
-                entity_type="requisition_item",
-                entity_id=item_id,
-                action="TA_ASSIGN",
-                prev_status=item.item_status,
-                new_status=item.item_status,
-                performed_by=performed_by,
-                metadata={"ta_user_id": ta_user_id},
-            )
+        with workflow_transition_context():
+            if current_status == RequisitionItemStatus.PENDING:
+                old_status = item.item_status
+                cls._set_item_status(item, RequisitionItemStatus.SOURCING.value)
+                
+                # Audit (SYSTEM triggered transition)
+                WorkflowAuditLogger.log_transition(
+                    db=db,
+                    entity_type="requisition_item",
+                    entity_id=item_id,
+                    action="TA_ASSIGN_AUTO_SOURCING",
+                    prev_status=old_status,
+                    new_status=RequisitionItemStatus.SOURCING.value,
+                    performed_by=performed_by,
+                    metadata={"ta_user_id": ta_user_id, "trigger": "GC-003"},
+                )
+            else:
+                # Just log the assignment without status change
+                WorkflowAuditLogger.log_transition(
+                    db=db,
+                    entity_type="requisition_item",
+                    entity_id=item_id,
+                    action="TA_ASSIGN",
+                    prev_status=item.item_status,
+                    new_status=item.item_status,
+                    performed_by=performed_by,
+                    metadata={"ta_user_id": ta_user_id},
+                )
         
         # Recalculate header (just in case)
         RequisitionWorkflowEngine.recalculate_header_status(
@@ -1246,21 +1253,22 @@ class RequisitionItemWorkflowEngine:
         
         cls._validate_transition(current_status, target_status, user_roles)
         
-        # Perform transition
-        old_status = item.item_status
-        cls._set_item_status(item, target_status.value)
-        
-        # Audit
-        WorkflowAuditLogger.log_transition(
-            db=db,
-            entity_type="requisition_item",
-            entity_id=item_id,
-            action="SHORTLIST",
-            prev_status=old_status,
-            new_status=target_status.value,
-            performed_by=user_id,
-            metadata={"candidate_count": candidate_count} if candidate_count else None,
-        )
+        # Perform transition + audit within workflow context
+        with workflow_transition_context():
+            old_status = item.item_status
+            cls._set_item_status(item, target_status.value)
+            
+            # Audit
+            WorkflowAuditLogger.log_transition(
+                db=db,
+                entity_type="requisition_item",
+                entity_id=item_id,
+                action="SHORTLIST",
+                prev_status=old_status,
+                new_status=target_status.value,
+                performed_by=user_id,
+                metadata={"candidate_count": candidate_count} if candidate_count else None,
+            )
         
         return item
     
@@ -1293,20 +1301,21 @@ class RequisitionItemWorkflowEngine:
         
         cls._validate_transition(current_status, target_status, user_roles)
         
-        # Perform transition
-        old_status = item.item_status
-        cls._set_item_status(item, target_status.value)
-        
-        # Audit
-        WorkflowAuditLogger.log_transition(
-            db=db,
-            entity_type="requisition_item",
-            entity_id=item_id,
-            action="START_INTERVIEW",
-            prev_status=old_status,
-            new_status=target_status.value,
-            performed_by=user_id,
-        )
+        # Perform transition + audit within workflow context
+        with workflow_transition_context():
+            old_status = item.item_status
+            cls._set_item_status(item, target_status.value)
+            
+            # Audit
+            WorkflowAuditLogger.log_transition(
+                db=db,
+                entity_type="requisition_item",
+                entity_id=item_id,
+                action="START_INTERVIEW",
+                prev_status=old_status,
+                new_status=target_status.value,
+                performed_by=user_id,
+            )
         
         return item
     
@@ -1343,27 +1352,28 @@ class RequisitionItemWorkflowEngine:
         
         cls._validate_transition(current_status, target_status, user_roles)
         
-        # Perform transition
-        old_status = item.item_status
-        cls._set_item_status(item, target_status.value)
-        
-        # Audit
-        metadata = {}
-        if candidate_id:
-            metadata["candidate_id"] = candidate_id
-        if offer_details:
-            metadata["offer_details"] = offer_details
-        
-        WorkflowAuditLogger.log_transition(
-            db=db,
-            entity_type="requisition_item",
-            entity_id=item_id,
-            action="MAKE_OFFER",
-            prev_status=old_status,
-            new_status=target_status.value,
-            performed_by=user_id,
-            metadata=metadata or None,
-        )
+        # Perform transition + audit within workflow context
+        with workflow_transition_context():
+            old_status = item.item_status
+            cls._set_item_status(item, target_status.value)
+            
+            # Audit
+            metadata = {}
+            if candidate_id:
+                metadata["candidate_id"] = candidate_id
+            if offer_details:
+                metadata["offer_details"] = offer_details
+            
+            WorkflowAuditLogger.log_transition(
+                db=db,
+                entity_type="requisition_item",
+                entity_id=item_id,
+                action="MAKE_OFFER",
+                prev_status=old_status,
+                new_status=target_status.value,
+                performed_by=user_id,
+                metadata=metadata or None,
+            )
         
         return item
     
@@ -1427,22 +1437,23 @@ class RequisitionItemWorkflowEngine:
                 value=employee_id,
             )
         
-        # Perform transition
-        old_status = item.item_status
-        cls._set_item_status(item, target_status.value)
-        item.assigned_emp_id = employee_id
-        
-        # Audit
-        WorkflowAuditLogger.log_transition(
-            db=db,
-            entity_type="requisition_item",
-            entity_id=item_id,
-            action="FULFILL",
-            prev_status=old_status,
-            new_status=target_status.value,
-            performed_by=user_id,
-            metadata={"employee_id": employee_id},
-        )
+        # Perform transition + audit within workflow context
+        with workflow_transition_context():
+            old_status = item.item_status
+            cls._set_item_status(item, target_status.value)
+            item.assigned_emp_id = employee_id
+            
+            # Audit
+            WorkflowAuditLogger.log_transition(
+                db=db,
+                entity_type="requisition_item",
+                entity_id=item_id,
+                action="FULFILL",
+                prev_status=old_status,
+                new_status=target_status.value,
+                performed_by=user_id,
+                metadata={"employee_id": employee_id},
+            )
         
         # Trigger header recalculation (may auto-transition to FULFILLED)
         RequisitionWorkflowEngine.recalculate_header_status(
@@ -1493,21 +1504,22 @@ class RequisitionItemWorkflowEngine:
         
         cls._validate_transition(current_status, target_status, user_roles)
         
-        # Perform transition
-        old_status = item.item_status
-        cls._set_item_status(item, target_status.value)
-        
-        # Audit
-        WorkflowAuditLogger.log_transition(
-            db=db,
-            entity_type="requisition_item",
-            entity_id=item_id,
-            action="CANCEL",
-            prev_status=old_status,
-            new_status=target_status.value,
-            performed_by=user_id,
-            reason=reason,
-        )
+        # Perform transition + audit within workflow context
+        with workflow_transition_context():
+            old_status = item.item_status
+            cls._set_item_status(item, target_status.value)
+            
+            # Audit
+            WorkflowAuditLogger.log_transition(
+                db=db,
+                entity_type="requisition_item",
+                entity_id=item_id,
+                action="CANCEL",
+                prev_status=old_status,
+                new_status=target_status.value,
+                performed_by=user_id,
+                reason=reason,
+            )
         
         # Trigger header recalculation
         RequisitionWorkflowEngine.recalculate_header_status(
@@ -1558,21 +1570,22 @@ class RequisitionItemWorkflowEngine:
             current_status, target_status, user_roles, reason=reason
         )
         
-        # Perform transition
-        old_status = item.item_status
-        cls._set_item_status(item, target_status.value)
-        
-        # Audit
-        WorkflowAuditLogger.log_transition(
-            db=db,
-            entity_type="requisition_item",
-            entity_id=item_id,
-            action="RE_SOURCE",
-            prev_status=old_status,
-            new_status=target_status.value,
-            performed_by=user_id,
-            reason=reason,
-        )
+        # Perform transition + audit within workflow context
+        with workflow_transition_context():
+            old_status = item.item_status
+            cls._set_item_status(item, target_status.value)
+            
+            # Audit
+            WorkflowAuditLogger.log_transition(
+                db=db,
+                entity_type="requisition_item",
+                entity_id=item_id,
+                action="RE_SOURCE",
+                prev_status=old_status,
+                new_status=target_status.value,
+                performed_by=user_id,
+                reason=reason,
+            )
         
         return item
     
@@ -1612,21 +1625,22 @@ class RequisitionItemWorkflowEngine:
             current_status, target_status, user_roles, reason=reason
         )
         
-        # Perform transition
-        old_status = item.item_status
-        cls._set_item_status(item, target_status.value)
-        
-        # Audit
-        WorkflowAuditLogger.log_transition(
-            db=db,
-            entity_type="requisition_item",
-            entity_id=item_id,
-            action="RETURN_TO_SHORTLIST",
-            prev_status=old_status,
-            new_status=target_status.value,
-            performed_by=user_id,
-            reason=reason,
-        )
+        # Perform transition + audit within workflow context
+        with workflow_transition_context():
+            old_status = item.item_status
+            cls._set_item_status(item, target_status.value)
+            
+            # Audit
+            WorkflowAuditLogger.log_transition(
+                db=db,
+                entity_type="requisition_item",
+                entity_id=item_id,
+                action="RETURN_TO_SHORTLIST",
+                prev_status=old_status,
+                new_status=target_status.value,
+                performed_by=user_id,
+                reason=reason,
+            )
         
         return item
     
@@ -1666,21 +1680,22 @@ class RequisitionItemWorkflowEngine:
             current_status, target_status, user_roles, reason=reason
         )
         
-        # Perform transition
-        old_status = item.item_status
-        cls._set_item_status(item, target_status.value)
-        
-        # Audit
-        WorkflowAuditLogger.log_transition(
-            db=db,
-            entity_type="requisition_item",
-            entity_id=item_id,
-            action="OFFER_DECLINED",
-            prev_status=old_status,
-            new_status=target_status.value,
-            performed_by=user_id,
-            reason=reason,
-        )
+        # Perform transition + audit within workflow context
+        with workflow_transition_context():
+            old_status = item.item_status
+            cls._set_item_status(item, target_status.value)
+            
+            # Audit
+            WorkflowAuditLogger.log_transition(
+                db=db,
+                entity_type="requisition_item",
+                entity_id=item_id,
+                action="OFFER_DECLINED",
+                prev_status=old_status,
+                new_status=target_status.value,
+                performed_by=user_id,
+                reason=reason,
+            )
         
         return item
     
