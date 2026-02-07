@@ -21,8 +21,8 @@ class RequisitionStatusHistory(Base):
         nullable=False
     )
 
-    old_status = Column(String(50), nullable=True)
-    new_status = Column(String(50), nullable=True)
+    old_status = Column(String(50), nullable=False)
+    new_status = Column(String(50), nullable=False)
     justification = Column(Text, nullable=True)
 
     changed_by = Column(

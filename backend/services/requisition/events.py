@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 
 from db.models.requisition_status_history import RequisitionStatusHistory
 from db.models.audit_log import AuditLog
+from .workflow_matrix import RequisitionStatus
+from .workflow_exceptions import WorkflowException
 
 
 class RequisitionEvents:
@@ -34,13 +36,35 @@ class RequisitionEvents:
         Args:
             db: Database session
             req_id: Requisition ID
-            old_status: Previous status (can be None for initial creation)
+            old_status: Previous status (must be a valid RequisitionStatus value)
             new_status: New status
             changed_by: User ID who made the change
             justification: Optional reason for the change
+            
+        Raises:
+            WorkflowException: If old_status is None or either status is invalid
         """
+        if old_status is None:
+            raise WorkflowException(
+                message="Invalid transition: old_status cannot be NULL",
+                code="NULL_OLD_STATUS",
+            )
+
         if not new_status or new_status == old_status:
             return
+
+        # Validate both statuses against the canonical enum
+        _valid = {s.value for s in RequisitionStatus}
+        if old_status not in _valid:
+            raise WorkflowException(
+                message=f"Invalid old_status '{old_status}' — not in RequisitionStatus enum",
+                code="INVALID_OLD_STATUS",
+            )
+        if new_status not in _valid:
+            raise WorkflowException(
+                message=f"Invalid new_status '{new_status}' — not in RequisitionStatus enum",
+                code="INVALID_NEW_STATUS",
+            )
 
         history = RequisitionStatusHistory(
             req_id=req_id,

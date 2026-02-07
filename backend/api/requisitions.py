@@ -32,6 +32,7 @@ from utils.storage import get_storage_service, StorageService
 from services.requisition import (
     RequisitionEvents,
     RequisitionPermissions,
+    RequisitionStatus,
 )
 from services.requisition.workflow_engine_v2 import RequisitionWorkflowEngine
 from services.requisition.workflow_exceptions import WorkflowException
@@ -102,7 +103,8 @@ async def create_requisition(
             budget_amount=parsed_budget,
             required_by_date=parsed_required_by,
             raised_by=current_user.user_id,
-            overall_status="Pending_Budget",
+            overall_status=RequisitionStatus.DRAFT.value,
+            version=1,
         )
 
         db.add(requisition)
@@ -123,15 +125,6 @@ async def create_requisition(
                 "is_replacement": requisition.is_replacement,
             },
         )
-        RequisitionEvents.record_status_history(
-            db=db,
-            req_id=requisition.req_id,
-            old_status=None,
-            new_status=requisition.overall_status,
-            changed_by=current_user.user_id,
-            justification="Created",
-        )
-
         if items_payload:
             for item in items_payload:
                 validated = RequisitionItemCreate(**item)

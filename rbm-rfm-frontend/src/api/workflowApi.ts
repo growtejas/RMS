@@ -207,6 +207,22 @@ export async function reopenRequisition(
   return response.data;
 }
 
+/**
+ * Assign a TA to a requisition header (self-assign or HR-assign).
+ * Does NOT change requisition status, just sets assigned_ta field.
+ * Requisition must be in Active status.
+ */
+export async function assignRequisitionTA(
+  reqId: number,
+  taUserId: number,
+): Promise<{ message: string; assigned_ta: number }> {
+  const response = await apiClient.patch<{
+    message: string;
+    assigned_ta: number;
+  }>(`/requisitions/${reqId}/assign-ta`, { ta_user_id: taUserId });
+  return response.data;
+}
+
 // ============================================================================
 // REQUISITION ITEM WORKFLOW API
 // ============================================================================

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   Filter,
   Search,
@@ -11,8 +11,10 @@ import {
   BarChart3,
   ChevronRight,
   UserPlus,
+  Loader2,
 } from "lucide-react";
 import { apiClient } from "../../api/client";
+import { assignRequisitionTA } from "../../api/workflowApi";
 import { useAuth } from "../../contexts/AuthContext";
 import { normalizeStatus, getStatusLabel } from "../../types/workflow";
 
@@ -407,32 +409,29 @@ const Requisitions: React.FC<RequisitionsProps> = ({
     "all" | "my" | "unassigned" | "high" | "overdue"
   >("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [assigningReqId, setAssigningReqId] = useState<string | null>(null);
+  const [assignError, setAssignError] = useState<string | null>(null);
+
+  const fetchRequisitions = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const endpoint =
+        activeFilter === "my"
+          ? "/requisitions?my_assignments=true"
+          : "/requisitions";
+      const response = await apiClient.get<BackendRequisition[]>(endpoint);
+      setRequisitions(mapRequisitions(response.data));
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to load requisitions";
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [activeFilter]);
 
   useEffect(() => {
-    let isMounted = true;
-
-    const fetchRequisitions = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        const endpoint =
-          activeFilter === "my"
-            ? "/requisitions?my_assignments=true"
-            : "/requisitions";
-        const response = await apiClient.get<BackendRequisition[]>(endpoint);
-        if (isMounted) {
-          setRequisitions(mapRequisitions(response.data));
-        }
-      } catch (err) {
-        if (!isMounted) return;
-        const message =
-          err instanceof Error ? err.message : "Failed to load requisitions";
-        setError(message);
-      } finally {
-        if (isMounted) setIsLoading(false);
-      }
-    };
-
     fetchRequisitions();
 
     const handleFocus = () => {
@@ -443,11 +442,10 @@ const Requisitions: React.FC<RequisitionsProps> = ({
     const intervalId = window.setInterval(fetchRequisitions, 30000);
 
     return () => {
-      isMounted = false;
       window.removeEventListener("focus", handleFocus);
       window.clearInterval(intervalId);
     };
-  }, [activeFilter]);
+  }, [fetchRequisitions]);
 
   const visibleRequisitions = requisitions.filter(
     (req) => normalizeStatus(req.overallStatus) === "Active",
@@ -477,20 +475,64 @@ const Requisitions: React.FC<RequisitionsProps> = ({
     return true;
   });
 
-  const handleSelfAssign = (reqId: string) => {
-    setRequisitions((prev) =>
-      prev.map((req) =>
-        req.id === reqId
-          ? {
-              ...req,
-              assignedTAId: currentUserId,
-              assignedTA: currentTaLabel,
-            }
-          : req,
-      ),
-    );
-    onSelfAssign?.(reqId);
-  };
+  /**
+   * Self-assign a requisition to the current TA user.
+   * Calls the backend API and updates local state on success.
+   */
+  const handleSelfAssign = useCallback(
+    async (reqId: string) => {
+      if (!currentUserId) {
+        setAssignError("User not authenticated");
+        return;
+      }
+
+      // Extract numeric ID from "REQ-123" format
+      const numericId = parseInt(reqId.replace("REQ-", ""), 10);
+      if (isNaN(numericId)) {
+        setAssignError("Invalid requisition ID");
+        return;
+      }
+
+      setAssigningReqId(reqId);
+      setAssignError(null);
+
+      try {
+        await assignRequisitionTA(numericId, currentUserId);
+
+        // Update local state
+        setRequisitions((prev) =>
+          prev.map((req) =>
+            req.id === reqId
+              ? {
+                  ...req,
+                  assignedTAId: currentUserId,
+                  assignedTA: currentTaLabel,
+                }
+              : req,
+          ),
+        );
+
+        // Notify parent
+        onSelfAssign?.(reqId);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to assign requisition";
+        const apiMessage =
+          typeof err === "object" &&
+          err !== null &&
+          "response" in err &&
+          (err as { response?: { data?: { detail?: string } } }).response?.data
+            ?.detail
+            ? (err as { response?: { data?: { detail?: string } } }).response
+                ?.data?.detail
+            : null;
+        setAssignError(apiMessage ?? message);
+      } finally {
+        setAssigningReqId(null);
+      }
+    },
+    [currentUserId, currentTaLabel, onSelfAssign],
+  );
 
   // Calculate stats for current TA
   const myRequisitions = visibleRequisitions.filter(
@@ -657,6 +699,40 @@ const Requisitions: React.FC<RequisitionsProps> = ({
               Requiring immediate attention
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Assignment Error */}
+      {assignError && (
+        <div
+          style={{
+            marginBottom: "16px",
+            padding: "12px 16px",
+            borderRadius: "10px",
+            background: "rgba(239, 68, 68, 0.08)",
+            color: "var(--error)",
+            fontSize: "13px",
+            border: "1px solid rgba(239, 68, 68, 0.2)",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+          }}
+        >
+          <AlertCircle size={16} />
+          {assignError}
+          <button
+            onClick={() => setAssignError(null)}
+            style={{
+              marginLeft: "auto",
+              background: "none",
+              border: "none",
+              color: "var(--error)",
+              cursor: "pointer",
+              fontSize: "16px",
+            }}
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -1009,17 +1085,34 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                           {isUnassigned ? (
                             <>
                               <button
-                                className="action-button"
-                                disabled
+                                className="action-button primary"
+                                onClick={() => handleSelfAssign(req.id)}
+                                disabled={assigningReqId === req.id}
                                 style={{
                                   fontSize: "12px",
                                   padding: "6px 12px",
-                                  opacity: 0.6,
-                                  cursor: "not-allowed",
+                                  opacity: assigningReqId === req.id ? 0.7 : 1,
                                 }}
-                                title="TA self-assign is disabled"
+                                title="Assign this requisition to yourself"
                               >
-                                Self Assign
+                                {assigningReqId === req.id ? (
+                                  <>
+                                    <Loader2
+                                      size={12}
+                                      className="animate-spin"
+                                      style={{ marginRight: "4px" }}
+                                    />
+                                    Assigning...
+                                  </>
+                                ) : (
+                                  <>
+                                    <UserPlus
+                                      size={12}
+                                      style={{ marginRight: "4px" }}
+                                    />
+                                    Self Assign
+                                  </>
+                                )}
                               </button>
                               <button
                                 className="action-button"

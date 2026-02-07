@@ -11,8 +11,11 @@ import {
   Briefcase,
   CheckCircle,
   AlertCircle,
+  Save,
+  Send,
 } from "lucide-react";
 import { apiClient } from "../../api/client";
+import { submitRequisition } from "../../api/workflowApi";
 
 interface RequisitionItem {
   id: number;
@@ -94,6 +97,13 @@ const RaiseRequisition: React.FC = () => {
   const [jdFile, setJdFile] = useState<File | null>(null);
   const [jdError, setJdError] = useState<string | null>(null);
 
+  // Draft requisition tracking
+  const [draftRequisitionId, setDraftRequisitionId] = useState<number | null>(
+    null,
+  );
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [draftSaved, setDraftSaved] = useState(false);
+
   const MAX_JD_SIZE = 10 * 1024 * 1024;
 
   useEffect(() => {
@@ -174,17 +184,10 @@ const RaiseRequisition: React.FC = () => {
     if (activeStep > 0) setActiveStep(activeStep - 1);
   };
 
-  const handleSubmit = async () => {
-    if (!validateStep(2)) {
-      setSubmitError("Please complete all required fields.");
-      return;
-    }
-
-    if (jdError) {
-      setSubmitError(jdError);
-      return;
-    }
-
+  /**
+   * Build the FormData payload for creating/updating a requisition.
+   */
+  const buildPayload = (): FormData | null => {
     const invalidItem = formData.items.find((item) => {
       const roleText = item.role.trim();
       const descriptionText = item.description.trim();
@@ -199,86 +202,219 @@ const RaiseRequisition: React.FC = () => {
       setSubmitError(
         "Each role needs a title (min 2 chars), primary skill, and description (min 5 chars).",
       );
+      return null;
+    }
+
+    const trimmedBudget = formData.budget.replace(/,/g, "").trim();
+    const budgetValue = trimmedBudget ? Number(trimmedBudget) : undefined;
+
+    if (
+      trimmedBudget &&
+      (budgetValue === undefined || !Number.isFinite(budgetValue))
+    ) {
+      setSubmitError("Budget must be a valid number.");
+      return null;
+    }
+
+    const itemsPayload = formData.items.flatMap((item) => {
+      const roleText = item.role.trim();
+      const descriptionText = item.description.trim();
+      const primarySkill = getSkillName(item.primarySkillId);
+      const secondarySkills = item.secondarySkillIds
+        .map((skillId) => getSkillName(skillId))
+        .filter(Boolean);
+      const requirementParts = [
+        primarySkill ? `Primary Skill: ${primarySkill}` : "",
+        secondarySkills.length
+          ? `Secondary Skills: ${secondarySkills.join(", ")}`
+          : "",
+      ].filter(Boolean);
+
+      const requirementsText = requirementParts.join(" | ") || undefined;
+
+      const payloadItem = {
+        role_position: roleText,
+        job_description: descriptionText,
+        skill_level: item.level,
+        experience_years: item.experience,
+        education_requirement: item.education.trim() || undefined,
+        requirements: requirementsText,
+      };
+
+      const quantity = Math.max(item.quantity || 1, 1);
+      return Array.from({ length: quantity }, () => payloadItem);
+    });
+
+    const workModePayload =
+      formData.workMode === "Remote" ? "WFH" : formData.workMode;
+    const clientNamePayload = formData.clientName.trim();
+    const durationPayload = formData.projectDuration.trim();
+
+    const payload = new FormData();
+    payload.append("project_name", formData.projectName || "");
+    payload.append("client_name", clientNamePayload || "");
+    payload.append("office_location", formData.officeLocation || "");
+    payload.append("work_mode", workModePayload || "");
+    payload.append("required_by_date", formData.requiredBy || "");
+    payload.append("priority", formData.priority || "");
+    payload.append("justification", formData.justification || "");
+    payload.append("duration", durationPayload || "");
+    payload.append("is_replacement", String(formData.isReplacement));
+    payload.append("manager_notes", formData.additionalNotes || "");
+    payload.append("items_json", JSON.stringify(itemsPayload));
+
+    if (budgetValue !== undefined) {
+      payload.append("budget_amount", String(budgetValue));
+    }
+
+    if (jdFile) {
+      payload.append("jd_file", jdFile);
+    }
+
+    return payload;
+  };
+
+  /**
+   * Save as Draft - creates the requisition in DRAFT status without submitting to workflow
+   */
+  const handleSaveDraft = async () => {
+    if (!validateStep(0)) {
+      setSubmitError("Please complete required fields in Project Scope.");
       return;
     }
+
+    if (jdError) {
+      setSubmitError(jdError);
+      return;
+    }
+
+    // If we have items, validate them
+    if (formData.items.length > 0) {
+      const payload = buildPayload();
+      if (!payload) return;
+    }
+
+    setIsSavingDraft(true);
+    setSubmitError(null);
+
+    try {
+      const payload = buildPayload();
+      if (!payload && formData.items.length > 0) return;
+
+      // If no items yet, create minimal payload
+      const finalPayload =
+        payload ||
+        (() => {
+          const fd = new FormData();
+          fd.append("project_name", formData.projectName || "");
+          fd.append("client_name", formData.clientName.trim() || "");
+          fd.append("office_location", formData.officeLocation || "");
+          fd.append(
+            "work_mode",
+            formData.workMode === "Remote" ? "WFH" : formData.workMode || "",
+          );
+          fd.append("required_by_date", formData.requiredBy || "");
+          fd.append("priority", formData.priority || "");
+          fd.append("justification", formData.justification || "");
+          fd.append("duration", formData.projectDuration.trim() || "");
+          fd.append("is_replacement", String(formData.isReplacement));
+          fd.append("manager_notes", formData.additionalNotes || "");
+          fd.append("items_json", "[]");
+          return fd;
+        })();
+
+      if (draftRequisitionId) {
+        // Update existing draft
+        await apiClient.put(
+          `/requisitions/${draftRequisitionId}`,
+          finalPayload,
+          {
+            headers: { "Content-Type": "multipart/form-data" },
+          },
+        );
+      } else {
+        // Create new draft
+        const response = await apiClient.post<{ req_id: number }>(
+          "/requisitions/",
+          finalPayload,
+          {
+            headers: { "Content-Type": "multipart/form-data" },
+          },
+        );
+        setDraftRequisitionId(response.data.req_id);
+      }
+
+      setDraftSaved(true);
+      setTimeout(() => setDraftSaved(false), 3000);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to save draft";
+      const apiMessage =
+        typeof error === "object" &&
+        error !== null &&
+        "response" in error &&
+        (error as { response?: { data?: { detail?: string } } }).response?.data
+          ?.detail
+          ? (error as { response?: { data?: { detail?: string } } }).response
+              ?.data?.detail
+          : null;
+
+      setSubmitError(apiMessage ?? errorMessage);
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
+  /**
+   * Submit Requisition - saves draft if needed, then calls workflow/submit
+   */
+  const handleSubmit = async () => {
+    if (!validateStep(2)) {
+      setSubmitError("Please complete all required fields.");
+      return;
+    }
+
+    if (jdError) {
+      setSubmitError(jdError);
+      return;
+    }
+
+    const payload = buildPayload();
+    if (!payload) return;
 
     setIsSubmitting(true);
     setSubmitError(null);
 
     try {
-      const trimmedBudget = formData.budget.replace(/,/g, "").trim();
-      const budgetValue = trimmedBudget ? Number(trimmedBudget) : undefined;
+      let reqId = draftRequisitionId;
 
-      if (
-        trimmedBudget &&
-        (budgetValue === undefined || !Number.isFinite(budgetValue))
-      ) {
-        setSubmitError("Budget must be a valid number.");
-        return;
+      // Step 1: Create or update the draft requisition
+      if (reqId) {
+        // Update existing draft
+        await apiClient.put(`/requisitions/${reqId}`, payload, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+      } else {
+        // Create new draft
+        const response = await apiClient.post<{ req_id: number }>(
+          "/requisitions/",
+          payload,
+          {
+            headers: { "Content-Type": "multipart/form-data" },
+          },
+        );
+        reqId = response.data.req_id;
+        setDraftRequisitionId(reqId);
       }
 
-      const itemsPayload = formData.items.flatMap((item) => {
-        const roleText = item.role.trim();
-        const descriptionText = item.description.trim();
-        const primarySkill = getSkillName(item.primarySkillId);
-        const secondarySkills = item.secondarySkillIds
-          .map((skillId) => getSkillName(skillId))
-          .filter(Boolean);
-        const requirementParts = [
-          primarySkill ? `Primary Skill: ${primarySkill}` : "",
-          secondarySkills.length
-            ? `Secondary Skills: ${secondarySkills.join(", ")}`
-            : "",
-        ].filter(Boolean);
+      // Step 2: Submit via workflow endpoint (DRAFT -> Pending_Budget)
+      await submitRequisition(reqId!);
 
-        const requirementsText = requirementParts.join(" | ") || undefined;
+      alert(
+        "Requisition submitted successfully! It is now pending budget approval.",
+      );
 
-        const payloadItem = {
-          role_position: roleText,
-          job_description: descriptionText,
-          skill_level: item.level,
-          experience_years: item.experience,
-          education_requirement: item.education.trim() || undefined,
-          requirements: requirementsText,
-        };
-
-        const quantity = Math.max(item.quantity || 1, 1);
-        return Array.from({ length: quantity }, () => payloadItem);
-      });
-
-      const workModePayload =
-        formData.workMode === "Remote" ? "WFH" : formData.workMode;
-      const clientNamePayload = formData.clientName.trim();
-      const durationPayload = formData.projectDuration.trim();
-
-      const payload = new FormData();
-      payload.append("project_name", formData.projectName || "");
-      payload.append("client_name", clientNamePayload || "");
-      payload.append("office_location", formData.officeLocation || "");
-      payload.append("work_mode", workModePayload || "");
-      payload.append("required_by_date", formData.requiredBy || "");
-      payload.append("priority", formData.priority || "");
-      payload.append("justification", formData.justification || "");
-      payload.append("duration", durationPayload || "");
-      payload.append("is_replacement", String(formData.isReplacement));
-      payload.append("manager_notes", formData.additionalNotes || "");
-      payload.append("items_json", JSON.stringify(itemsPayload));
-
-      if (budgetValue !== undefined) {
-        payload.append("budget_amount", String(budgetValue));
-      }
-
-      if (jdFile) {
-        payload.append("jd_file", jdFile);
-      }
-
-      await apiClient.post("/requisitions/", payload, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      });
-
-      alert("Requisition submitted successfully!");
+      // Reset form
       setFormData({
         projectName: "",
         clientName: "",
@@ -298,6 +434,8 @@ const RaiseRequisition: React.FC = () => {
       setActiveStep(0);
       setJdFile(null);
       setJdError(null);
+      setDraftRequisitionId(null);
+      setDraftSaved(false);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Failed to submit requisition";
@@ -1584,7 +1722,51 @@ const RaiseRequisition: React.FC = () => {
           ← Back
         </button>
 
-        <div style={{ display: "flex", gap: "12px" }}>
+        <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+          {/* Draft Status Indicator */}
+          {draftRequisitionId && (
+            <span
+              style={{
+                fontSize: "12px",
+                color: "var(--text-tertiary)",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+              }}
+            >
+              <Save size={12} />
+              Draft #{draftRequisitionId}
+            </span>
+          )}
+          {draftSaved && (
+            <span
+              style={{
+                fontSize: "12px",
+                color: "var(--success)",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+              }}
+            >
+              <CheckCircle size={12} />
+              Saved
+            </span>
+          )}
+
+          {/* Save Draft Button */}
+          <button
+            className="action-button"
+            onClick={handleSaveDraft}
+            disabled={isSavingDraft || !validateStep(0)}
+            style={{
+              opacity: !validateStep(0) ? 0.5 : 1,
+              cursor: !validateStep(0) ? "not-allowed" : "pointer",
+            }}
+          >
+            <Save size={16} style={{ marginRight: "6px" }} />
+            {isSavingDraft ? "Saving..." : "Save Draft"}
+          </button>
+
           {activeStep < steps.length - 1 ? (
             <button
               className="action-button primary"
@@ -1606,8 +1788,8 @@ const RaiseRequisition: React.FC = () => {
                   : "var(--bg-tertiary)",
               }}
             >
-              <CheckCircle size={16} style={{ marginRight: "8px" }} />
-              {isSubmitting ? "Submitting..." : "Submit Requisition"}
+              <Send size={16} style={{ marginRight: "8px" }} />
+              {isSubmitting ? "Submitting..." : "Submit for Approval"}
             </button>
           )}
         </div>
@@ -1661,16 +1843,20 @@ const RaiseRequisition: React.FC = () => {
           }}
         >
           <p>
-            <strong>Step 1:</strong> Creates the requisition header in the
-            database (table: requisitions)
+            <strong>Save Draft:</strong> Creates or updates the requisition in
+            DRAFT status. You can return to edit it later.
           </p>
           <p>
-            <strong>Step 2:</strong> Each position becomes a separate record
-            (table: requisition_items)
+            <strong>Submit for Approval:</strong> Saves the requisition and
+            submits it for budget approval (DRAFT → Pending_Budget).
           </p>
           <p>
-            <strong>Step 3:</strong> HR will work on each item independently.
-            The requisition closes when all items are fulfilled or cancelled.
+            <strong>Approval Flow:</strong> Budget Owner approves → HR reviews
+            (Pending_HR) → TA assigned → Positions filled.
+          </p>
+          <p style={{ marginTop: "8px", color: "var(--text-tertiary)" }}>
+            Each position becomes a separate requisition item that HR/TA will
+            work on independently.
           </p>
         </div>
       </div>

@@ -54,13 +54,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     try {
       const apiUrl = `${import.meta.env.VITE_API_BASE_URL}/auth/login`;
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
       const response = await fetch(apiUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ username, password }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         let errorMessage = "Login failed. Please try again.";
@@ -93,8 +99,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
 
       return userObj;
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "An unexpected error occurred";
+      let message = "An unexpected error occurred";
+      if (err instanceof DOMException && err.name === "AbortError") {
+        message =
+          "Login request timed out. Please check if the server is running.";
+      } else if (
+        err instanceof TypeError &&
+        err.message === "Failed to fetch"
+      ) {
+        message = "Unable to reach the server. Please check your connection.";
+      } else if (err instanceof Error) {
+        message = err.message;
+      }
       setError(message);
       throw err;
     } finally {

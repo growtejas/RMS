@@ -214,7 +214,32 @@ class WorkflowAuditLogger:
         
         This is specific to requisition headers and provides
         a quick lookup of status change history.
+        
+        Raises:
+            WorkflowException: If old_status is None
+            AuditWriteException: If DB write fails
         """
+        if old_status is None:
+            raise WorkflowException(
+                message="Invalid transition: old_status cannot be NULL",
+                code="NULL_OLD_STATUS",
+            )
+
+        # Validate both statuses against the canonical enum
+        _valid = {s.value for s in RequisitionStatus}
+        if old_status not in _valid:
+            raise ValidationException(
+                field="old_status",
+                message=f"Invalid status value: {old_status}",
+                value=old_status,
+            )
+        if new_status not in _valid:
+            raise ValidationException(
+                field="new_status",
+                message=f"Invalid status value: {new_status}",
+                value=new_status,
+            )
+
         try:
             history = RequisitionStatusHistory(
                 req_id=req_id,
