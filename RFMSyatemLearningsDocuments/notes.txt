@@ -84,7 +84,7 @@ python -m pip install fastapi
 
 alembic command
 
-.\venv\Scripts\python.exe -m alembic revision --autogenerate -m "employee core table"
+.\venv\Scripts\python.exe -m alembic revision --autogenerate -m "requisition_header"
 
 .\venv\Scripts\python.exe -m alembic upgrade head
 

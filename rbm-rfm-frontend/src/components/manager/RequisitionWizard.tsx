@@ -368,8 +368,4 @@ export const WizardNavigation: React.FC<WizardNavigationProps> = ({
   );
 };
 
-// ============================================================================
-// EXPORTS
-// ============================================================================
-
 export default RequisitionWizard;
