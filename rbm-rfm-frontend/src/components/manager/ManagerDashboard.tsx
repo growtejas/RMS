@@ -13,6 +13,7 @@ import RequisitionAudit from "./RequisitionAudit";
 import { AlertTriangle, Clock, TrendingUp } from "lucide-react";
 import { managerDashboardService } from "../../api/managerDashboardService";
 import { ManagerDashboardMetrics } from "../../types/managerDashboard";
+import RequisitionWizard from "./RequisitionWizard";
 
 const viewLabels: Record<ManagerDashboardView, string> = {
   "manager-dashboard": "Dashboard",
