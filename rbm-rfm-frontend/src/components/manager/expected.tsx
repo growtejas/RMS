@@ -9,14 +9,9 @@
  * - Budget finalization and submission
  * - File uploads with async handling
  * - Replacement hire logic
- *
- * WORKFLOW ENGINE V2 COMPLIANCE:
- * 1. POST /api/requisitions creates requisition in DRAFT status ONLY
- * 2. POST /api/requisitions/{id}/workflow/submit transitions to Pending_Budget
- * 3. No client-side status mutations - backend is single source of truth
  */
 
-import React, { useState, useRef, useEffect, ChangeEvent } from "react";
+import React, { useState, useRef, ChangeEvent } from "react";
 import {
   Check,
   Plus,
@@ -25,17 +20,10 @@ import {
   DollarSign,
   Calendar,
   Building,
-  MapPin,
   User,
   Briefcase,
   FileText,
 } from "lucide-react";
-import { apiClient } from "../../api/client";
-import {
-  submitRequisition,
-  getWorkflowErrorMessage,
-  WorkflowTransitionResponse,
-} from "../../api/workflowApi";
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -63,8 +51,7 @@ interface RequisitionData {
   projectName: string;
   requiredByDate: string;
   clientName: string;
-  officeLocation: string;
-  workMode: "Remote" | "Hybrid" | "WFO" | "";
+  officeLocation: "Remote" | "Hybrid" | "WFO" | "";
   priority: "Low" | "Medium" | "High" | "";
   businessJustification: string;
   positions: ResourcePosition[];
@@ -91,32 +78,22 @@ interface StepIndicatorProps {
   totalSteps: number;
 }
 
-interface SkillResponse {
-  skill_id: number;
-  skill_name: string;
-}
-
-interface LocationResponse {
-  location_id: number;
-  city?: string | null;
-  country?: string | null;
-}
-
-interface RequisitionItemPayload {
-  role_position: string;
-  job_description: string;
-  skill_level: string;
-  experience_years: number;
-  education_requirement?: string;
-  requirements?: string;
-}
-
 // ============================================================================
 // CONSTANTS
 // ============================================================================
 
-const WORK_MODES = ["Remote", "Hybrid", "WFO"] as const;
+const OFFICE_LOCATIONS = ["Remote", "Hybrid", "WFO"] as const;
 const PRIORITIES = ["Low", "Medium", "High"] as const;
+const DEFAULT_SKILLS = [
+  "React",
+  "TypeScript",
+  "Node.js",
+  "Python",
+  "Java",
+  "AWS",
+  "Docker",
+  "Kubernetes",
+];
 
 // ============================================================================
 // HELPER COMPONENTS
@@ -391,7 +368,6 @@ const App: React.FC = () => {
     requiredByDate: "",
     clientName: "",
     officeLocation: "",
-    workMode: "",
     priority: "",
     businessJustification: "",
     positions: [],
@@ -399,8 +375,37 @@ const App: React.FC = () => {
     projectDuration: "",
   });
 
-  // Available skills fetched from backend
-  const [availableSkills, setAvailableSkills] = useState<string[]>([]);
+  // Available skills (simulating master skills table)
+  const [availableSkills, setAvailableSkills] = useState<string[]>([
+    ...DEFAULT_SKILLS,
+    "Angular",
+    "Vue.js",
+    "React Native",
+    "Flutter",
+    "Swift",
+    "Kotlin",
+    "Java",
+    "Spring Boot",
+    "Microservices",
+    "GraphQL",
+    "PostgreSQL",
+    "MongoDB",
+    "Redis",
+    "Kafka",
+    "RabbitMQ",
+    "AWS",
+    "Azure",
+    "GCP",
+    "Docker",
+    "Kubernetes",
+    "CI/CD",
+    "Terraform",
+    "Jenkins",
+    "GitLab",
+    "Python",
+    "Django",
+    "FastAPI",
+  ]);
 
   // New skill input for instant addition
   const [newSkillInputs, setNewSkillInputs] = useState<Record<string, string>>(
@@ -409,10 +414,6 @@ const App: React.FC = () => {
 
   // File input refs
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-
-  const [officeLocations, setOfficeLocations] = useState<LocationResponse[]>(
-    [],
-  );
 
   // Wizard steps
   const steps: WizardStep[] = [
@@ -432,33 +433,6 @@ const App: React.FC = () => {
       description: "Review & submit",
     },
   ];
-
-  // Fetch skills and locations from backend on mount
-  useEffect(() => {
-    const fetchSkills = async () => {
-      try {
-        const response = await apiClient.get<SkillResponse[]>("/skills/");
-        const backendSkills = response.data
-          .map((s) => s.skill_name)
-          .filter((name) => name.trim() !== "");
-        setAvailableSkills(Array.from(new Set(backendSkills)));
-      } catch {
-        // Silently fail - use default skills
-      }
-    };
-
-    const fetchLocations = async () => {
-      try {
-        const response = await apiClient.get<LocationResponse[]>("/locations/");
-        setOfficeLocations(response.data);
-      } catch {
-        // Silently fail - keep dropdown empty
-      }
-    };
-
-    fetchSkills();
-    fetchLocations();
-  }, []);
 
   // Validation helpers
   const isStep1Valid = () => {
@@ -512,121 +486,19 @@ const App: React.FC = () => {
     }
   };
 
-  // Build payload for API
-  const buildItemsPayload = (): RequisitionItemPayload[] => {
-    return requisitionData.positions.flatMap((pos) => {
-      const requirementParts = [
-        pos.primarySkill ? `Primary Skill: ${pos.primarySkill}` : "",
-        pos.secondarySkills.length
-          ? `Secondary Skills: ${pos.secondarySkills.join(", ")}`
-          : "",
-      ].filter(Boolean);
-
-      const requirementsText = requirementParts.join(" | ") || undefined;
-
-      const payloadItem: RequisitionItemPayload = {
-        role_position: pos.roleTitle.trim(),
-        job_description: `${pos.roleTitle} position requiring ${pos.yearsOfExperience}+ years experience`,
-        skill_level:
-          pos.yearsOfExperience >= 8
-            ? "Lead"
-            : pos.yearsOfExperience >= 5
-              ? "Senior"
-              : pos.yearsOfExperience >= 3
-                ? "Mid"
-                : "Junior",
-        experience_years: pos.yearsOfExperience,
-        requirements: requirementsText,
-      };
-
-      const quantity = Math.max(pos.quantity || 1, 1);
-      return Array.from({ length: quantity }, () => payloadItem);
-    });
-  };
-
-  const buildPayload = (): FormData => {
-    const itemsPayload = buildItemsPayload();
-    const trimmedBudget = requisitionData.estimatedBudget
-      .replace(/,/g, "")
-      .trim();
-    const budgetValue = trimmedBudget ? Number(trimmedBudget) : undefined;
-
-    const workModePayload =
-      requisitionData.workMode === "Remote" ? "WFH" : requisitionData.workMode;
-
-    const payload = new FormData();
-    payload.append("project_name", requisitionData.projectName || "");
-    payload.append("client_name", requisitionData.clientName.trim() || "");
-    payload.append("office_location", requisitionData.officeLocation || "");
-    payload.append("work_mode", workModePayload || "");
-    payload.append("required_by_date", requisitionData.requiredByDate || "");
-    payload.append("priority", requisitionData.priority || "");
-    payload.append(
-      "justification",
-      requisitionData.businessJustification || "",
-    );
-    payload.append("duration", requisitionData.projectDuration.trim() || "");
-    payload.append("is_replacement", "false");
-    payload.append("manager_notes", "");
-    payload.append("items_json", JSON.stringify(itemsPayload));
-
-    if (budgetValue !== undefined && Number.isFinite(budgetValue)) {
-      payload.append("budget_amount", String(budgetValue));
-    }
-
-    return payload;
-  };
-
   const handleSubmit = async () => {
     if (!isStep3Valid()) return;
 
     setIsSubmitting(true);
 
+    // Simulate API call
     try {
-      // Step 1: Create requisition (DRAFT status)
-      const payload = buildPayload();
-      const createResponse = await apiClient.post<{ req_id: number }>(
-        "/requisitions/",
-        payload,
-        { headers: { "Content-Type": "multipart/form-data" } },
-      );
-      const reqId = createResponse.data.req_id;
-
-      // Step 2: Submit via workflow endpoint (DRAFT → Pending_Budget)
-      const transitionResult: WorkflowTransitionResponse =
-        await submitRequisition(reqId);
-
-      if (
-        transitionResult.success &&
-        transitionResult.new_status === "Pending_Budget"
-      ) {
-        alert(
-          `Requisition #${reqId} submitted successfully!\n\nStatus: ${transitionResult.new_status}\nIt is now pending budget approval.`,
-        );
-        // Reset form
-        setRequisitionData({
-          projectName: "",
-          requiredByDate: "",
-          clientName: "",
-          officeLocation: "",
-          workMode: "",
-          priority: "",
-          businessJustification: "",
-          positions: [],
-          estimatedBudget: "",
-          projectDuration: "",
-        });
-        setActiveStep(0);
-        setCompletedSteps(new Set());
-      } else {
-        throw new Error(
-          `Unexpected workflow response: ${JSON.stringify(transitionResult)}`,
-        );
-      }
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      console.log("Submitting requisition:", requisitionData);
+      alert("Requisition submitted successfully!");
     } catch (error) {
       console.error("Submission error:", error);
-      const errorMessage = getWorkflowErrorMessage(error);
-      alert(`Failed to submit requisition: ${errorMessage}`);
+      alert("Failed to submit requisition. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -658,7 +530,6 @@ const App: React.FC = () => {
   const updatePosition = (
     id: string,
     field: keyof ResourcePosition,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     value: any,
   ) => {
     setRequisitionData((prev) => ({
@@ -710,34 +581,29 @@ const App: React.FC = () => {
     }
   };
 
-  const handleInstantSkillAdd = async (
+  const handleInstantSkillAdd = (
     positionId: string,
     skillType: "primary" | "secondary",
   ) => {
     const skillName = newSkillInputs[`${positionId}_${skillType}`]?.trim();
     if (!skillName) return;
 
-    try {
-      const response = await apiClient.post<SkillResponse>(
-        "/skills/instant-add",
-        { name: skillName },
-      );
-      const savedName = response.data.skill_name?.trim();
-      if (!savedName) return;
-
-      setAvailableSkills((prev) =>
-        prev.includes(savedName) ? prev : [...prev, savedName],
-      );
-
-      addSkillToPosition(positionId, savedName, skillType);
-
-      setNewSkillInputs((prev) => ({
-        ...prev,
-        [`${positionId}_${skillType}`]: "",
-      }));
-    } catch (error) {
-      console.error("Failed to save skill:", error);
+    // Add to available skills if not exists
+    if (!availableSkills.includes(skillName)) {
+      setAvailableSkills((prev) => [...prev, skillName]);
     }
+
+    // Add to position
+    addSkillToPosition(positionId, skillName, skillType);
+
+    // Clear input
+    setNewSkillInputs((prev) => ({
+      ...prev,
+      [`${positionId}_${skillType}`]: "",
+    }));
+
+    // Simulate POST /skills/instant-add
+    console.log(`Instant adding skill: ${skillName} with is_verified = false`);
   };
 
   // File upload handling
@@ -767,11 +633,10 @@ const App: React.FC = () => {
   };
 
   // Add default first position when positions are empty
-  useEffect(() => {
+  React.useEffect(() => {
     if (requisitionData.positions.length === 0) {
       addNewPosition();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Determine if current step can proceed
@@ -890,42 +755,9 @@ const App: React.FC = () => {
                         className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none"
                       >
                         <option value="">Select location</option>
-                        {officeLocations.map((location) => {
-                          const label = [location.city, location.country]
-                            .filter(Boolean)
-                            .join(", ");
-                          return (
-                            <option
-                              key={location.location_id}
-                              value={
-                                label || `Location ${location.location_id}`
-                              }
-                            >
-                              {label || `Location ${location.location_id}`}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Work Mode
-                    </label>
-                    <div className="relative">
-                      <MapPin className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                      <select
-                        value={requisitionData.workMode}
-                        onChange={(e) =>
-                          handleInputChange("workMode", e.target.value)
-                        }
-                        className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none"
-                      >
-                        <option value="">Select work mode</option>
-                        {WORK_MODES.map((mode) => (
-                          <option key={mode} value={mode}>
-                            {mode}
+                        {OFFICE_LOCATIONS.map((loc) => (
+                          <option key={loc} value={loc}>
+                            {loc}
                           </option>
                         ))}
                       </select>

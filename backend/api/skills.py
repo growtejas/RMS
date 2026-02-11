@@ -51,7 +51,17 @@ def instant_add_skill(
 
     existing = db.query(Skill).filter(Skill.normalized_name == normalized_name).first()
     if existing:
-        return existing
+        created_by_name = None
+        if existing.created_by:
+            user = db.query(User).filter(User.user_id == existing.created_by).first()
+            created_by_name = user.username if user else None
+
+        return SkillResponse(
+            skill_id=existing.skill_id,
+            skill_name=existing.skill_name,
+            created_by=created_by_name,
+            created_at=None,
+        )
 
     skill = Skill(
         skill_name=name,
@@ -63,7 +73,12 @@ def instant_add_skill(
     db.commit()
     db.refresh(skill)
 
-    return skill
+    return SkillResponse(
+        skill_id=skill.skill_id,
+        skill_name=skill.skill_name,
+        created_by=current_user.username,
+        created_at=None,
+    )
 @router.get("/", response_model=list[SkillResponse])
 def list_skills(
     db: Session = Depends(get_db),

@@ -7,13 +7,12 @@ import ManagerSidebar, { ManagerDashboardView } from "./ManagerSidebar";
 import "../../styles/hr/hr-dashboard.css";
 import "../../styles/manager/manager-dashboard.css";
 import { getStatusLabel } from "../../types/workflow";
-import RaiseRequisition from "./RaiseRequisition";
+import RequisitionWizard from "./RequisitionWizard";
 import MyRequisitions from "./MyRequisitions";
 import RequisitionAudit from "./RequisitionAudit";
 import { AlertTriangle, Clock, TrendingUp } from "lucide-react";
 import { managerDashboardService } from "../../api/managerDashboardService";
 import { ManagerDashboardMetrics } from "../../types/managerDashboard";
-import RequisitionWizard from "./RequisitionWizard";
 
 const viewLabels: Record<ManagerDashboardView, string> = {
   "manager-dashboard": "Dashboard",
@@ -252,7 +251,7 @@ const ManagerDashboard: React.FC = () => {
       case "manager-dashboard":
         return renderDashboard();
       case "raise-requisition":
-        return <RaiseRequisition />;
+        return <RequisitionWizard />;
       case "my-requisitions":
         return <MyRequisitions />;
       case "requisition-audit":
