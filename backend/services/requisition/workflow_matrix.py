@@ -52,6 +52,18 @@ class RequisitionItemStatus(str, Enum):
     CANCELLED = "Cancelled"
 
 
+class ItemBudgetStatus(str, Enum):
+    """
+    Budget status for requisition items.
+    
+    This is NOT a workflow status - it tracks budget approval state separately.
+    """
+    PENDING = "pending"           # Budget not yet set or not approved
+    SUBMITTED = "submitted"       # estimated_budget > 0, awaiting approval
+    APPROVED = "approved"         # approved_budget set
+    REJECTED = "rejected"         # Budget rejected, needs revision
+
+
 class SystemRole(str, Enum):
     """
     Official system roles for authorization.
@@ -323,6 +335,50 @@ ITEM_TRANSITION_AUTHORITY: Dict[
 
 
 # ============================================================================
+# ITEM BUDGET WORKFLOW AUTHORITY
+# ============================================================================
+
+# Roles authorized to edit item estimated_budget
+ITEM_BUDGET_EDIT_AUTHORITY: FrozenSet[SystemRole] = frozenset({
+    SystemRole.MANAGER,
+    SystemRole.HR,
+    SystemRole.ADMIN,
+})
+
+# Roles authorized to approve item budget
+ITEM_BUDGET_APPROVE_AUTHORITY: FrozenSet[SystemRole] = frozenset({
+    SystemRole.MANAGER,
+    SystemRole.HR,
+    SystemRole.ADMIN,
+})
+
+# Roles authorized to reject item budget
+ITEM_BUDGET_REJECT_AUTHORITY: FrozenSet[SystemRole] = frozenset({
+    SystemRole.MANAGER,
+    SystemRole.HR,
+    SystemRole.ADMIN,
+})
+
+# Roles authorized to cancel item budget
+ITEM_BUDGET_CANCEL_AUTHORITY: FrozenSet[SystemRole] = frozenset({
+    SystemRole.MANAGER,
+    SystemRole.HR,
+    SystemRole.ADMIN,
+})
+
+# Header states where item budget can be edited/approved
+ITEM_BUDGET_EDITABLE_HEADER_STATES: FrozenSet[RequisitionStatus] = frozenset({
+    RequisitionStatus.DRAFT,
+    RequisitionStatus.PENDING_BUDGET,
+})
+
+# Header states where item budget can be approved
+ITEM_BUDGET_APPROVABLE_HEADER_STATES: FrozenSet[RequisitionStatus] = frozenset({
+    RequisitionStatus.PENDING_BUDGET,
+})
+
+
+# ============================================================================
 # FIELD EDIT AUTHORITY (Section 5.3)
 # ============================================================================
 
@@ -341,6 +397,7 @@ HEADER_FORBIDDEN_FIELDS: FrozenSet[str] = frozenset({
 ITEM_FORBIDDEN_FIELDS: FrozenSet[str] = frozenset({
     "item_status",
     "assigned_employee_id",  # Only via workflow/fulfill
+    "approved_budget",       # Only via workflow/approve-budget
     "created_at",
 })
 
@@ -435,3 +492,60 @@ def get_item_authorized_roles(
 ) -> FrozenSet[SystemRole]:
     """Get the roles authorized for an item transition."""
     return ITEM_TRANSITION_AUTHORITY.get((from_status, to_status), frozenset())
+
+
+# ============================================================================
+# BUDGET WORKFLOW HELPERS
+# ============================================================================
+
+def can_edit_item_budget(
+    header_status: RequisitionStatus,
+    user_roles: list,
+) -> bool:
+    """
+    Check if item budget can be edited in current header state.
+    
+    Budget can only be edited when header is in DRAFT or PENDING_BUDGET.
+    """
+    if header_status not in ITEM_BUDGET_EDITABLE_HEADER_STATES:
+        return False
+    
+    user_system_roles = {
+        SystemRole(r) for r in user_roles
+        if r in [sr.value for sr in SystemRole]
+    }
+    return bool(user_system_roles.intersection(ITEM_BUDGET_EDIT_AUTHORITY))
+
+
+def can_approve_item_budget(
+    header_status: RequisitionStatus,
+    user_roles: list,
+) -> bool:
+    """
+    Check if item budget can be approved in current header state.
+    
+    Budget can only be approved when header is in PENDING_BUDGET.
+    """
+    if header_status not in ITEM_BUDGET_APPROVABLE_HEADER_STATES:
+        return False
+    
+    user_system_roles = {
+        SystemRole(r) for r in user_roles
+        if r in [sr.value for sr in SystemRole]
+    }
+    return bool(user_system_roles.intersection(ITEM_BUDGET_APPROVE_AUTHORITY))
+
+
+def get_budget_edit_authorized_roles() -> FrozenSet[SystemRole]:
+    """Get roles authorized to edit item budgets."""
+    return ITEM_BUDGET_EDIT_AUTHORITY
+
+
+def get_budget_approve_authorized_roles() -> FrozenSet[SystemRole]:
+    """Get roles authorized to approve item budgets."""
+    return ITEM_BUDGET_APPROVE_AUTHORITY
+
+
+def get_budget_reject_authorized_roles() -> FrozenSet[SystemRole]:
+    """Get roles authorized to reject item budgets."""
+    return ITEM_BUDGET_REJECT_AUTHORITY

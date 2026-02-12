@@ -16,7 +16,7 @@
  * 3. No client-side status mutations - backend is single source of truth
  */
 
-import React, { useState, useRef, useEffect, ChangeEvent } from "react";
+import React, { useState, useRef, useEffect, ChangeEvent, useMemo } from "react";
 import {
   Check,
   Plus,
@@ -57,6 +57,9 @@ interface ResourcePosition {
   isReplacement: boolean;
   jobDescriptionUrl?: string;
   jobDescriptionFile?: File | null;
+  // Item-level budget fields
+  estimatedBudget: string;
+  currency: string;
 }
 
 interface RequisitionData {
@@ -68,7 +71,8 @@ interface RequisitionData {
   priority: "Low" | "Medium" | "High" | "";
   businessJustification: string;
   positions: ResourcePosition[];
-  estimatedBudget: string;
+  // REMOVED: Header-level budget - now item-level only
+  // estimatedBudget: string;
   projectDuration: string;
 }
 
@@ -109,6 +113,9 @@ interface RequisitionItemPayload {
   experience_years: number;
   education_requirement?: string;
   requirements?: string;
+  // Item-level budget fields
+  estimated_budget: number;
+  currency: string;
 }
 
 // ============================================================================
@@ -117,6 +124,18 @@ interface RequisitionItemPayload {
 
 const WORK_MODES = ["Remote", "Hybrid", "WFO"] as const;
 const PRIORITIES = ["Low", "Medium", "High"] as const;
+
+// Currency options for item-level budgets
+const CURRENCIES = [
+  { code: "INR", label: "INR - Indian Rupee", symbol: "₹" },
+  { code: "USD", label: "USD - US Dollar", symbol: "$" },
+  { code: "EUR", label: "EUR - Euro", symbol: "€" },
+  { code: "GBP", label: "GBP - British Pound", symbol: "£" },
+  { code: "AUD", label: "AUD - Australian Dollar", symbol: "A$" },
+  { code: "SGD", label: "SGD - Singapore Dollar", symbol: "S$" },
+] as const;
+
+const DEFAULT_CURRENCY = "INR";
 
 // ============================================================================
 // HELPER COMPONENTS
@@ -395,7 +414,7 @@ const App: React.FC = () => {
     priority: "",
     businessJustification: "",
     positions: [],
-    estimatedBudget: "",
+    // REMOVED: Header-level budget - now item-level only
     projectDuration: "",
   });
 
@@ -477,13 +496,27 @@ const App: React.FC = () => {
           pos.roleTitle.trim() !== "" &&
           pos.primarySkill.trim() !== "" &&
           pos.yearsOfExperience > 0 &&
-          pos.quantity > 0,
+          pos.quantity > 0 &&
+          // Budget validation: estimated_budget must be > 0
+          pos.estimatedBudget.trim() !== "" &&
+          parseFloat(pos.estimatedBudget.replace(/,/g, "")) > 0 &&
+          pos.currency.trim() !== "",
       )
     );
   };
 
+  // Compute total estimated budget from all positions
+  const computedTotalBudget = useMemo(() => {
+    return requisitionData.positions.reduce((sum, pos) => {
+      const budgetValue = parseFloat(pos.estimatedBudget.replace(/,/g, "")) || 0;
+      return sum + budgetValue * pos.quantity;
+    }, 0);
+  }, [requisitionData.positions]);
+
+  // Step 3 is now valid if positions have budgets (validated in Step 2)
   const isStep3Valid = () => {
-    return requisitionData.estimatedBudget.trim() !== "";
+    // All budget validation is now done in Step 2
+    return isStep2Valid();
   };
 
   // Navigation handlers
@@ -524,6 +557,9 @@ const App: React.FC = () => {
 
       const requirementsText = requirementParts.join(" | ") || undefined;
 
+      // Parse budget value from string
+      const budgetValue = parseFloat(pos.estimatedBudget.replace(/,/g, "")) || 0;
+
       const payloadItem: RequisitionItemPayload = {
         role_position: pos.roleTitle.trim(),
         job_description: `${pos.roleTitle} position requiring ${pos.yearsOfExperience}+ years experience`,
@@ -537,6 +573,9 @@ const App: React.FC = () => {
                 : "Junior",
         experience_years: pos.yearsOfExperience,
         requirements: requirementsText,
+        // Item-level budget fields
+        estimated_budget: budgetValue,
+        currency: pos.currency || DEFAULT_CURRENCY,
       };
 
       const quantity = Math.max(pos.quantity || 1, 1);
@@ -546,10 +585,6 @@ const App: React.FC = () => {
 
   const buildPayload = (): FormData => {
     const itemsPayload = buildItemsPayload();
-    const trimmedBudget = requisitionData.estimatedBudget
-      .replace(/,/g, "")
-      .trim();
-    const budgetValue = trimmedBudget ? Number(trimmedBudget) : undefined;
 
     const workModePayload =
       requisitionData.workMode === "Remote" ? "WFH" : requisitionData.workMode;
@@ -570,9 +605,8 @@ const App: React.FC = () => {
     payload.append("manager_notes", "");
     payload.append("items_json", JSON.stringify(itemsPayload));
 
-    if (budgetValue !== undefined && Number.isFinite(budgetValue)) {
-      payload.append("budget_amount", String(budgetValue));
-    }
+    // NOTE: Header-level budget_amount is NO LONGER sent.
+    // Budget is now at item-level and included in items_json.
 
     return payload;
   };
@@ -613,7 +647,7 @@ const App: React.FC = () => {
           priority: "",
           businessJustification: "",
           positions: [],
-          estimatedBudget: "",
+          // REMOVED: Header-level budget
           projectDuration: "",
         });
         setActiveStep(0);
@@ -648,6 +682,9 @@ const App: React.FC = () => {
       quantity: 1,
       isReplacement: false,
       jobDescriptionFile: null,
+      // Item-level budget with defaults
+      estimatedBudget: "",
+      currency: DEFAULT_CURRENCY,
     };
     setRequisitionData((prev) => ({
       ...prev,
@@ -1205,6 +1242,69 @@ const App: React.FC = () => {
                       </div>
                     </div>
 
+                    {/* Item-Level Budget Section */}
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <h4 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                        <DollarSign className="w-4 h-4 text-green-600" />
+                        Budget for this Position
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Estimated Budget (per resource){" "}
+                            <span className="text-red-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-2 text-gray-500">
+                              {CURRENCIES.find((c) => c.code === position.currency)?.symbol || "₹"}
+                            </span>
+                            <input
+                              type="text"
+                              value={position.estimatedBudget}
+                              onChange={(e) => {
+                                // Allow only numbers and commas
+                                const value = e.target.value.replace(/[^0-9,]/g, "");
+                                updatePosition(position.id, "estimatedBudget", value);
+                              }}
+                              className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              placeholder="e.g., 50,000"
+                            />
+                          </div>
+                          {position.quantity > 1 && position.estimatedBudget && (
+                            <p className="text-xs text-gray-500 mt-1">
+                              Total for {position.quantity} resources:{" "}
+                              <span className="font-medium">
+                                {CURRENCIES.find((c) => c.code === position.currency)?.symbol}
+                                {(
+                                  parseFloat(position.estimatedBudget.replace(/,/g, "")) *
+                                  position.quantity
+                                ).toLocaleString()}
+                              </span>
+                            </p>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Currency <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            value={position.currency}
+                            onChange={(e) =>
+                              updatePosition(position.id, "currency", e.target.value)
+                            }
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          >
+                            {CURRENCIES.map((curr) => (
+                              <option key={curr.code} value={curr.code}>
+                                {curr.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="mt-4">
                       <label className="flex items-center gap-2 cursor-pointer">
                         <input
@@ -1278,38 +1378,32 @@ const App: React.FC = () => {
             {/* Step 3: Budget & Finalize */}
             <WizardStepContent
               stepIndex={2}
-              title="Budget & Finalize"
-              subtitle="Review and submit your requisition for approval"
+              title="Review & Finalize"
+              subtitle="Review your requisition before submission"
             >
               <div className="space-y-6">
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-                  <h3 className="text-lg font-semibold text-blue-900 mb-4 flex items-center gap-2">
+                {/* Budget Summary - Computed from Items */}
+                <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+                  <h3 className="text-lg font-semibold text-green-900 mb-4 flex items-center gap-2">
                     <DollarSign className="w-5 h-5" />
-                    Budget Information
+                    Budget Summary (Computed from Items)
                   </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Estimated Budget <span className="text-red-500">*</span>
-                      </label>
-                      <div className="relative">
-                        <DollarSign className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                        <input
-                          type="text"
-                          value={requisitionData.estimatedBudget}
-                          onChange={(e) =>
-                            handleInputChange("estimatedBudget", e.target.value)
-                          }
-                          className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          placeholder="e.g., 150000"
-                        />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-white rounded-lg p-4 border border-green-100">
+                      <div className="text-sm text-gray-600 mb-1">
+                        Total Estimated Budget
+                      </div>
+                      <div className="text-2xl font-bold text-green-700">
+                        ₹{computedTotalBudget.toLocaleString()}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        Sum of all item budgets
                       </div>
                     </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <div className="bg-white rounded-lg p-4 border border-green-100">
+                      <div className="text-sm text-gray-600 mb-1">
                         Project Duration (Optional)
-                      </label>
+                      </div>
                       <input
                         type="text"
                         value={requisitionData.projectDuration}
@@ -1323,6 +1417,75 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Per-Item Budget Breakdown */}
+                <div className="bg-white border border-gray-200 rounded-lg p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                    Item Budget Breakdown
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="text-left px-4 py-2 font-medium text-gray-700">
+                            Position
+                          </th>
+                          <th className="text-center px-4 py-2 font-medium text-gray-700">
+                            Qty
+                          </th>
+                          <th className="text-right px-4 py-2 font-medium text-gray-700">
+                            Budget/Resource
+                          </th>
+                          <th className="text-right px-4 py-2 font-medium text-gray-700">
+                            Total
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {requisitionData.positions.map((pos, idx) => {
+                          const perResource =
+                            parseFloat(pos.estimatedBudget.replace(/,/g, "")) || 0;
+                          const total = perResource * pos.quantity;
+                          const currSymbol =
+                            CURRENCIES.find((c) => c.code === pos.currency)?.symbol || "₹";
+                          return (
+                            <tr key={pos.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-2">
+                                <span className="font-medium">{pos.roleTitle || `Position ${idx + 1}`}</span>
+                                <span className="text-gray-500 text-xs ml-2">
+                                  ({pos.primarySkill || "No skill"})
+                                </span>
+                              </td>
+                              <td className="px-4 py-2 text-center">{pos.quantity}</td>
+                              <td className="px-4 py-2 text-right">
+                                {currSymbol}{perResource.toLocaleString()}
+                              </td>
+                              <td className="px-4 py-2 text-right font-medium">
+                                {currSymbol}{total.toLocaleString()}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot className="bg-gray-50 font-semibold">
+                        <tr>
+                          <td className="px-4 py-2">Total</td>
+                          <td className="px-4 py-2 text-center">
+                            {requisitionData.positions.reduce(
+                              (sum, pos) => sum + pos.quantity,
+                              0,
+                            )}
+                          </td>
+                          <td className="px-4 py-2"></td>
+                          <td className="px-4 py-2 text-right text-green-700">
+                            ₹{computedTotalBudget.toLocaleString()}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Requisition Summary */}
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">
                     Requisition Summary
@@ -1366,12 +1529,9 @@ const App: React.FC = () => {
                       </span>
                     </div>
                     <div className="flex justify-between py-2">
-                      <span className="text-gray-600">Estimated Budget:</span>
-                      <span className="font-medium text-gray-900">
-                        $
-                        {parseInt(
-                          requisitionData.estimatedBudget || "0",
-                        ).toLocaleString()}
+                      <span className="text-gray-600">Total Estimated Budget:</span>
+                      <span className="font-bold text-green-700 text-lg">
+                        ₹{computedTotalBudget.toLocaleString()}
                       </span>
                     </div>
                   </div>
@@ -1390,15 +1550,14 @@ const App: React.FC = () => {
                           status "Pending Budget Approval"
                         </li>
                         <li>
-                          All positions and skill requirements will be reviewed
-                          by HR
+                          <strong>Each item's budget must be approved individually</strong> by HR before proceeding
                         </li>
                         <li>
                           You will receive notifications on the approval status
                         </li>
                         <li>
-                          Budget approval is required before proceeding to
-                          sourcing
+                          Budget approval for all items is required before
+                          proceeding to sourcing
                         </li>
                       </ul>
                     </div>

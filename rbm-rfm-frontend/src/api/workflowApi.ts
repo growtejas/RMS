@@ -330,6 +330,68 @@ export async function cancelItem(
 }
 
 // ============================================================================
+// ITEM BUDGET WORKFLOW API
+// ============================================================================
+
+import type {
+  ItemBudgetEditRequest,
+  ItemBudgetRejectRequest,
+  ItemBudgetResponse,
+} from "../types/workflow";
+
+export type { ItemBudgetEditRequest, ItemBudgetRejectRequest, ItemBudgetResponse };
+
+/**
+ * Edit the estimated budget for an item.
+ * Can only be done when header is in DRAFT or PENDING_BUDGET.
+ * Cannot be done after budget has been approved.
+ */
+export async function editItemBudget(
+  itemId: number,
+  request: ItemBudgetEditRequest,
+): Promise<ItemBudgetResponse> {
+  const response = await apiClient.post<ItemBudgetResponse>(
+    `/requisition-items/${itemId}/workflow/edit-budget`,
+    request,
+  );
+  return response.data;
+}
+
+/**
+ * Approve budget for an item.
+ * Sets approved_budget = estimated_budget.
+ * Can only be done when header is in PENDING_BUDGET.
+ * Cannot approve if estimated_budget <= 0.
+ * 
+ * After all items are approved, header automatically transitions to PENDING_HR.
+ */
+export async function approveItemBudget(
+  itemId: number,
+): Promise<ItemBudgetResponse> {
+  const response = await apiClient.post<ItemBudgetResponse>(
+    `/requisition-items/${itemId}/workflow/approve-budget`,
+    {},
+  );
+  return response.data;
+}
+
+/**
+ * Reject budget for an item.
+ * Clears approved_budget. Manager must revise estimated_budget.
+ * Requires reason (min 10 characters).
+ */
+export async function rejectItemBudget(
+  itemId: number,
+  request: ItemBudgetRejectRequest,
+): Promise<ItemBudgetResponse> {
+  const response = await apiClient.post<ItemBudgetResponse>(
+    `/requisition-items/${itemId}/workflow/reject-budget`,
+    request,
+  );
+  return response.data;
+}
+
+// ============================================================================
 // ERROR HANDLING UTILITIES
 // ============================================================================
 

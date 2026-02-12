@@ -38,6 +38,10 @@ interface RequisitionItem {
   job_description: string;
   requirements?: string | null;
   item_status: string;
+  // Item-level budget fields
+  estimated_budget?: number | null;
+  approved_budget?: number | null;
+  currency?: string;
 }
 
 interface Requisition {
@@ -49,6 +53,7 @@ interface Requisition {
   required_by_date?: string | null;
   priority?: string | null;
   justification?: string | null;
+  // DEPRECATED: Header-level budget - use computed totals instead
   budget_amount?: number | null;
   duration?: string | null;
   is_replacement?: boolean | null;
@@ -64,6 +69,10 @@ interface Requisition {
   budget_approved_at?: string | null;
   hr_approved_by?: number | null;
   hr_approved_at?: string | null;
+  // Computed budget totals (from items)
+  total_estimated_budget?: number | null;
+  total_approved_budget?: number | null;
+  budget_approval_status?: "none" | "pending" | "partial" | "approved" | null;
 }
 
 interface StatusHistoryEntry {
@@ -814,9 +823,19 @@ const ManagerRequisitionDetails: React.FC = () => {
             <DollarSign size={20} />
           </div>
           <span className="stat-number">
-            {formatCurrency(requisition.budget_amount)}
+            {formatCurrency(requisition.total_estimated_budget ?? requisition.budget_amount)}
           </span>
-          <span className="stat-label">Budget</span>
+          <span className="stat-label">Total Estimated</span>
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-icon-wrapper uptime">
+            <DollarSign size={20} />
+          </div>
+          <span className="stat-number">
+            {formatCurrency(requisition.total_approved_budget)}
+          </span>
+          <span className="stat-label">Total Approved</span>
         </div>
 
         <div className="stat-card">
@@ -828,7 +847,7 @@ const ManagerRequisitionDetails: React.FC = () => {
         </div>
 
         <div className="stat-card">
-          <div className="stat-icon-wrapper uptime">
+          <div className="stat-icon-wrapper">
             <Clock size={20} />
           </div>
           <span className="stat-number">{requisition.duration || "—"}</span>
@@ -1059,6 +1078,45 @@ const ManagerRequisitionDetails: React.FC = () => {
                         </span>
                       </div>
 
+                      {/* Item Budget Section */}
+                      <div className="position-section" style={{ backgroundColor: "#f8fafc", borderRadius: "6px", padding: "12px", marginTop: "12px" }}>
+                        <div className="position-section-label" style={{ marginBottom: "8px", fontWeight: 600 }}>
+                          <DollarSign size={14} style={{ display: "inline", marginRight: "4px", verticalAlign: "middle" }} />
+                          Budget
+                        </div>
+                        <div style={{ display: "flex", gap: "24px", flexWrap: "wrap" }}>
+                          <div>
+                            <span style={{ fontSize: "12px", color: "#64748b" }}>Estimated: </span>
+                            <span style={{ fontWeight: 500 }}>
+                              {item.estimated_budget != null
+                                ? `${item.currency || "INR"} ${item.estimated_budget.toLocaleString()}`
+                                : "—"}
+                            </span>
+                          </div>
+                          <div>
+                            <span style={{ fontSize: "12px", color: "#64748b" }}>Approved: </span>
+                            <span style={{ fontWeight: 500, color: item.approved_budget != null ? "#16a34a" : "#64748b" }}>
+                              {item.approved_budget != null
+                                ? `${item.currency || "INR"} ${item.approved_budget.toLocaleString()}`
+                                : "Pending"}
+                            </span>
+                          </div>
+                          <div>
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                padding: "2px 8px",
+                                borderRadius: "9999px",
+                                backgroundColor: item.approved_budget != null ? "#dcfce7" : "#fef3c7",
+                                color: item.approved_budget != null ? "#166534" : "#92400e",
+                              }}
+                            >
+                              {item.approved_budget != null ? "Approved" : "Pending Approval"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
                       <div className="position-section">
                         <div className="position-section-label">
                           Job Description
@@ -1221,23 +1279,65 @@ const ManagerRequisitionDetails: React.FC = () => {
           {/* Budget & Justification */}
           <div className="master-data-manager">
             <div className="data-manager-header">
-              <h3>Budget & Justification</h3>
-              <p className="subtitle">Financial details and business case</p>
+              <h3>Budget Summary & Justification</h3>
+              <p className="subtitle">Computed budget totals and business case</p>
             </div>
 
             {!isEditing ? (
               <div className="budget-section-stack">
-                <div className="field-grid">
-                  <div>
-                    <div className="field-label">Budget Amount</div>
-                    <div className="field-value--bold">
-                      {formatCurrency(requisition.budget_amount)}
-                    </div>
+                {/* Computed Budget Summary */}
+                <div style={{ backgroundColor: "#f0fdf4", borderRadius: "8px", padding: "16px", marginBottom: "16px" }}>
+                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#166534", marginBottom: "12px" }}>
+                    Budget Overview (Computed from Items)
                   </div>
-                  <div>
-                    <div className="field-label">Replacement</div>
-                    <div className="field-value">
-                      {requisition.is_replacement ? "Yes" : "No"}
+                  <div className="field-grid">
+                    <div>
+                      <div className="field-label">Total Estimated</div>
+                      <div className="field-value--bold" style={{ color: "#1e40af" }}>
+                        {formatCurrency(requisition.total_estimated_budget ?? requisition.budget_amount)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="field-label">Total Approved</div>
+                      <div className="field-value--bold" style={{ color: "#16a34a" }}>
+                        {formatCurrency(requisition.total_approved_budget)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="field-label">Approval Status</div>
+                      <div className="field-value">
+                        <span
+                          style={{
+                            fontSize: "12px",
+                            padding: "4px 12px",
+                            borderRadius: "9999px",
+                            backgroundColor:
+                              requisition.budget_approval_status === "approved"
+                                ? "#dcfce7"
+                                : requisition.budget_approval_status === "partial"
+                                ? "#fef3c7"
+                                : "#e2e8f0",
+                            color:
+                              requisition.budget_approval_status === "approved"
+                                ? "#166534"
+                                : requisition.budget_approval_status === "partial"
+                                ? "#92400e"
+                                : "#475569",
+                          }}
+                        >
+                          {requisition.budget_approval_status === "approved"
+                            ? "All Items Approved"
+                            : requisition.budget_approval_status === "partial"
+                            ? "Partially Approved"
+                            : "Pending Approval"}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="field-label">Replacement</div>
+                      <div className="field-value">
+                        {requisition.is_replacement ? "Yes" : "No"}
+                      </div>
                     </div>
                   </div>
                 </div>

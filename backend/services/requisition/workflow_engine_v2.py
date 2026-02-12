@@ -1773,3 +1773,450 @@ class RequisitionItemWorkflowEngine:
         )
         
         return item
+    
+    # =========================================================================
+    # ITEM BUDGET WORKFLOW OPERATIONS
+    # =========================================================================
+    
+    @classmethod
+    def edit_budget(
+        cls,
+        db: Session,
+        item_id: int,
+        estimated_budget: float,
+        currency: str,
+        user_id: int,
+        user_roles: List[str],
+    ) -> RequisitionItem:
+        """
+        Edit the estimated budget for an item.
+        
+        Can only be done when header is in DRAFT or PENDING_BUDGET.
+        
+        Args:
+            db: Database session (must be in transaction)
+            item_id: Item ID
+            estimated_budget: New estimated budget (must be > 0)
+            currency: Currency code (ISO 4217)
+            user_id: ID of user performing action
+            user_roles: List of user's role names
+            
+        Returns:
+            Updated item
+            
+        Raises:
+            ValidationException: If budget <= 0 or currency invalid
+            AuthorizationException: If user not authorized
+            EntityLockedException: If header state doesn't allow budget editing
+        """
+        from .workflow_matrix import (
+            ITEM_BUDGET_EDITABLE_HEADER_STATES,
+            ITEM_BUDGET_EDIT_AUTHORITY,
+            SystemRole,
+        )
+        import re
+        
+        # Validate estimated_budget
+        if estimated_budget <= 0:
+            raise ValidationException(
+                field="estimated_budget",
+                message="Estimated budget must be greater than 0",
+                value=estimated_budget,
+            )
+        
+        # Validate currency format (ISO 4217 pattern)
+        if not re.match(r'^[A-Z]{2,10}$', currency):
+            raise ValidationException(
+                field="currency",
+                message="Currency must be 2-10 uppercase letters (ISO 4217)",
+                value=currency,
+            )
+        
+        # Check authorization
+        user_system_roles = {
+            SystemRole(r) for r in user_roles
+            if r in [sr.value for sr in SystemRole]
+        }
+        if not user_system_roles.intersection(ITEM_BUDGET_EDIT_AUTHORITY):
+            raise AuthorizationException(
+                action="edit item budget",
+                user_roles=user_roles,
+                required_roles=[r.value for r in ITEM_BUDGET_EDIT_AUTHORITY],
+            )
+        
+        # Lock item
+        item = cls._get_locked_item(db, item_id)
+        
+        # Check header state allows budget editing
+        requisition = (
+            db.query(Requisition)
+            .filter(Requisition.req_id == item.req_id)
+            .with_for_update()
+            .first()
+        )
+        if not requisition:
+            raise EntityNotFoundException(
+                entity_type="requisition",
+                entity_id=item.req_id,
+            )
+        
+        header_status = RequisitionWorkflowEngine._parse_status(requisition.overall_status)
+        if header_status not in ITEM_BUDGET_EDITABLE_HEADER_STATES:
+            raise EntityLockedException(
+                entity_type="requisition_item",
+                entity_id=item_id,
+                reason=f"Cannot edit budget when requisition is in '{requisition.overall_status}' status. "
+                       f"Budget editing only allowed in: {', '.join(s.value for s in ITEM_BUDGET_EDITABLE_HEADER_STATES)}",
+            )
+        
+        # Cannot edit budget if already approved
+        if item.approved_budget is not None:
+            raise EntityLockedException(
+                entity_type="requisition_item",
+                entity_id=item_id,
+                reason="Cannot edit budget after it has been approved. Request a budget revision instead.",
+            )
+        
+        # Capture old values for audit
+        old_estimated_budget = float(item.estimated_budget) if item.estimated_budget else 0
+        old_currency = item.currency
+        
+        # Update budget
+        item.estimated_budget = estimated_budget
+        item.currency = currency
+        cls._increment_item_version(item)
+        
+        # Audit
+        WorkflowAuditLogger.log_transition(
+            db=db,
+            entity_type="requisition_item",
+            entity_id=item_id,
+            action="ITEM_BUDGET_EDITED",
+            prev_status=item.item_status,
+            new_status=item.item_status,
+            performed_by=user_id,
+            user_roles=user_roles,
+            metadata={
+                "previous_estimated_budget": old_estimated_budget,
+                "new_estimated_budget": estimated_budget,
+                "previous_currency": old_currency,
+                "new_currency": currency,
+            },
+        )
+        
+        return item
+    
+    @classmethod
+    def approve_budget(
+        cls,
+        db: Session,
+        item_id: int,
+        user_id: int,
+        user_roles: List[str],
+    ) -> RequisitionItem:
+        """
+        Approve budget for an item.
+        
+        Sets approved_budget = estimated_budget.
+        Can only be done when header is in PENDING_BUDGET.
+        
+        After approval:
+        - If ALL items have approved budgets → header transitions to PENDING_HR
+        - If some items still pending → header remains PENDING_BUDGET
+        
+        Args:
+            db: Database session (must be in transaction)
+            item_id: Item ID
+            user_id: ID of user performing action
+            user_roles: List of user's role names
+            
+        Returns:
+            Updated item
+            
+        Raises:
+            ValidationException: If estimated_budget <= 0
+            AuthorizationException: If user not authorized
+            EntityLockedException: If header state doesn't allow approval
+        """
+        from .workflow_matrix import (
+            ITEM_BUDGET_APPROVABLE_HEADER_STATES,
+            ITEM_BUDGET_APPROVE_AUTHORITY,
+            SystemRole,
+        )
+        
+        # Check authorization
+        user_system_roles = {
+            SystemRole(r) for r in user_roles
+            if r in [sr.value for sr in SystemRole]
+        }
+        if not user_system_roles.intersection(ITEM_BUDGET_APPROVE_AUTHORITY):
+            raise AuthorizationException(
+                action="approve item budget",
+                user_roles=user_roles,
+                required_roles=[r.value for r in ITEM_BUDGET_APPROVE_AUTHORITY],
+            )
+        
+        # Lock item with SELECT FOR UPDATE
+        item = cls._get_locked_item(db, item_id)
+        
+        # Check header state allows budget approval
+        requisition = (
+            db.query(Requisition)
+            .filter(Requisition.req_id == item.req_id)
+            .with_for_update()
+            .first()
+        )
+        if not requisition:
+            raise EntityNotFoundException(
+                entity_type="requisition",
+                entity_id=item.req_id,
+            )
+        
+        header_status = RequisitionWorkflowEngine._parse_status(requisition.overall_status)
+        if header_status not in ITEM_BUDGET_APPROVABLE_HEADER_STATES:
+            raise EntityLockedException(
+                entity_type="requisition_item",
+                entity_id=item_id,
+                reason=f"Cannot approve budget when requisition is in '{requisition.overall_status}' status. "
+                       f"Budget approval only allowed in: {', '.join(s.value for s in ITEM_BUDGET_APPROVABLE_HEADER_STATES)}",
+            )
+        
+        # Validate estimated_budget > 0
+        if not item.estimated_budget or float(item.estimated_budget) <= 0:
+            raise ValidationException(
+                field="estimated_budget",
+                message="Cannot approve budget: estimated_budget must be greater than 0",
+                value=float(item.estimated_budget) if item.estimated_budget else 0,
+            )
+        
+        # Check if already approved
+        if item.approved_budget is not None:
+            raise ValidationException(
+                field="approved_budget",
+                message="Budget has already been approved for this item",
+                value=float(item.approved_budget),
+            )
+        
+        # Capture values for audit
+        estimated_budget_value = float(item.estimated_budget)
+        
+        # Approve budget: approved_budget = estimated_budget
+        item.approved_budget = item.estimated_budget
+        cls._increment_item_version(item)
+        
+        # Audit
+        WorkflowAuditLogger.log_transition(
+            db=db,
+            entity_type="requisition_item",
+            entity_id=item_id,
+            action="ITEM_BUDGET_APPROVED",
+            prev_status=item.item_status,
+            new_status=item.item_status,
+            performed_by=user_id,
+            user_roles=user_roles,
+            metadata={
+                "estimated_budget": estimated_budget_value,
+                "approved_budget": estimated_budget_value,
+                "currency": item.currency,
+            },
+        )
+        
+        # Check if all items now have approved budgets → transition header to PENDING_HR
+        cls._recalculate_header_budget_status(db, requisition, user_id, user_roles)
+        
+        return item
+    
+    @classmethod
+    def reject_budget(
+        cls,
+        db: Session,
+        item_id: int,
+        user_id: int,
+        user_roles: List[str],
+        reason: str,
+    ) -> RequisitionItem:
+        """
+        Reject budget for an item.
+        
+        Clears approved_budget and requires manager to revise estimated_budget.
+        
+        Args:
+            db: Database session (must be in transaction)
+            item_id: Item ID
+            user_id: ID of user performing action
+            user_roles: List of user's role names
+            reason: Rejection reason (min 10 chars)
+            
+        Returns:
+            Updated item
+        """
+        from .workflow_matrix import (
+            ITEM_BUDGET_APPROVABLE_HEADER_STATES,
+            ITEM_BUDGET_REJECT_AUTHORITY,
+            SystemRole,
+        )
+        
+        # Validate reason
+        reason = (reason or "").strip()
+        if len(reason) < cls.MIN_REASON_LENGTH:
+            raise ValidationException(
+                field="reason",
+                message=f"Rejection reason must be at least {cls.MIN_REASON_LENGTH} characters",
+                value=reason,
+            )
+        
+        # Check authorization
+        user_system_roles = {
+            SystemRole(r) for r in user_roles
+            if r in [sr.value for sr in SystemRole]
+        }
+        if not user_system_roles.intersection(ITEM_BUDGET_REJECT_AUTHORITY):
+            raise AuthorizationException(
+                action="reject item budget",
+                user_roles=user_roles,
+                required_roles=[r.value for r in ITEM_BUDGET_REJECT_AUTHORITY],
+            )
+        
+        # Lock item
+        item = cls._get_locked_item(db, item_id)
+        
+        # Check header state
+        requisition = (
+            db.query(Requisition)
+            .filter(Requisition.req_id == item.req_id)
+            .with_for_update()
+            .first()
+        )
+        if not requisition:
+            raise EntityNotFoundException(
+                entity_type="requisition",
+                entity_id=item.req_id,
+            )
+        
+        header_status = RequisitionWorkflowEngine._parse_status(requisition.overall_status)
+        if header_status not in ITEM_BUDGET_APPROVABLE_HEADER_STATES:
+            raise EntityLockedException(
+                entity_type="requisition_item",
+                entity_id=item_id,
+                reason=f"Cannot reject budget when requisition is in '{requisition.overall_status}' status.",
+            )
+        
+        # Capture values for audit
+        old_estimated_budget = float(item.estimated_budget) if item.estimated_budget else 0
+        old_approved_budget = float(item.approved_budget) if item.approved_budget else None
+        
+        # Clear approved_budget (manager must revise)
+        item.approved_budget = None
+        cls._increment_item_version(item)
+        
+        # Audit
+        WorkflowAuditLogger.log_transition(
+            db=db,
+            entity_type="requisition_item",
+            entity_id=item_id,
+            action="ITEM_BUDGET_REJECTED",
+            prev_status=item.item_status,
+            new_status=item.item_status,
+            performed_by=user_id,
+            user_roles=user_roles,
+            reason=reason,
+            metadata={
+                "estimated_budget": old_estimated_budget,
+                "previous_approved_budget": old_approved_budget,
+                "currency": item.currency,
+            },
+        )
+        
+        return item
+    
+    @classmethod
+    def _recalculate_header_budget_status(
+        cls,
+        db: Session,
+        requisition: Requisition,
+        changed_by: int,
+        user_roles: List[str],
+    ) -> Optional[RequisitionStatus]:
+        """
+        Recalculate header status based on item budget approvals.
+        
+        Called after budget approval/rejection.
+        
+        Rules:
+        - If ALL items have approved_budget > 0 → header transitions to PENDING_HR
+        - Otherwise → header remains PENDING_BUDGET
+        
+        Args:
+            db: Database session
+            requisition: Locked requisition
+            changed_by: User ID
+            user_roles: User roles
+            
+        Returns:
+            New status if changed, None otherwise
+        """
+        current_status = RequisitionWorkflowEngine._parse_status(requisition.overall_status)
+        
+        # Only recalculate for PENDING_BUDGET headers
+        if current_status != RequisitionStatus.PENDING_BUDGET:
+            return None
+        
+        # Get all items for this requisition
+        items = (
+            db.query(RequisitionItem)
+            .filter(RequisitionItem.req_id == requisition.req_id)
+            .all()
+        )
+        
+        if not items:
+            return None
+        
+        # Check if all items have approved budgets
+        all_approved = all(
+            item.approved_budget is not None and float(item.approved_budget) > 0
+            for item in items
+        )
+        
+        if all_approved:
+            # Transition header to PENDING_HR
+            target_status = RequisitionStatus.PENDING_HR
+            
+            with workflow_transition_context():
+                old_status = requisition.overall_status
+                RequisitionWorkflowEngine._set_status(requisition, target_status.value)
+                requisition.budget_approved_by = changed_by
+                RequisitionWorkflowEngine._increment_version(requisition)
+                
+                # Calculate totals for audit
+                total_estimated = sum(float(i.estimated_budget or 0) for i in items)
+                total_approved = sum(float(i.approved_budget or 0) for i in items)
+                
+                # Audit
+                WorkflowAuditLogger.log_transition(
+                    db=db,
+                    entity_type="requisition",
+                    entity_id=requisition.req_id,
+                    action="ALL_BUDGETS_APPROVED",
+                    prev_status=old_status,
+                    new_status=target_status.value,
+                    performed_by=changed_by,
+                    user_roles=user_roles,
+                    metadata={
+                        "trigger": "all_item_budgets_approved",
+                        "total_estimated_budget": total_estimated,
+                        "total_approved_budget": total_approved,
+                        "item_count": len(items),
+                    },
+                )
+                WorkflowAuditLogger.log_status_history(
+                    db=db,
+                    req_id=requisition.req_id,
+                    old_status=old_status,
+                    new_status=target_status.value,
+                    changed_by=changed_by,
+                    justification="All item budgets approved",
+                )
+            
+            return target_status
+        
+        return None

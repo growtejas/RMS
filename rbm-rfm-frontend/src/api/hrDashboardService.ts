@@ -41,6 +41,36 @@ export interface HRPendingApprovalItem {
   status: string;
 }
 
+// ============================================
+// Item Budget Types (Item-Level Budget Architecture)
+// ============================================
+
+export interface RequisitionItemBudget {
+  item_id: number;
+  req_id: number;
+  role_position: string;
+  skill_level: string | null;
+  experience_years: number | null;
+  item_status: string;
+  estimated_budget: number | null;
+  approved_budget: number | null;
+  currency: string;
+}
+
+export interface PendingBudgetRequisition {
+  req_id: number;
+  project_name: string | null;
+  client_name: string | null;
+  overall_status: string;
+  raised_by_name: string | null;
+  created_at: string | null;
+  items: RequisitionItemBudget[];
+  // Computed totals (from items)
+  total_estimated_budget: number | null;
+  total_approved_budget: number | null;
+  budget_approval_status: "none" | "pending" | "partial" | "approved" | null;
+}
+
 export interface RecentActivity {
   audit_id: number;
   action: string;
@@ -110,6 +140,23 @@ export const hrDashboardService = {
     const response = await apiClient.get<HRPendingApprovalItem[]>(
       "/dashboard/hr/pending-approvals",
       { signal },
+    );
+    return response.data;
+  },
+
+  /**
+   * Fetch requisitions pending budget approval with item-level details.
+   * Used by ItemBudgetApprovalPanel.
+   */
+  getPendingBudgetRequisitions: async (
+    signal?: AbortSignal,
+  ): Promise<PendingBudgetRequisition[]> => {
+    const response = await apiClient.get<PendingBudgetRequisition[]>(
+      "/requisitions/",
+      {
+        params: { status: "Pending_Budget" },
+        signal,
+      },
     );
     return response.data;
   },

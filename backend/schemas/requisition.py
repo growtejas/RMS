@@ -75,6 +75,7 @@ class RequisitionResponse(BaseModel):
     required_by_date: Optional[date] = None
     priority: Optional[str] = None
     justification: Optional[str] = None
+    # DEPRECATED: Header-level budget_amount - use computed totals instead
     budget_amount: Optional[condecimal(max_digits=12, decimal_places=2)] = None
     duration: Optional[str] = None
     is_replacement: Optional[bool] = None
@@ -96,6 +97,10 @@ class RequisitionResponse(BaseModel):
     active_items: Optional[int] = None
     progress_ratio: Optional[float] = None
     progress_text: Optional[str] = None
+    # Computed budget totals (from items)
+    total_estimated_budget: Optional[condecimal(max_digits=12, decimal_places=2)] = None
+    total_approved_budget: Optional[condecimal(max_digits=12, decimal_places=2)] = None
+    budget_approval_status: Optional[str] = None  # 'pending', 'partial', 'approved', 'none'
 
     class Config:
         from_attributes = True

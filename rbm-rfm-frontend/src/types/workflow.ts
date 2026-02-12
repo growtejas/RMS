@@ -94,7 +94,172 @@ export type TransitionAction =
   | "start_interview"
   | "make_offer"
   | "fulfill"
-  | "cancel_item";
+  | "cancel_item"
+  // Item budget actions
+  | "edit_item_budget"
+  | "approve_item_budget"
+  | "reject_item_budget";
+
+// ============================================================================
+// ITEM BUDGET STATUS
+// ============================================================================
+
+/**
+ * Budget approval status for requisition items.
+ * This is NOT a workflow status - it tracks budget approval state separately.
+ */
+export type ItemBudgetStatus = "pending" | "approved" | "rejected";
+
+/** All valid item budget statuses as an array. */
+export const ITEM_BUDGET_STATUSES: readonly ItemBudgetStatus[] = [
+  "pending",
+  "approved",
+  "rejected",
+] as const;
+
+/** Human-readable labels for item budget statuses. */
+export const ITEM_BUDGET_STATUS_LABELS: Record<ItemBudgetStatus, string> = {
+  pending: "Pending Approval",
+  approved: "Approved",
+  rejected: "Rejected",
+};
+
+/** CSS class per item budget status. */
+export const ITEM_BUDGET_STATUS_CLASSES: Record<ItemBudgetStatus, string> = {
+  pending: "budget-status--pending",
+  approved: "budget-status--approved",
+  rejected: "budget-status--rejected",
+};
+
+// ============================================================================
+// REQUISITION ITEM WITH BUDGET
+// ============================================================================
+
+/**
+ * Requisition item with budget fields.
+ * Matches backend schemas/requisition_item.py - RequisitionItemResponse
+ */
+export interface RequisitionItem {
+  item_id: number;
+  req_id: number;
+  role_position: string;
+  skill_level: string | null;
+  experience_years: number | null;
+  education_requirement: string | null;
+  job_description: string;
+  requirements: string | null;
+  item_status: RequisitionItemStatus;
+  replacement_hire: boolean;
+  replaced_emp_id: string | null;
+  // Budget fields (item-level)
+  estimated_budget: number | null;
+  approved_budget: number | null;
+  currency: string;
+  // Assignment
+  assigned_ta: number | null;
+  assigned_emp_id: string | null;
+}
+
+/**
+ * Requisition item creation payload with budget.
+ * Matches backend schemas/requisition_item.py - RequisitionItemCreate
+ */
+export interface RequisitionItemCreate {
+  role_position: string;
+  job_description: string;
+  skill_level?: string;
+  experience_years?: number;
+  education_requirement?: string;
+  requirements?: string;
+  replacement_hire?: boolean;
+  replaced_emp_id?: string;
+  // Budget fields (item-level)
+  estimated_budget?: number;
+  currency?: string;
+}
+
+// ============================================================================
+// REQUISITION WITH COMPUTED BUDGETS
+// ============================================================================
+
+/**
+ * Budget approval status for entire requisition.
+ */
+export type BudgetApprovalStatus = "none" | "pending" | "partial" | "approved";
+
+/**
+ * Requisition with computed budget totals.
+ * Matches backend schemas/requisition.py - RequisitionResponse
+ */
+export interface Requisition {
+  req_id: number;
+  project_name: string | null;
+  client_name: string | null;
+  office_location: string | null;
+  work_mode: string | null;
+  required_by_date: string | null;
+  priority: string | null;
+  justification: string | null;
+  // DEPRECATED: Header-level budget - use computed totals
+  budget_amount: number | null;
+  duration: string | null;
+  is_replacement: boolean | null;
+  manager_notes: string | null;
+  rejection_reason: string | null;
+  jd_file_key: string | null;
+  overall_status: RequisitionStatus;
+  raised_by: number;
+  assigned_ta: number | null;
+  budget_approved_by: number | null;
+  approved_by: number | null;
+  approval_history: string | null;
+  assigned_at: string | null;
+  created_at: string | null;
+  items: RequisitionItem[];
+  // Progress tracking
+  total_items: number | null;
+  fulfilled_items: number | null;
+  cancelled_items: number | null;
+  active_items: number | null;
+  progress_ratio: number | null;
+  progress_text: string | null;
+  // Computed budget totals (from items)
+  total_estimated_budget: number | null;
+  total_approved_budget: number | null;
+  budget_approval_status: BudgetApprovalStatus | null;
+}
+
+// ============================================================================
+// ITEM BUDGET API TYPES
+// ============================================================================
+
+/**
+ * Request to edit item budget.
+ */
+export interface ItemBudgetEditRequest {
+  estimated_budget: number;
+  currency: string;
+}
+
+/**
+ * Request to reject item budget.
+ */
+export interface ItemBudgetRejectRequest {
+  reason: string;
+}
+
+/**
+ * Response from item budget operations.
+ */
+export interface ItemBudgetResponse {
+  success: boolean;
+  item_id: number;
+  estimated_budget: number;
+  approved_budget: number | null;
+  currency: string;
+  budget_status: ItemBudgetStatus;
+  header_status?: RequisitionStatus;
+}
 
 // ============================================================================
 // DISPLAY LABELS

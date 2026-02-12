@@ -137,6 +137,9 @@ async def create_requisition(
                     education_requirement=validated.education_requirement,
                     requirements=validated.requirements,
                     item_status="Pending",
+                    # Item-level budget fields
+                    estimated_budget=validated.estimated_budget or 0,
+                    currency=validated.currency or 'INR',
                 )
                 db.add(db_item)
                 db.flush()
@@ -150,6 +153,8 @@ async def create_requisition(
                         "req_id": requisition.req_id,
                         "role_position": db_item.role_position,
                         "item_status": db_item.item_status,
+                        "estimated_budget": float(db_item.estimated_budget),
+                        "currency": db_item.currency,
                     },
                 )
 
@@ -254,15 +259,46 @@ def get_requisition(
         progress_ratio = 1.0
         progress_text = "0/0"
 
-    requisition.items = items
-    requisition.total_items = total_items
-    requisition.fulfilled_items = fulfilled_items
-    requisition.cancelled_items = cancelled_items
-    requisition.active_items = active_items
-    requisition.progress_ratio = progress_ratio
-    requisition.progress_text = progress_text
+    # Compute budget totals from items (NOT from header)
+    total_estimated_budget = sum(
+        float(item.estimated_budget or 0) for item in items
+    )
+    total_approved_budget = sum(
+        float(item.approved_budget or 0) for item in items
+    )
+    
+    # Compute budget approval status
+    approved_count = sum(
+        1 for item in items
+        if item.approved_budget is not None and float(item.approved_budget) > 0
+    )
+    if total_items == 0:
+        budget_approval_status = 'none'
+    elif approved_count == 0:
+        budget_approval_status = 'pending'
+    elif approved_count < total_items:
+        budget_approval_status = 'partial'
+    else:
+        budget_approval_status = 'approved'
 
-    return requisition
+    base_response = RequisitionResponse.model_validate(
+        requisition,
+        from_attributes=True,
+    )
+    return base_response.model_copy(
+        update={
+            "items": items,
+            "total_items": total_items,
+            "fulfilled_items": fulfilled_items,
+            "cancelled_items": cancelled_items,
+            "active_items": active_items,
+            "progress_ratio": progress_ratio,
+            "progress_text": progress_text,
+            "total_estimated_budget": total_estimated_budget,
+            "total_approved_budget": total_approved_budget,
+            "budget_approval_status": budget_approval_status,
+        }
+    )
 
 
 @router.put("/{req_id}")
@@ -309,6 +345,9 @@ def update_requisition_manager(
                 education_requirement=validated.education_requirement,
                 requirements=validated.requirements,
                 item_status="Pending",
+                # Item-level budget fields
+                estimated_budget=validated.estimated_budget or 0,
+                currency=validated.currency or 'INR',
             )
             db.add(db_item)
 

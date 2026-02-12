@@ -1128,3 +1128,186 @@ async def swap_ta(
     except WorkflowException as e:
         db.rollback()
         raise handle_workflow_exception(e)
+
+
+# =========================================================================
+# ITEM BUDGET WORKFLOW ENDPOINTS
+# =========================================================================
+
+class ItemBudgetEditRequest(BaseModel):
+    """Request for editing item budget."""
+    estimated_budget: float = Field(..., gt=0)
+    currency: str = Field(default='INR', max_length=10)
+    
+    @validator('currency')
+    def validate_currency_format(cls, v):
+        import re
+        if not re.match(r'^[A-Z]{2,10}$', v):
+            raise ValueError('Currency must be 2-10 uppercase letters (ISO 4217)')
+        return v
+
+
+class ItemBudgetRejectRequest(BaseModel):
+    """Request for rejecting item budget."""
+    reason: str = Field(..., min_length=10, max_length=2000)
+
+
+class ItemBudgetResponse(BaseModel):
+    """Response for budget operations."""
+    success: bool = True
+    item_id: int
+    estimated_budget: float
+    approved_budget: Optional[float] = None
+    currency: str
+    budget_status: str  # 'pending', 'approved', 'rejected'
+    header_status: Optional[str] = None  # Updated header status if changed
+
+
+@item_workflow_router.post(
+    "/edit-budget",
+    response_model=ItemBudgetResponse,
+    responses={
+        400: {"model": WorkflowErrorResponse},
+        403: {"model": WorkflowErrorResponse},
+        404: {"model": WorkflowErrorResponse},
+    },
+)
+async def edit_item_budget(
+    item_id: int,
+    request: ItemBudgetEditRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager", "HR", "Admin")),
+    user_roles: List[str] = Depends(get_current_user_roles),
+):
+    """
+    Edit the estimated budget for an item.
+    
+    Can only be done when header is in DRAFT or PENDING_BUDGET.
+    Cannot be done after budget has been approved.
+    
+    Authorized: Manager, HR, Admin
+    """
+    try:
+        updated_item = RequisitionItemWorkflowEngine.edit_budget(
+            db=db,
+            item_id=item_id,
+            estimated_budget=request.estimated_budget,
+            currency=request.currency,
+            user_id=current_user.user_id,
+            user_roles=user_roles,
+        )
+        db.commit()
+        
+        return ItemBudgetResponse(
+            item_id=updated_item.item_id,
+            estimated_budget=float(updated_item.estimated_budget),
+            approved_budget=float(updated_item.approved_budget) if updated_item.approved_budget else None,
+            currency=updated_item.currency,
+            budget_status='pending' if updated_item.approved_budget is None else 'approved',
+        )
+    except WorkflowException as e:
+        db.rollback()
+        raise handle_workflow_exception(e)
+
+
+@item_workflow_router.post(
+    "/approve-budget",
+    response_model=ItemBudgetResponse,
+    responses={
+        400: {"model": WorkflowErrorResponse},
+        403: {"model": WorkflowErrorResponse},
+        404: {"model": WorkflowErrorResponse},
+    },
+)
+async def approve_item_budget(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager", "HR", "Admin")),
+    user_roles: List[str] = Depends(get_current_user_roles),
+):
+    """
+    Approve budget for an item.
+    
+    Sets approved_budget = estimated_budget.
+    Can only be done when header is in PENDING_BUDGET.
+    Cannot approve if estimated_budget <= 0.
+    
+    After all items are approved, header automatically transitions to PENDING_HR.
+    
+    Authorized: Manager, HR, Admin
+    """
+    from db.models.requisition import Requisition
+    
+    try:
+        updated_item = RequisitionItemWorkflowEngine.approve_budget(
+            db=db,
+            item_id=item_id,
+            user_id=current_user.user_id,
+            user_roles=user_roles,
+        )
+        
+        # Get updated header status
+        requisition = db.query(Requisition).filter(
+            Requisition.req_id == updated_item.req_id
+        ).first()
+        
+        db.commit()
+        
+        return ItemBudgetResponse(
+            item_id=updated_item.item_id,
+            estimated_budget=float(updated_item.estimated_budget),
+            approved_budget=float(updated_item.approved_budget) if updated_item.approved_budget else None,
+            currency=updated_item.currency,
+            budget_status='approved',
+            header_status=requisition.overall_status if requisition else None,
+        )
+    except WorkflowException as e:
+        db.rollback()
+        raise handle_workflow_exception(e)
+
+
+@item_workflow_router.post(
+    "/reject-budget",
+    response_model=ItemBudgetResponse,
+    responses={
+        400: {"model": WorkflowErrorResponse},
+        403: {"model": WorkflowErrorResponse},
+        404: {"model": WorkflowErrorResponse},
+        422: {"model": WorkflowErrorResponse},
+    },
+)
+async def reject_item_budget(
+    item_id: int,
+    request: ItemBudgetRejectRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("Manager", "HR", "Admin")),
+    user_roles: List[str] = Depends(get_current_user_roles),
+):
+    """
+    Reject budget for an item.
+    
+    Clears approved_budget. Manager must revise estimated_budget.
+    Requires reason (min 10 characters).
+    
+    Authorized: Manager, HR, Admin
+    """
+    try:
+        updated_item = RequisitionItemWorkflowEngine.reject_budget(
+            db=db,
+            item_id=item_id,
+            user_id=current_user.user_id,
+            user_roles=user_roles,
+            reason=request.reason,
+        )
+        db.commit()
+        
+        return ItemBudgetResponse(
+            item_id=updated_item.item_id,
+            estimated_budget=float(updated_item.estimated_budget),
+            approved_budget=None,
+            currency=updated_item.currency,
+            budget_status='rejected',
+        )
+    except WorkflowException as e:
+        db.rollback()
+        raise handle_workflow_exception(e)

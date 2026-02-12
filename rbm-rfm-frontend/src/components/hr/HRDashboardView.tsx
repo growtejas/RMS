@@ -27,6 +27,7 @@ import {
   RecentActivity,
 } from "../../api/hrDashboardService";
 import HRPendingApprovals from "./HRPendingApprovals";
+import ItemBudgetApprovalPanel from "./ItemBudgetApprovalPanel";
 
 // ============================================
 // Types
@@ -252,6 +253,9 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Tab state for approval views
+  const [approvalTab, setApprovalTab] = useState<"budget" | "hr">("budget");
+
   // RBAC Check
   const hasHRAccess = useMemo(() => {
     if (!user?.roles) return false;
@@ -414,13 +418,51 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
       )}
 
       {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
-        {/* Left Column - Pending Approvals Table */}
-        <div className="lg:col-span-2">
-          <HRPendingApprovals
-            onViewRequisition={handleViewRequisition}
-            onActionComplete={() => fetchDashboardData(false)}
-          />
+      <div className="grid grid-cols-1 gap-6 mt-6">
+        {/* Approval Tabs */}
+        <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+          {/* Tab Header */}
+          <div className="border-b border-slate-200">
+            <nav className="flex" aria-label="Approval tabs">
+              <button
+                onClick={() => setApprovalTab("budget")}
+                className={`px-6 py-4 text-sm font-medium transition-colors relative ${
+                  approvalTab === "budget"
+                    ? "text-blue-600 border-b-2 border-blue-600"
+                    : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <Briefcase size={16} />
+                  Item Budget Approvals
+                </span>
+              </button>
+              <button
+                onClick={() => setApprovalTab("hr")}
+                className={`px-6 py-4 text-sm font-medium transition-colors relative ${
+                  approvalTab === "hr"
+                    ? "text-blue-600 border-b-2 border-blue-600"
+                    : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <UserCheck size={16} />
+                  HR Approvals
+                </span>
+              </button>
+            </nav>
+          </div>
+
+          {/* Tab Content */}
+          <div className="p-4">
+            {approvalTab === "budget" && <ItemBudgetApprovalPanel />}
+            {approvalTab === "hr" && (
+              <HRPendingApprovals
+                onViewRequisition={handleViewRequisition}
+                onActionComplete={() => fetchDashboardData(false)}
+              />
+            )}
+          </div>
         </div>
 
         {/* <div className="space-y-3">

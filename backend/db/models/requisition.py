@@ -117,6 +117,66 @@ class Requisition(Base):
     )
 
     # --------------------
+    # Computed Budget Properties (NOT persisted)
+    # --------------------
+    @property
+    def total_estimated_budget(self):
+        """
+        Compute total estimated budget from all items.
+        
+        This is a computed property - NOT stored in the database.
+        Budget totals must always be calculated dynamically from items.
+        """
+        if not self.items:
+            return 0
+        return sum(
+            float(item.estimated_budget or 0)
+            for item in self.items
+        )
+    
+    @property
+    def total_approved_budget(self):
+        """
+        Compute total approved budget from all items.
+        
+        This is a computed property - NOT stored in the database.
+        Budget totals must always be calculated dynamically from items.
+        """
+        if not self.items:
+            return 0
+        return sum(
+            float(item.approved_budget or 0)
+            for item in self.items
+        )
+    
+    @property
+    def budget_approval_status(self):
+        """
+        Compute budget approval status based on items.
+        
+        Returns:
+            'pending': No items have approved budgets
+            'partial': Some items have approved budgets
+            'approved': All items have approved budgets
+            'none': No items exist
+        """
+        if not self.items:
+            return 'none'
+        
+        approved_count = sum(
+            1 for item in self.items
+            if item.approved_budget is not None and item.approved_budget > 0
+        )
+        total_count = len(self.items)
+        
+        if approved_count == 0:
+            return 'pending'
+        elif approved_count < total_count:
+            return 'partial'
+        else:
+            return 'approved'
+
+    # --------------------
     # Audit
     # --------------------
     created_at = Column(

@@ -4,6 +4,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Numeric,
     ForeignKey,
     CheckConstraint
 )
@@ -103,6 +104,31 @@ class RequisitionItem(Base):
     ta_notes = Column(Text, nullable=True)
 
     # --------------------
+    # Budget (Item-Level)
+    # --------------------
+    # estimated_budget: Set by manager, required for budget approval
+    estimated_budget = Column(
+        Numeric(precision=12, scale=2),
+        nullable=False,
+        default=0,
+        server_default='0'
+    )
+    
+    # approved_budget: Set during budget approval (copied from estimated_budget)
+    approved_budget = Column(
+        Numeric(precision=12, scale=2),
+        nullable=True
+    )
+    
+    # currency: ISO 4217 currency code (default INR)
+    currency = Column(
+        String(10),
+        nullable=False,
+        default='INR',
+        server_default='INR'
+    )
+
+    # --------------------
     # Workflow (Specification v1.0.0)
     # --------------------
     item_status = Column(
@@ -134,5 +160,18 @@ class RequisitionItem(Base):
         CheckConstraint(
             "item_status != 'Fulfilled' OR assigned_emp_id IS NOT NULL",
             name="chk_fulfilled_has_employee"
+        ),
+        # Budget constraints (added via migration budget_item_level_refactor)
+        CheckConstraint(
+            "estimated_budget >= 0",
+            name="chk_item_estimated_budget_non_negative"
+        ),
+        CheckConstraint(
+            "approved_budget IS NULL OR approved_budget >= 0",
+            name="chk_item_approved_budget_non_negative"
+        ),
+        CheckConstraint(
+            "currency ~ '^[A-Z]{2,10}$'",
+            name="chk_item_currency_format"
         ),
     )
