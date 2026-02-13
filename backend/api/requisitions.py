@@ -1,4 +1,5 @@
 from datetime import datetime, date
+from decimal import Decimal
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
@@ -6,6 +7,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
+from sqlalchemy import or_
 from typing import Optional, List
 
 from db.session import get_db
@@ -199,9 +201,20 @@ def list_requisitions(
         )
 
         if my_assignments:
+            # Phase 7: Include requisitions where ANY item is assigned to this TA
+            # This handles item-level TA reassignment (not just header-level)
             query = query.filter(
-                Requisition.assigned_ta == current_user.user_id,
                 Requisition.overall_status == "Active",
+            ).filter(
+                # Either header-level assignment OR item-level assignment
+                or_(
+                    Requisition.assigned_ta == current_user.user_id,
+                    Requisition.req_id.in_(
+                        db.query(RequisitionItem.req_id)
+                        .filter(RequisitionItem.assigned_ta == current_user.user_id)
+                        .distinct()
+                    )
+                )
             )
 
     if assigned_ta is not None:
@@ -261,16 +274,16 @@ def get_requisition(
 
     # Compute budget totals from items (NOT from header)
     total_estimated_budget = sum(
-        float(item.estimated_budget or 0) for item in items
+        (item.estimated_budget or Decimal("0")) for item in items
     )
     total_approved_budget = sum(
-        float(item.approved_budget or 0) for item in items
+        (item.approved_budget or Decimal("0")) for item in items
     )
     
     # Compute budget approval status
     approved_count = sum(
         1 for item in items
-        if item.approved_budget is not None and float(item.approved_budget) > 0
+        if item.approved_budget is not None and item.approved_budget > Decimal("0")
     )
     if total_items == 0:
         budget_approval_status = 'none'
@@ -482,7 +495,8 @@ def update_requisition(
     updates = payload.dict(exclude_unset=True)
 
     # PHASE 1 SAFETY: Block workflow fields from being modified via generic update
-    blocked_fields = {"overall_status", "approved_by", "budget_approved_by", "assigned_ta"}
+    # PHASE 2 GATEKEEPER: budget_amount blocked - header budget derived from item totals
+    blocked_fields = {"overall_status", "approved_by", "budget_approved_by", "assigned_ta", "budget_amount"}
     attempted_blocked = blocked_fields & set(updates.keys())
     if attempted_blocked:
         raise HTTPException(
@@ -490,20 +504,8 @@ def update_requisition(
             detail=f"Cannot modify workflow fields via this endpoint: {', '.join(attempted_blocked)}"
         )
 
-    old_budget = requisition.budget_amount
-
     for field, value in updates.items():
         setattr(requisition, field, value)
-
-    # Use events module for audit logging
-    if "budget_amount" in updates and updates.get("budget_amount") != old_budget:
-        RequisitionEvents.log_budget_update(
-            db=db,
-            req_id=requisition.req_id,
-            old_budget=float(old_budget) if old_budget else None,
-            new_budget=float(updates.get("budget_amount")) if updates.get("budget_amount") else None,
-            performed_by=current_user.user_id,
-        )
 
     db.commit()
     return {"message": "Requisition updated"}

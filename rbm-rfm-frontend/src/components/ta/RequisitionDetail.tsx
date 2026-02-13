@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo } from "react";
+import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import {
   ArrowLeft,
   Calendar,
@@ -22,6 +22,12 @@ import {
   MapPin,
   ChevronDown,
   ChevronUp,
+  Upload,
+  Ban,
+  Search,
+  UserCheck,
+  Phone,
+  Gift,
 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
 import { apiClient } from "../../api/client";
@@ -31,7 +37,17 @@ import {
   normalizeStatus,
   getStatusLabel,
   isTerminalStatus,
+  RequisitionItemStatus,
+  ITEM_STATUS_LABELS,
+  ITEM_STATUSES,
 } from "../../types/workflow";
+import {
+  shortlistItem,
+  startInterview,
+  makeOffer,
+  fulfillItem,
+  cancelItem as cancelItemApi,
+} from "../../api/workflowApi";
 import "../../styles/hr/hr-dashboard.css";
 
 interface RequisitionDetailsProps {
@@ -54,6 +70,7 @@ interface Employee {
 
 interface RequisitionItem {
   id: string;
+  numericItemId: number;  // Phase 7: Numeric item ID for API calls
   skill: string;
   level: string;
   experience: number;
@@ -63,7 +80,35 @@ interface RequisitionItem {
   assignedEmployeeName?: string;
   assignedDate?: string;
   description: string;
+  cvFileUrl?: string;
+  cvFileName?: string;
+  assignedTAId?: number | null;  // Phase 7: Item-level TA assignment
 }
+
+// Phase 4: Item status milestone order for visual tracking
+const ITEM_MILESTONE_ORDER: RequisitionItemStatus[] = [
+  "Pending",
+  "Sourcing",
+  "Shortlisted",
+  "Interviewing",
+  "Offered",
+  "Fulfilled",
+];
+
+const getItemMilestoneIndex = (status: string): number => {
+  const idx = ITEM_MILESTONE_ORDER.indexOf(status as RequisitionItemStatus);
+  return idx >= 0 ? idx : 0;
+};
+
+const ITEM_STATUS_ICONS: Record<string, React.ReactNode> = {
+  Pending: <Clock size={14} />,
+  Sourcing: <Search size={14} />,
+  Shortlisted: <FileText size={14} />,
+  Interviewing: <Phone size={14} />,
+  Offered: <Gift size={14} />,
+  Fulfilled: <CheckCircle size={14} />,
+  Cancelled: <Ban size={14} />,
+};
 
 interface TimelineEvent {
   date: string;
@@ -119,6 +164,7 @@ interface BackendRequisitionItem {
   job_description: string;
   requirements?: string | null;
   item_status: string;
+  assigned_ta?: number | null;  // Phase 7: Item-level TA assignment
 }
 
 interface BackendRequisition {
@@ -200,11 +246,40 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const currentUserId = user?.user_id ?? null;
+  const userRoles = user?.roles ?? [];
+  const isHRUser = userRoles.some((r) => ["hr", "admin"].includes(r.toLowerCase()));
+  
+  // Phase 7: Per-item edit permission check
+  // TA can only edit items assigned to them
+  const canEditItem = (item: RequisitionItem): boolean => {
+    if (!currentUserId) return false;
+    // HR/Admin can edit any item
+    if (isHRUser) return true;
+    // TA can only edit items assigned to them
+    return item.assignedTAId === currentUserId;
+  };
+  
+  // Legacy: Header-level check (kept for backward compatibility)
   const canAssignResources = Boolean(
     ticket?.assignedTAId &&
     currentUserId &&
     ticket.assignedTAId === currentUserId,
   );
+
+  // Phase 4: CV Upload state
+  const [cvUploading, setCvUploading] = useState<string | null>(null);
+  const cvInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  // Phase 4: Item workflow transition state
+  const [transitioningItem, setTransitioningItem] = useState<string | null>(null);
+  const [transitionError, setTransitionError] = useState<string | null>(null);
+  const [transitionSuccess, setTransitionSuccess] = useState<string | null>(null);
+
+  // Phase 4: HR Kill Switch - Cancel Item Modal
+  const [cancelModalItem, setCancelModalItem] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   const parseReqId = (value?: string | null) => {
     if (!value) return null;
@@ -316,12 +391,14 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       items:
         req.items?.map((item) => ({
           id: `ITEM-${item.item_id}`,
+          numericItemId: item.item_id,  // Phase 7: Numeric ID for API
           skill: item.role_position,
           level: item.skill_level ?? "—",
           experience: item.experience_years ?? 0,
           education: item.education_requirement ?? "—",
           itemStatus: item.item_status,
           description: item.job_description,
+          assignedTAId: item.assigned_ta ?? null,  // Phase 7: Item-level TA
         })) ?? [],
       availableEmployees: [],
       timeline: [],
@@ -420,6 +497,214 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       isMounted = false;
     };
   }, [effectiveTicketId]);
+
+  // ============================================================================
+  // HOOKS THAT MUST BE CALLED BEFORE EARLY RETURNS (React Rules of Hooks)
+  // ============================================================================
+
+  // Phase 4: CV Upload Handler
+  const handleCvUpload = useCallback(
+    async (itemId: string, event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      setCvUploading(itemId);
+      setTransitionError(null);
+
+      try {
+        // Simulate CV upload - in production, this would upload to storage
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const fileUrl = `https://storage.example.com/cv/${itemId}_${file.name}`;
+
+        // Update local state with CV info
+        setTicket((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            items: prev.items.map((item) =>
+              item.id === itemId
+                ? { ...item, cvFileUrl: fileUrl, cvFileName: file.name }
+                : item
+            ),
+          };
+        });
+
+        setTransitionSuccess(`CV uploaded: ${file.name}`);
+        setTimeout(() => setTransitionSuccess(null), 3000);
+      } catch (err) {
+        setTransitionError(
+          err instanceof Error ? err.message : "Failed to upload CV"
+        );
+      } finally {
+        setCvUploading(null);
+      }
+    },
+    []
+  );
+
+  // Phase 4: Refresh requisition data
+  const refreshRequisition = useCallback(async () => {
+    const reqId = parseReqId(effectiveTicketId);
+    if (!reqId) return;
+
+    try {
+      const response = await apiClient.get<BackendRequisition>(
+        `/requisitions/${reqId}`
+      );
+      const built = buildTicket(response.data);
+      setTicket(built);
+      const statusMap: Record<string, string> = {};
+      built.items.forEach((item) => {
+        statusMap[item.id] = item.itemStatus;
+      });
+      initialItemStatusesRef.current = statusMap;
+    } catch {
+      // Silent refresh failure
+    }
+  }, [effectiveTicketId]);
+
+  // Phase 4: Item Workflow Transitions
+  const handleItemTransition = useCallback(
+    async (
+      itemId: string,
+      action: "shortlist" | "interview" | "offer" | "fulfill",
+      employeeId?: string
+    ) => {
+      const numericId = Number(itemId.replace("ITEM-", ""));
+      if (isNaN(numericId)) {
+        setTransitionError("Invalid item ID");
+        return;
+      }
+
+      // Phase 7: Per-item authorization check
+      const item = ticket?.items.find((i) => i.id === itemId);
+      if (!item) {
+        setTransitionError("Item not found");
+        return;
+      }
+      
+      // Phase 7: Check item-level TA permission
+      if (!currentUserId) {
+        setTransitionError("You must be logged in to update items.");
+        return;
+      }
+      const isUserHRorAdmin = userRoles.some((r) => 
+        ["hr", "admin"].includes(r.toLowerCase())
+      );
+      if (!isUserHRorAdmin && item.assignedTAId !== currentUserId) {
+        setTransitionError("You are not authorized to update this item. It is assigned to another TA.");
+        return;
+      }
+
+      // Phase 4: Shortlist requires CV upload
+      if (action === "shortlist" && !item?.cvFileUrl) {
+        setTransitionError("CV upload is mandatory before shortlisting");
+        return;
+      }
+
+      setTransitioningItem(itemId);
+      setTransitionError(null);
+      setTransitionSuccess(null);
+
+      try {
+        switch (action) {
+          case "shortlist":
+            await shortlistItem(numericId);
+            break;
+          case "interview":
+            await startInterview(numericId);
+            break;
+          case "offer":
+            await makeOffer(numericId);
+            break;
+          case "fulfill":
+            if (!employeeId) {
+              throw new Error("Employee ID required for fulfillment");
+            }
+            await fulfillItem(numericId, employeeId);
+            break;
+        }
+
+        setTransitionSuccess(
+          `Item ${itemId} successfully moved to ${
+            action === "shortlist"
+              ? "Shortlisted"
+              : action === "interview"
+              ? "Interviewing"
+              : action === "offer"
+              ? "Offered"
+              : "Fulfilled"
+          }`
+        );
+
+        // Refresh requisition data from backend
+        await refreshRequisition();
+
+        setTimeout(() => setTransitionSuccess(null), 3000);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Transition failed";
+        const apiDetail =
+          typeof err === "object" && err !== null && "response" in err
+            ? (err as { response?: { data?: { detail?: string } } }).response
+                ?.data?.detail
+            : undefined;
+        setTransitionError(apiDetail ?? message);
+      } finally {
+        setTransitioningItem(null);
+      }
+    },
+    [ticket, refreshRequisition, currentUserId, userRoles]
+  );
+
+  // Phase 4: HR Kill Switch - Cancel Item
+  const handleCancelItem = useCallback(async () => {
+    if (!cancelModalItem || !cancelReason.trim()) {
+      setCancelError("Reason is required for cancellation");
+      return;
+    }
+
+    if (cancelReason.trim().length < 10) {
+      setCancelError("Reason must be at least 10 characters");
+      return;
+    }
+
+    const numericId = Number(cancelModalItem.replace("ITEM-", ""));
+    if (isNaN(numericId)) {
+      setCancelError("Invalid item ID");
+      return;
+    }
+
+    setCancelling(true);
+    setCancelError(null);
+
+    try {
+      await cancelItemApi(numericId, cancelReason.trim());
+
+      setTransitionSuccess(`Item ${cancelModalItem} has been cancelled`);
+      setCancelModalItem(null);
+      setCancelReason("");
+
+      // Refresh requisition data from backend
+      await refreshRequisition();
+
+      setTimeout(() => setTransitionSuccess(null), 3000);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Cancel failed";
+      const apiDetail =
+        typeof err === "object" && err !== null && "response" in err
+          ? (err as { response?: { data?: { detail?: string } } }).response
+              ?.data?.detail
+          : undefined;
+      setCancelError(apiDetail ?? message);
+    } finally {
+      setCancelling(false);
+    }
+  }, [cancelModalItem, cancelReason, refreshRequisition]);
+
+  // ============================================================================
+  // EARLY RETURNS (after all hooks)
+  // ============================================================================
 
   if (isLoading) {
     return (
@@ -602,7 +887,16 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
 
   // Handle employee assignment
   const handleAssignEmployee = (itemId: string, employeeId: string) => {
-    if (!ticket || !canAssignResources) return;
+    if (!ticket) return;
+    
+    // Phase 7: Per-item authorization check
+    const item = ticket.items.find((i) => i.id === itemId);
+    if (!item) return;
+    const isUserHRorAdmin = userRoles.some((r) => 
+      ["hr", "admin"].includes(r.toLowerCase())
+    );
+    if (!isUserHRorAdmin && item.assignedTAId !== currentUserId) return;
+    
     const employee = ticket.availableEmployees.find(
       (emp) => emp.id === employeeId,
     );
@@ -862,21 +1156,34 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
           </div>
         </div>
 
-        {/* Progress Bar */}
+        {/* Phase 5: Auto Closure Progress Display */}
         <div style={{ marginBottom: "8px" }}>
           <div
             style={{
               display: "flex",
               justifyContent: "space-between",
+              alignItems: "center",
               marginBottom: "8px",
             }}
           >
             <span style={{ fontSize: "14px", fontWeight: 500 }}>
               Completion Progress
             </span>
-            <span style={{ fontSize: "14px", fontWeight: 600 }}>
-              {completionStats.progress}%
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              {/* Phase 5: Fractional Progress Display */}
+              <span
+                style={{
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  color: completionStats.progress === 100 ? "var(--success)" : "var(--primary-accent)",
+                }}
+              >
+                {completionStats.fulfilled + completionStats.cancelled} / {completionStats.totalItems} completed
+              </span>
+              <span style={{ fontSize: "14px", fontWeight: 600 }}>
+                {completionStats.progress}%
+              </span>
+            </div>
           </div>
           <div
             style={{
@@ -891,7 +1198,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 width: `${completionStats.progress}%`,
                 height: "100%",
                 background:
-                  "linear-gradient(135deg, var(--primary-accent), var(--primary-accent-dark))",
+                  completionStats.progress === 100
+                    ? "linear-gradient(135deg, var(--success), #059669)"
+                    : "linear-gradient(135deg, var(--primary-accent), var(--primary-accent-dark))",
                 transition: "width 0.3s ease",
               }}
             />
@@ -905,11 +1214,44 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
               color: "var(--text-tertiary)",
             }}
           >
-            <span> {completionStats.fulfilled} Fulfilled</span>
-            <span> {completionStats.pending} Pending</span>
-            <span> {completionStats.cancelled} Cancelled</span>
-            <span> {completionStats.totalItems} Total Positions</span>
+            <span style={{ color: "var(--success)" }}>✓ {completionStats.fulfilled} Fulfilled</span>
+            <span style={{ color: "var(--warning)" }}>○ {completionStats.pending} Pending</span>
+            <span>✕ {completionStats.cancelled} Cancelled</span>
+            <span>📊 {completionStats.totalItems} Total</span>
           </div>
+          {/* Phase 5: Auto-closure indicator */}
+          {completionStats.progress === 100 && completionStats.pending === 0 && (
+            <div
+              style={{
+                marginTop: "12px",
+                padding: "10px 12px",
+                borderRadius: "8px",
+                backgroundColor: "rgba(16, 185, 129, 0.08)",
+                border: "1px solid rgba(16, 185, 129, 0.2)",
+                fontSize: "12px",
+                color: "var(--success)",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <CheckCircle size={14} />
+              <span>
+                <strong>Auto-Closure:</strong> All items are resolved. Requisition will close automatically.
+              </span>
+            </div>
+          )}
+          {completionStats.pending > 0 && (
+            <div
+              style={{
+                marginTop: "12px",
+                fontSize: "11px",
+                color: "var(--text-tertiary)",
+              }}
+            >
+              Phase 5: Requisition will auto-close when all {completionStats.pending} pending items are fulfilled or cancelled.
+            </div>
+          )}
         </div>
       </div>
 
@@ -1334,9 +1676,62 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
           <div className="data-manager-header">
             <h2>Requisition Items Management</h2>
             <p className="subtitle">
-              Manage individual positions - Update status or assign resources
+              Phase 4: TA Execution - Track milestones, upload CVs, and manage positions
             </p>
           </div>
+
+          {/* Phase 4: Status Messages */}
+          {transitionError && (
+            <div
+              style={{
+                marginBottom: "16px",
+                padding: "12px 16px",
+                borderRadius: "10px",
+                backgroundColor: "rgba(239, 68, 68, 0.08)",
+                border: "1px solid rgba(239, 68, 68, 0.2)",
+                color: "var(--error)",
+                fontSize: "13px",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <AlertCircle size={16} />
+              {transitionError}
+              <button
+                onClick={() => setTransitionError(null)}
+                style={{
+                  marginLeft: "auto",
+                  background: "none",
+                  border: "none",
+                  color: "var(--error)",
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </button>
+            </div>
+          )}
+
+          {transitionSuccess && (
+            <div
+              style={{
+                marginBottom: "16px",
+                padding: "12px 16px",
+                borderRadius: "10px",
+                backgroundColor: "rgba(16, 185, 129, 0.08)",
+                border: "1px solid rgba(16, 185, 129, 0.2)",
+                color: "var(--success)",
+                fontSize: "13px",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <CheckCircle size={16} />
+              {transitionSuccess}
+            </div>
+          )}
 
           {!canAssignResources && (
             <div
@@ -1383,6 +1778,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                     transition: "all 0.2s ease",
                   }}
                 >
+                  {/* Phase 4: Item Header with Status and Info */}
                   <div
                     style={{
                       display: "flex",
@@ -1391,7 +1787,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                       marginBottom: "16px",
                     }}
                   >
-                    <div>
+                    <div style={{ flex: 1 }}>
                       <div
                         style={{
                           display: "flex",
@@ -1406,10 +1802,14 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                               ? "ticket-status open"
                               : item.itemStatus === "Fulfilled"
                                 ? "ticket-status fulfilled"
-                                : "ticket-status closed"
+                                : item.itemStatus === "Cancelled"
+                                  ? "ticket-status closed"
+                                  : "ticket-status in-progress"
                           }
+                          style={{ display: "flex", alignItems: "center", gap: "4px" }}
                         >
-                          {item.itemStatus}
+                          {ITEM_STATUS_ICONS[item.itemStatus]}
+                          {ITEM_STATUS_LABELS[item.itemStatus as RequisitionItemStatus] ?? item.itemStatus}
                         </span>
                         <strong style={{ fontSize: "15px" }}>
                           {item.skill} ({item.level})
@@ -1421,6 +1821,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                           gap: "16px",
                           fontSize: "12px",
                           color: "var(--text-tertiary)",
+                          flexWrap: "wrap",
                         }}
                       >
                         <span>📊 {item.experience} years exp</span>
@@ -1430,17 +1831,110 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                             ? `👤 Assigned: ${item.assignedEmployeeName}`
                             : "👤 Unassigned"}
                         </span>
+                        {item.cvFileName && (
+                          <span style={{ color: "var(--success)" }}>
+                            📄 CV: {item.cvFileName}
+                          </span>
+                        )}
                       </div>
+
+                      {/* Phase 4: Milestone Tracker */}
+                      {item.itemStatus !== "Cancelled" && (
+                        <div style={{ marginTop: "12px" }}>
+                          <div style={{ fontSize: "11px", color: "var(--text-tertiary)", marginBottom: "6px" }}>
+                            Milestone Progress
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                            {ITEM_MILESTONE_ORDER.map((milestone, idx) => {
+                              const currentIdx = getItemMilestoneIndex(item.itemStatus);
+                              const isComplete = idx < currentIdx;
+                              const isCurrent = idx === currentIdx;
+                              return (
+                                <React.Fragment key={milestone}>
+                                  <div
+                                    style={{
+                                      width: "24px",
+                                      height: "24px",
+                                      borderRadius: "50%",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      fontSize: "10px",
+                                      fontWeight: 600,
+                                      backgroundColor: isComplete
+                                        ? "var(--success)"
+                                        : isCurrent
+                                        ? "var(--primary-accent)"
+                                        : "var(--border-subtle)",
+                                      color: isComplete || isCurrent ? "white" : "var(--text-tertiary)",
+                                      transition: "all 0.2s ease",
+                                    }}
+                                    title={ITEM_STATUS_LABELS[milestone]}
+                                  >
+                                    {isComplete ? <CheckCircle size={12} /> : idx + 1}
+                                  </div>
+                                  {idx < ITEM_MILESTONE_ORDER.length - 1 && (
+                                    <div
+                                      style={{
+                                        flex: 1,
+                                        height: "2px",
+                                        backgroundColor: isComplete ? "var(--success)" : "var(--border-subtle)",
+                                        maxWidth: "20px",
+                                      }}
+                                    />
+                                  )}
+                                </React.Fragment>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
+                    {/* Phase 4: Action Buttons */}
                     <div
                       style={{
                         display: "flex",
                         alignItems: "center",
                         gap: "8px",
+                        flexWrap: "wrap",
+                        justifyContent: "flex-end",
                       }}
                     >
-                      {item.itemStatus === "Pending" && (
+                      {/* CV Upload for Sourcing status */}
+                      {item.itemStatus === "Sourcing" && canEditItem(item) && (
+                        <>
+                          <input
+                            ref={(el) => { cvInputRefs.current[item.id] = el; }}
+                            type="file"
+                            accept=".pdf,.doc,.docx"
+                            onChange={(e) => handleCvUpload(item.id, e)}
+                            style={{ display: "none" }}
+                          />
+                          <button
+                            className="action-button"
+                            style={{
+                              fontSize: "12px",
+                              padding: "8px 12px",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                            }}
+                            disabled={cvUploading === item.id}
+                            onClick={() => cvInputRefs.current[item.id]?.click()}
+                          >
+                            <Upload size={12} />
+                            {cvUploading === item.id
+                              ? "Uploading..."
+                              : item.cvFileName
+                              ? "Replace CV"
+                              : "Upload CV"}
+                          </button>
+                        </>
+                      )}
+
+                      {/* Workflow Transition Buttons based on current status */}
+                      {item.itemStatus === "Sourcing" && canEditItem(item) && (
                         <button
                           className="action-button primary"
                           style={{
@@ -1449,50 +1943,97 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                             display: "flex",
                             alignItems: "center",
                             gap: "6px",
-                            opacity: canAssignResources ? 1 : 0.6,
+                            opacity: item.cvFileUrl ? 1 : 0.6,
                           }}
-                          disabled={!canAssignResources}
+                          disabled={transitioningItem === item.id || !item.cvFileUrl}
+                          onClick={() => handleItemTransition(item.id, "shortlist")}
+                          title={item.cvFileUrl ? "Move to Shortlisted" : "CV upload required first"}
+                        >
+                          <FileText size={12} />
+                          {transitioningItem === item.id ? "Processing..." : "Shortlist"}
+                        </button>
+                      )}
+
+                      {item.itemStatus === "Shortlisted" && canEditItem(item) && (
+                        <button
+                          className="action-button primary"
+                          style={{
+                            fontSize: "12px",
+                            padding: "8px 12px",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
+                          disabled={transitioningItem === item.id}
+                          onClick={() => handleItemTransition(item.id, "interview")}
+                        >
+                          <Phone size={12} />
+                          {transitioningItem === item.id ? "Processing..." : "Schedule Interview"}
+                        </button>
+                      )}
+
+                      {item.itemStatus === "Interviewing" && canEditItem(item) && (
+                        <button
+                          className="action-button primary"
+                          style={{
+                            fontSize: "12px",
+                            padding: "8px 12px",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
+                          disabled={transitioningItem === item.id}
+                          onClick={() => handleItemTransition(item.id, "offer")}
+                        >
+                          <Gift size={12} />
+                          {transitioningItem === item.id ? "Processing..." : "Extend Offer"}
+                        </button>
+                      )}
+
+                      {item.itemStatus === "Pending" && canEditItem(item) && (
+                        <button
+                          className="action-button primary"
+                          style={{
+                            fontSize: "12px",
+                            padding: "8px 12px",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
                           onClick={() =>
-                            canAssignResources &&
                             setSelectedItemForAssignment(
-                              selectedItemForAssignment === item.id
-                                ? null
-                                : item.id,
+                              selectedItemForAssignment === item.id ? null : item.id
                             )
                           }
                         >
                           <UserPlus size={12} />
-                          {selectedItemForAssignment === item.id
-                            ? "Cancel"
-                            : canAssignResources
-                              ? "Assign Employee"
-                              : "Locked"}
+                          {selectedItemForAssignment === item.id ? "Cancel" : "Start Sourcing"}
                         </button>
                       )}
 
-                      {isEditing && (
-                        <div style={{ display: "flex", gap: "4px" }}>
+                      {/* Phase 4: HR Kill Switch - Only HR can cancel items */}
+                      {isHRUser &&
+                        item.itemStatus !== "Fulfilled" &&
+                        item.itemStatus !== "Cancelled" && (
                           <button
                             className="action-button"
-                            style={{ fontSize: "11px", padding: "6px 10px" }}
-                            onClick={() =>
-                              handleItemStatusChange(item.id, "Fulfilled")
-                            }
-                            disabled={item.itemStatus === "Fulfilled"}
+                            style={{
+                              fontSize: "12px",
+                              padding: "8px 12px",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              backgroundColor: "rgba(239, 68, 68, 0.1)",
+                              color: "var(--error)",
+                              border: "1px solid rgba(239, 68, 68, 0.2)",
+                            }}
+                            onClick={() => setCancelModalItem(item.id)}
+                            title="HR Kill Switch: Cancel this item"
                           >
-                            Mark Fulfilled
+                            <Ban size={12} />
+                            Cancel Item
                           </button>
-                          <button
-                            className="action-button"
-                            style={{ fontSize: "11px", padding: "6px 10px" }}
-                            onClick={() =>
-                              handleItemStatusChange(item.id, "Cancelled")
-                            }
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      )}
+                        )}
 
                       <button
                         className="action-button"
@@ -1534,7 +2075,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                       </div>
 
                       {selectedItemForAssignment === item.id &&
-                        canAssignResources && (
+                        canEditItem(item) && (
                           <div
                             style={{
                               marginTop: "16px",
@@ -1624,7 +2165,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                                         fontSize: "11px",
                                         padding: "6px 12px",
                                       }}
-                                      disabled={!canAssignResources}
+                                      disabled={!canEditItem(item)}
                                       onClick={() =>
                                         handleAssignEmployee(item.id, emp.id)
                                       }
@@ -1656,6 +2197,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
             })}
           </div>
 
+          {/* Phase 4: Workflow Guidance */}
           <div
             style={{
               marginTop: "32px",
@@ -1670,29 +2212,210 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 display: "flex",
                 alignItems: "center",
                 gap: "12px",
-                marginBottom: "8px",
+                marginBottom: "12px",
               }}
             >
               <AlertCircle size={16} color="var(--primary-accent)" />
               <strong
                 style={{ fontSize: "13px", color: "var(--text-primary)" }}
               >
-                Workflow Note
+                Phase 4: TA Execution Workflow
               </strong>
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                gap: "12px",
+              }}
+            >
+              <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                <strong>1. Sourcing:</strong> Upload CV (mandatory) → Shortlist
+              </div>
+              <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                <strong>2. Shortlisted:</strong> Schedule Interview
+              </div>
+              <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                <strong>3. Interviewing:</strong> Extend Offer or Reject
+              </div>
+              <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                <strong>4. Offered:</strong> Mark Fulfilled with employee ID
+              </div>
             </div>
             <p
               style={{
-                fontSize: "12px",
-                color: "var(--text-secondary)",
-                lineHeight: 1.5,
+                marginTop: "12px",
+                fontSize: "11px",
+                color: "var(--text-tertiary)",
               }}
             >
-              Each requisition item represents one position. When you assign an
-              employee, the item status changes to "Fulfilled". The overall
-              requisition will close automatically when all items are either
-              "Fulfilled" or "Cancelled".
+              Note: HR can cancel any item using the Kill Switch (requires reason).
+              Auto-closure happens when all items are Fulfilled or Cancelled.
             </p>
           </div>
+
+          {/* Phase 4: HR Kill Switch Modal */}
+          {cancelModalItem && (
+            <div
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: "rgba(0, 0, 0, 0.5)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 1000,
+              }}
+              onClick={() => {
+                setCancelModalItem(null);
+                setCancelReason("");
+                setCancelError(null);
+              }}
+            >
+              <div
+                style={{
+                  backgroundColor: "white",
+                  borderRadius: "16px",
+                  padding: "24px",
+                  maxWidth: "480px",
+                  width: "90%",
+                  boxShadow: "0 20px 60px rgba(0, 0, 0, 0.3)",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "12px",
+                    marginBottom: "20px",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: "40px",
+                      height: "40px",
+                      borderRadius: "10px",
+                      backgroundColor: "rgba(239, 68, 68, 0.1)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Ban size={20} color="var(--error)" />
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: "16px", fontWeight: 600, margin: 0 }}>
+                      Cancel Item - HR Kill Switch
+                    </h3>
+                    <p
+                      style={{
+                        fontSize: "12px",
+                        color: "var(--text-tertiary)",
+                        margin: 0,
+                      }}
+                    >
+                      {cancelModalItem}
+                    </p>
+                  </div>
+                </div>
+
+                {cancelError && (
+                  <div
+                    style={{
+                      marginBottom: "16px",
+                      padding: "10px 12px",
+                      borderRadius: "8px",
+                      backgroundColor: "rgba(239, 68, 68, 0.08)",
+                      border: "1px solid rgba(239, 68, 68, 0.2)",
+                      color: "var(--error)",
+                      fontSize: "12px",
+                    }}
+                  >
+                    {cancelError}
+                  </div>
+                )}
+
+                <div style={{ marginBottom: "20px" }}>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "13px",
+                      fontWeight: 500,
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Cancellation Reason <span style={{ color: "var(--error)" }}>*</span>
+                  </label>
+                  <textarea
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                    placeholder="Enter reason for cancellation (minimum 10 characters)..."
+                    rows={4}
+                    style={{
+                      width: "100%",
+                      padding: "12px",
+                      borderRadius: "8px",
+                      border: `1px solid ${
+                        cancelError && !cancelReason.trim()
+                          ? "var(--error)"
+                          : "var(--border-subtle)"
+                      }`,
+                      fontSize: "13px",
+                      resize: "vertical",
+                    }}
+                  />
+                  <p
+                    style={{
+                      fontSize: "11px",
+                      color:
+                        cancelReason.length < 10
+                          ? "var(--text-tertiary)"
+                          : "var(--success)",
+                      marginTop: "4px",
+                    }}
+                  >
+                    {cancelReason.length}/10 characters minimum
+                  </p>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "12px",
+                    justifyContent: "flex-end",
+                  }}
+                >
+                  <button
+                    className="action-button"
+                    onClick={() => {
+                      setCancelModalItem(null);
+                      setCancelReason("");
+                      setCancelError(null);
+                    }}
+                    disabled={cancelling}
+                  >
+                    Keep Item
+                  </button>
+                  <button
+                    className="action-button"
+                    style={{
+                      backgroundColor: "var(--error)",
+                      color: "white",
+                      border: "none",
+                    }}
+                    onClick={handleCancelItem}
+                    disabled={cancelling || cancelReason.trim().length < 10}
+                  >
+                    {cancelling ? "Cancelling..." : "Confirm Cancellation"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

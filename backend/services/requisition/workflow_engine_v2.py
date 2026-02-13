@@ -1104,6 +1104,43 @@ class RequisitionItemWorkflowEngine:
         return item
     
     @staticmethod
+    def _validate_assigned_ta(
+        item: RequisitionItem,
+        user_id: int,
+        user_roles: List[str],
+    ) -> None:
+        """
+        Validate that user is the assigned TA for the item (Phase 7 permission transfer).
+        
+        HR and Admin bypass this check as they have override authority.
+        TA users can only modify items assigned to them.
+        
+        Raises:
+            AuthorizationException: If TA is not assigned to this item
+        """
+        # HR and Admin have override authority
+        if "HR" in user_roles or "Admin" in user_roles:
+            return
+        
+        # TA users must be the assigned TA
+        if "TA" in user_roles:
+            if item.assigned_ta is None:
+                raise AuthorizationException(
+                    action="modify unassigned item",
+                    user_roles=user_roles,
+                    required_roles=["HR", "Admin"],
+                    reason="Item has no TA assigned. Only HR or Admin can modify.",
+                )
+            if item.assigned_ta != user_id:
+                raise AuthorizationException(
+                    action="modify item assigned to another TA",
+                    user_roles=user_roles,
+                    required_roles=["HR", "Admin"],
+                    reason=f"You are not the assigned TA for this item. "
+                           f"Assigned TA ID: {item.assigned_ta}",
+                )
+    
+    @staticmethod
     def _set_item_status(item: RequisitionItem, new_status: str) -> None:
         """
         Set item status within protected context.
@@ -1247,6 +1284,7 @@ class RequisitionItemWorkflowEngine:
         """
         item = cls._get_locked_item(db, item_id)
         cls._validate_header_allows_item_change(db, item.req_id)
+        cls._validate_assigned_ta(item, user_id, user_roles)  # Phase 7: TA ownership check
         
         current_status = cls._parse_status(item.item_status)
         target_status = RequisitionItemStatus.SHORTLISTED
@@ -1295,6 +1333,7 @@ class RequisitionItemWorkflowEngine:
         """
         item = cls._get_locked_item(db, item_id)
         cls._validate_header_allows_item_change(db, item.req_id)
+        cls._validate_assigned_ta(item, user_id, user_roles)  # Phase 7: TA ownership check
         
         current_status = cls._parse_status(item.item_status)
         target_status = RequisitionItemStatus.INTERVIEWING
@@ -1346,6 +1385,7 @@ class RequisitionItemWorkflowEngine:
         """
         item = cls._get_locked_item(db, item_id)
         cls._validate_header_allows_item_change(db, item.req_id)
+        cls._validate_assigned_ta(item, user_id, user_roles)  # Phase 7: TA ownership check
         
         current_status = cls._parse_status(item.item_status)
         target_status = RequisitionItemStatus.OFFERED
@@ -1404,6 +1444,7 @@ class RequisitionItemWorkflowEngine:
         """
         item = cls._get_locked_item(db, item_id)
         cls._validate_header_allows_item_change(db, item.req_id)
+        cls._validate_assigned_ta(item, user_id, user_roles)  # Phase 7: TA ownership check
         
         current_status = cls._parse_status(item.item_status)
         target_status = RequisitionItemStatus.FULFILLED
@@ -1498,6 +1539,7 @@ class RequisitionItemWorkflowEngine:
         
         item = cls._get_locked_item(db, item_id)
         cls._validate_header_allows_item_change(db, item.req_id)
+        cls._validate_assigned_ta(item, user_id, user_roles)  # Phase 7: TA ownership check
         
         current_status = cls._parse_status(item.item_status)
         target_status = RequisitionItemStatus.CANCELLED
@@ -1773,6 +1815,126 @@ class RequisitionItemWorkflowEngine:
         )
         
         return item
+    
+    @classmethod
+    def bulk_reassign(
+        cls,
+        db: Session,
+        req_id: int,
+        old_ta_id: int,
+        new_ta_id: int,
+        user_id: int,
+        user_roles: List[str],
+        reason: str,
+        item_ids: Optional[List[int]] = None,
+    ) -> List[RequisitionItem]:
+        """
+        Bulk reassign items from one TA to another within a single transaction.
+
+        All eligible items are locked with FOR UPDATE, updated, and audited
+        inside the caller's transaction boundary.  If any step fails the
+        caller must rollback — the engine never commits.
+
+        Args:
+            db: Database session (caller owns the transaction)
+            req_id: Requisition header ID
+            old_ta_id: Current TA to reassign FROM
+            new_ta_id: Target TA to reassign TO
+            user_id: HR Admin performing the action
+            user_roles: Roles of the performing user
+            reason: Mandatory reason (min 5 chars)
+            item_ids: Optional subset of item IDs to reassign.
+                      If None, all eligible items under old_ta_id are reassigned.
+
+        Returns:
+            List of updated RequisitionItem objects.
+
+        Raises:
+            AuthorizationException: If user is not HR or Admin.
+            ValidationException: If reason too short or old == new TA.
+            EntityNotFoundException: If requisition not found.
+        """
+        # ---- Role check ----
+        if "HR" not in user_roles and "Admin" not in user_roles:
+            raise AuthorizationException(
+                action="bulk reassign TA",
+                user_roles=user_roles,
+                required_roles=["HR", "Admin"],
+            )
+
+        # ---- Validate reason ----
+        reason = (reason or "").strip()
+        if len(reason) < 5:
+            raise ValidationException(
+                field="reason",
+                message="Reassignment reason must be at least 5 characters",
+                value=reason,
+            )
+
+        # ---- Validate TAs differ ----
+        if old_ta_id == new_ta_id:
+            raise ValidationException(
+                field="new_ta_id",
+                message="New TA must be different from the current TA",
+                value=str(new_ta_id),
+            )
+
+        # ---- Verify requisition exists ----
+        requisition = (
+            db.query(Requisition)
+            .filter(Requisition.req_id == req_id)
+            .first()
+        )
+        if not requisition:
+            raise EntityNotFoundException(
+                entity_type="requisition",
+                entity_id=req_id,
+            )
+
+        # ---- Lock eligible items with FOR UPDATE ----
+        query = (
+            db.query(RequisitionItem)
+            .filter(
+                RequisitionItem.req_id == req_id,
+                RequisitionItem.assigned_ta == old_ta_id,
+                RequisitionItem.item_status.notin_(["Fulfilled", "Cancelled"]),
+            )
+            .with_for_update()
+        )
+
+        if item_ids:
+            query = query.filter(RequisitionItem.item_id.in_(item_ids))
+
+        items = query.all()
+
+        if not items:
+            raise ValidationException(
+                field="items",
+                message="No eligible items found for reassignment",
+                value=f"req_id={req_id}, old_ta={old_ta_id}",
+            )
+
+        # ---- Update + audit each item inside the same transaction ----
+        for item in items:
+            item.assigned_ta = new_ta_id
+
+            WorkflowAuditLogger.log_transition(
+                db=db,
+                entity_type="requisition_item",
+                entity_id=item.item_id,
+                action="ITEM_REASSIGNED",
+                prev_status=item.item_status,
+                new_status=item.item_status,
+                performed_by=user_id,
+                reason=reason,
+                metadata={
+                    "old_ta_id": old_ta_id,
+                    "new_ta_id": new_ta_id,
+                    "req_id": req_id,
+                },
+            )
+
+        return items
     
     # =========================================================================
     # ITEM BUDGET WORKFLOW OPERATIONS

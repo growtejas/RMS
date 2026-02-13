@@ -84,7 +84,7 @@ def get_users(db: Session = Depends(get_db)):
 @router.get("/")
 def list_users(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("Admin", "HR"))
+    current_user: User = Depends(require_any_role("Admin", "HR", "TA"))
 ):
     results = (
         db.query(

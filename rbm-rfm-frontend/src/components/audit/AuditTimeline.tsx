@@ -31,6 +31,11 @@ import {
   Circle,
   AlertCircle,
   Clock,
+  FileText,
+  Phone,
+  Gift,
+  DollarSign,
+  UserCog,
 } from "lucide-react";
 import {
   AuditRecord,
@@ -70,6 +75,9 @@ export interface AuditTimelineProps {
 // ICON MAPPING
 // ============================================================================
 
+/**
+ * Phase 6: Icon mapping for all timeline event types
+ */
 const ACTION_ICONS: Record<AuditActionType, React.ReactNode> = {
   approve: <CheckCircle size={16} />,
   reject: <XCircle size={16} />,
@@ -79,7 +87,12 @@ const ACTION_ICONS: Record<AuditActionType, React.ReactNode> = {
   create: <PlusCircle size={16} />,
   fulfill: <CheckCircle size={16} />,
   assign: <UserCheck size={16} />,
+  reassign: <UserCog size={16} />,
   update: <Edit3 size={16} />,
+  shortlist: <FileText size={16} />,
+  interview: <Phone size={16} />,
+  offer: <Gift size={16} />,
+  budget: <DollarSign size={16} />,
   unknown: <Circle size={16} />,
 };
 

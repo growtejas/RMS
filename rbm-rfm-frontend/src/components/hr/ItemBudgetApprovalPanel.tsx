@@ -176,9 +176,14 @@ const ItemBudgetApprovalPanel: React.FC = () => {
     itemId: number,
     state: Partial<ItemActionState>,
   ) => {
+    const defaultState: ItemActionState = {
+      editing: false,
+      approving: false,
+      rejecting: false,
+    };
     setActionStates((prev) => ({
       ...prev,
-      [itemId]: { ...prev[itemId], ...state },
+      [itemId]: { ...(prev[itemId] ?? defaultState), ...state },
     }));
   };
 

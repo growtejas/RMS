@@ -47,6 +47,7 @@ from api.requisition_status_history import router as requisition_status_history_
 
 # ---- Workflow (Specification v1.0.0) ----
 from api.workflow_routes import requisition_workflow_router, item_workflow_router
+from api.workflow_routes import item_reassign_router, requisition_reassign_router
 
 # ---- Workflow Audit & Observability ----
 from api.workflow_audit import router as workflow_audit_router
@@ -92,6 +93,8 @@ app.include_router(requisition_status_history_router, prefix="/api")
 # ---- Workflow API (Specification v1.0.0) ----
 app.include_router(requisition_workflow_router, prefix="/api")
 app.include_router(item_workflow_router, prefix="/api")
+app.include_router(item_reassign_router, prefix="/api")
+app.include_router(requisition_reassign_router, prefix="/api")
 app.include_router(workflow_audit_router, prefix="/api")
 
 app.include_router(audit_log_router, prefix="/api")

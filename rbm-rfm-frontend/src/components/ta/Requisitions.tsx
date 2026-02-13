@@ -51,6 +51,7 @@ interface RequisitionItem {
   assignedEmployeeName?: string;
   assignedDate?: string;
   description?: string;
+  assignedTAId?: number | null;  // Phase 7: Item-level TA assignment
 }
 
 interface BackendRequisitionItem {
@@ -62,6 +63,7 @@ interface BackendRequisitionItem {
   job_description: string;
   requirements?: string | null;
   item_status: string;
+  assigned_ta?: number | null;  // Phase 7: Item-level TA assignment
 }
 
 interface BackendRequisition {
@@ -110,6 +112,7 @@ const mapRequisitions = (data: BackendRequisition[]): Requisition[] =>
         education: item.education_requirement ?? "—",
         itemStatus: item.item_status,
         description: item.job_description,
+        assignedTAId: item.assigned_ta ?? null,  // Phase 7: Item-level TA
       })) ?? [],
   }));
 
@@ -416,10 +419,13 @@ const Requisitions: React.FC<RequisitionsProps> = ({
     try {
       setIsLoading(true);
       setError(null);
-      const endpoint =
+      // Phase 7: Add cache-busting to ensure fresh data after reassignment
+      const baseEndpoint =
         activeFilter === "my"
           ? "/requisitions?my_assignments=true"
           : "/requisitions";
+      const separator = baseEndpoint.includes("?") ? "&" : "?";
+      const endpoint = `${baseEndpoint}${separator}_t=${Date.now()}`;
       const response = await apiClient.get<BackendRequisition[]>(endpoint);
       setRequisitions(mapRequisitions(response.data));
     } catch (err) {
@@ -437,19 +443,32 @@ const Requisitions: React.FC<RequisitionsProps> = ({
     const handleFocus = () => {
       fetchRequisitions();
     };
+    
+    // Phase 7: Listen for TA reassignment events to refresh the list
+    const handleReassignment = () => {
+      fetchRequisitions();
+    };
 
     window.addEventListener("focus", handleFocus);
+    window.addEventListener("requisition-reassigned", handleReassignment);
     const intervalId = window.setInterval(fetchRequisitions, 30000);
 
     return () => {
       window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("requisition-reassigned", handleReassignment);
       window.clearInterval(intervalId);
     };
   }, [fetchRequisitions]);
 
-  const visibleRequisitions = requisitions.filter(
-    (req) => normalizeStatus(req.overallStatus) === "Active",
-  );
+  // PHASE 3: TA users can see ALL APPROVED requisitions (Active status)
+  // These are requisitions that have passed budget and HR approval
+  // Unassigned items are viewable but not editable
+  const visibleRequisitions = requisitions.filter((req) => {
+    const status = normalizeStatus(req.overallStatus);
+    // Show Active requisitions (post-HR approval)
+    // Active = APPROVED_UNASSIGNED in the spec terminology
+    return status === "Active";
+  });
 
   // Filter requisitions
   const filteredRequisitions = visibleRequisitions.filter((req) => {
@@ -884,11 +903,53 @@ const Requisitions: React.FC<RequisitionsProps> = ({
               filteredRequisitions.map((req) => {
                 const agingDays = calculateAgingDays(req.dateCreated);
                 const completion = calculateCompletion(req.items);
-                const isAssignedToMe = req.assignedTAId === currentUserId;
-                const isUnassigned = !req.assignedTAId;
-                const assignedLabel = req.assignedTAId
-                  ? (req.assignedTA ?? `User #${req.assignedTAId}`)
-                  : "Unassigned";
+                
+                // Phase 7: Check item-level TA assignments (not just header-level)
+                const activeItems = req.items.filter(
+                  (item) => item.itemStatus !== "Fulfilled" && item.itemStatus !== "Cancelled"
+                );
+                const assignedTAs = activeItems
+                  .map((item) => item.assignedTAId)
+                  .filter((taId): taId is number => taId !== null && taId !== undefined);
+                
+                // Check if current user is assigned to ANY item
+                const isAssignedToMe = assignedTAs.includes(currentUserId ?? -1);
+                
+                // Determine the primary TA label
+                // Phase 7: Prioritize item-level assignments (they're more accurate after reassignment)
+                let assignedLabel: string = "Unassigned";
+                let primaryTAId: number | null = null;
+                
+                if (assignedTAs.length > 0) {
+                  // Use item-level: find most common TA
+                  const taCounts: Record<number, number> = {};
+                  assignedTAs.forEach((taId) => {
+                    taCounts[taId] = (taCounts[taId] ?? 0) + 1;
+                  });
+                  const sortedTAs = Object.entries(taCounts).sort((a, b) => b[1] - a[1]);
+                  
+                  // TypeScript safety: sortedTAs will have at least one entry if assignedTAs.length > 0
+                  // We know assignedTAs.length > 0, so taCounts has entries, so sortedTAs[0] exists
+                  if (sortedTAs.length > 0 && sortedTAs[0]) {
+                    const topTA = sortedTAs[0];
+                    primaryTAId = Number(topTA[0]);
+                    
+                    if (sortedTAs.length > 1) {
+                      // Multiple different TAs assigned
+                      assignedLabel = `Multiple TAs (${sortedTAs.length})`;
+                    } else {
+                      assignedLabel = `User #${primaryTAId}`;
+                    }
+                  }
+                  // If sortedTAs is empty (shouldn't happen), assignedLabel stays "Unassigned"
+                } else if (req.assignedTAId) {
+                  // Fallback to header-level if no item-level assignments
+                  primaryTAId = req.assignedTAId;
+                  assignedLabel = req.assignedTA ?? `User #${req.assignedTAId}`;
+                }
+                // If neither condition is met, both stay at initial values
+                
+                const isUnassigned = !primaryTAId && assignedTAs.length === 0;
 
                 return (
                   <React.Fragment key={req.id}>
@@ -1049,41 +1110,46 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                       </td>
 
                       <td>
-                        {req.assignedTAId ? (
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
-                            }}
-                          >
+                        {(() => {
+                          const hasAssignment = (primaryTAId !== null && primaryTAId !== undefined) || assignedTAs.length > 0;
+                          return hasAssignment ? (
                             <div
                               style={{
-                                width: "8px",
-                                height: "8px",
-                                borderRadius: "50%",
-                                backgroundColor: isAssignedToMe
-                                  ? "var(--success)"
-                                  : "var(--warning)",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
                               }}
-                            />
-                            <span style={{ fontSize: "13px" }}>
-                              {isAssignedToMe
-                                ? assignedLabel
-                                : `Managed by ${assignedLabel}`}
+                            >
+                              <div
+                                style={{
+                                  width: "8px",
+                                  height: "8px",
+                                  borderRadius: "50%",
+                                  backgroundColor: isAssignedToMe
+                                    ? "var(--success)"
+                                    : "var(--warning)",
+                                }}
+                              />
+                              <span style={{ fontSize: "13px" }}>
+                                {isAssignedToMe
+                                  ? assignedLabel
+                                  : `Managed by ${assignedLabel}`}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="status-badge inactive">
+                              Unassigned
                             </span>
-                          </div>
-                        ) : (
-                          <span className="status-badge inactive">
-                            Unassigned
-                          </span>
-                        )}
+                          );
+                        })()}
                       </td>
 
+                      {/* PHASE 3: Permission-based action buttons */}
                       <td>
                         <div style={{ display: "flex", gap: "8px" }}>
                           {isUnassigned ? (
                             <>
+                              {/* Unassigned: TA can self-assign */}
                               <button
                                 className="action-button primary"
                                 onClick={() => handleSelfAssign(req.id)}
@@ -1114,6 +1180,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                                   </>
                                 )}
                               </button>
+                              {/* Unassigned: View only (no Map Resource/Shortlist) */}
                               <button
                                 className="action-button"
                                 onClick={() => onViewRequisition?.(req.id)}
@@ -1121,12 +1188,14 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                                   fontSize: "12px",
                                   padding: "6px 12px",
                                 }}
+                                title="View details (assign first to manage)"
                               >
-                                View
+                                View Only
                               </button>
                             </>
                           ) : isAssignedToMe ? (
                             <>
+                              {/* Assigned to current TA: Full access */}
                               <button
                                 className="action-button primary"
                                 onClick={() => onManageItems?.(req.id)}
@@ -1134,6 +1203,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                                   fontSize: "12px",
                                   padding: "6px 12px",
                                 }}
+                                title="Manage items: Upload CV, Map Resource, Update Progress"
                               >
                                 Manage Items
                               </button>
@@ -1149,14 +1219,29 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                               </button>
                             </>
                           ) : (
-                            <span
-                              style={{
-                                fontSize: "12px",
-                                color: "var(--text-tertiary)",
-                              }}
-                            >
-                              Managed by another TA
-                            </span>
+                            <>
+                              {/* Assigned to another TA: View only, no edit */}
+                              <button
+                                className="action-button"
+                                onClick={() => onViewRequisition?.(req.id)}
+                                style={{
+                                  fontSize: "12px",
+                                  padding: "6px 12px",
+                                }}
+                                title="View only - managed by another TA"
+                              >
+                                View
+                              </button>
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  color: "var(--text-tertiary)",
+                                  padding: "6px 0",
+                                }}
+                              >
+                                (Managed by {assignedLabel})
+                              </span>
+                            </>
                           )}
                         </div>
                       </td>

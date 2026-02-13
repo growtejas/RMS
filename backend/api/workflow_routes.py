@@ -113,6 +113,30 @@ class SwapTARequest(BaseModel):
     reason: str = Field(..., min_length=5, max_length=2000)
 
 
+class BulkReassignRequest(BaseModel):
+    """Request for bulk TA reassignment."""
+    old_ta_id: int = Field(..., gt=0)
+    new_ta_id: int = Field(..., gt=0)
+    reason: str = Field(..., min_length=5, max_length=2000)
+    item_ids: Optional[List[int]] = Field(None, description="Specific item IDs to reassign. If omitted, all eligible items are reassigned.")
+
+
+class BulkReassignItemResult(BaseModel):
+    """Single item result in bulk reassign response."""
+    item_id: int
+    role_position: str
+    old_ta_id: Optional[int]
+    new_ta_id: int
+
+
+class BulkReassignResponse(BaseModel):
+    """Response for bulk TA reassignment."""
+    success: bool = True
+    reassigned_count: int
+    req_id: int
+    items: List[BulkReassignItemResult]
+
+
 # ============================================================================
 # RESPONSE SCHEMAS
 # ============================================================================
@@ -555,6 +579,76 @@ async def reopen_requisition(
             new_status=requisition.overall_status,
             transitioned_at=datetime.utcnow(),
             transitioned_by=current_user.user_id,
+        )
+    except WorkflowException as e:
+        db.rollback()
+        raise handle_workflow_exception(e)
+
+
+# ============================================================================
+# BULK TA REASSIGNMENT
+# ============================================================================
+
+@requisition_workflow_router.post(
+    "/bulk-reassign",
+    response_model=BulkReassignResponse,
+    responses={
+        400: {"model": WorkflowErrorResponse},
+        403: {"model": WorkflowErrorResponse},
+        404: {"model": WorkflowErrorResponse},
+        422: {"model": WorkflowErrorResponse},
+    },
+)
+async def bulk_reassign_ta(
+    req_id: int,
+    request: BulkReassignRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin")),
+    user_roles: List[str] = Depends(get_current_user_roles),
+):
+    """
+    Bulk reassign items from one TA to another.
+
+    Atomic operation — all items are updated in a single transaction.
+    If item_ids is omitted, ALL active items assigned to old_ta_id
+    under this requisition are reassigned.
+
+    Authorized: HR, Admin
+    Requires: reason (min 5 chars), old_ta_id != new_ta_id
+    """
+    try:
+        updated_items = RequisitionItemWorkflowEngine.bulk_reassign(
+            db=db,
+            req_id=req_id,
+            old_ta_id=request.old_ta_id,
+            new_ta_id=request.new_ta_id,
+            user_id=current_user.user_id,
+            user_roles=user_roles,
+            reason=request.reason,
+            item_ids=request.item_ids,
+        )
+        db.commit()
+
+        # Notification after successful commit
+        from services import notification_service
+        notification_service.send(
+            request.new_ta_id,
+            f"{len(updated_items)} item(s) from requisition #{req_id} "
+            f"have been reassigned to you. Reason: {request.reason}",
+        )
+
+        return BulkReassignResponse(
+            reassigned_count=len(updated_items),
+            req_id=req_id,
+            items=[
+                BulkReassignItemResult(
+                    item_id=item.item_id,
+                    role_position=item.role_position,
+                    old_ta_id=request.old_ta_id,
+                    new_ta_id=request.new_ta_id,
+                )
+                for item in updated_items
+            ],
         )
     except WorkflowException as e:
         db.rollback()
@@ -1116,6 +1210,14 @@ async def swap_ta(
             reason=request.reason,
         )
         db.commit()
+
+        # Notification after successful commit
+        from services import notification_service
+        notification_service.send(
+            request.new_ta_id,
+            f"Item #{item_id} ({updated_item.role_position}) has been "
+            f"reassigned to you. Reason: {request.reason}",
+        )
         
         return WorkflowTransitionResponse(
             entity_id=updated_item.item_id,
@@ -1307,6 +1409,171 @@ async def reject_item_budget(
             approved_budget=None,
             currency=updated_item.currency,
             budget_status='rejected',
+        )
+    except WorkflowException as e:
+        db.rollback()
+        raise handle_workflow_exception(e)
+
+
+# ============================================================================
+# INLINE TA REASSIGNMENT ROUTERS (Phase 7 — exact URLs per spec)
+# ============================================================================
+#
+# POST /api/requisition-items/{item_id}/reassign   (item-level)
+# POST /api/requisitions/{req_id}/bulk-reassign     (bulk)
+#
+# These sit *outside* the /workflow/ prefix so they match the spec URLs.
+# They delegate to the same engine methods used by the /workflow/ endpoints.
+# ============================================================================
+
+class ReassignItemRequest(BaseModel):
+    """Item-level TA reassignment request."""
+    new_ta_id: int = Field(..., gt=0)
+    reason: str = Field(..., min_length=5, max_length=2000)
+
+
+class ReassignItemResponse(BaseModel):
+    """Item-level TA reassignment response."""
+    success: bool = True
+    item_id: int
+    role_position: str
+    old_ta_id: Optional[int]
+    new_ta_id: int
+
+
+item_reassign_router = APIRouter(
+    prefix="/requisition-items/{item_id}",
+    tags=["TA Reassignment"],
+)
+
+requisition_reassign_router = APIRouter(
+    prefix="/requisitions/{req_id}",
+    tags=["TA Reassignment"],
+)
+
+
+@item_reassign_router.post(
+    "/reassign",
+    response_model=ReassignItemResponse,
+    responses={
+        400: {"model": WorkflowErrorResponse},
+        403: {"model": WorkflowErrorResponse},
+        404: {"model": WorkflowErrorResponse},
+    },
+)
+async def reassign_item_ta(
+    item_id: int,
+    request: ReassignItemRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin")),
+    user_roles: List[str] = Depends(get_current_user_roles),
+):
+    """
+    Reassign (or assign) the TA for a single requisition item.
+
+    Delegates to the existing swap_ta engine method which:
+    - Validates role (HR / Admin)
+    - Validates reason >= 5 chars
+    - Checks item is non-terminal
+    - Locks the row with FOR UPDATE
+    - Writes audit log inside the transaction
+
+    After commit, sends notification to the new TA.
+
+    URL: POST /api/requisition-items/{item_id}/reassign
+    Authorized: HR, Admin
+    """
+    try:
+        item = RequisitionItemWorkflowEngine._get_locked_item(db, item_id)
+        old_ta_id = item.assigned_ta
+
+        updated_item = RequisitionItemWorkflowEngine.swap_ta(
+            db=db,
+            item_id=item_id,
+            new_ta_id=request.new_ta_id,
+            user_id=current_user.user_id,
+            user_roles=user_roles,
+            reason=request.reason,
+        )
+        db.commit()
+
+        # Notification after commit
+        from services import notification_service
+        notification_service.send(
+            request.new_ta_id,
+            f"Item #{item_id} ({updated_item.role_position}) has been "
+            f"reassigned to you. Reason: {request.reason}",
+        )
+
+        return ReassignItemResponse(
+            item_id=updated_item.item_id,
+            role_position=updated_item.role_position,
+            old_ta_id=old_ta_id,
+            new_ta_id=request.new_ta_id,
+        )
+    except WorkflowException as e:
+        db.rollback()
+        raise handle_workflow_exception(e)
+
+
+@requisition_reassign_router.post(
+    "/bulk-reassign",
+    response_model=BulkReassignResponse,
+    responses={
+        400: {"model": WorkflowErrorResponse},
+        403: {"model": WorkflowErrorResponse},
+        404: {"model": WorkflowErrorResponse},
+        422: {"model": WorkflowErrorResponse},
+    },
+)
+async def bulk_reassign_ta_inline(
+    req_id: int,
+    request: BulkReassignRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("HR", "Admin")),
+    user_roles: List[str] = Depends(get_current_user_roles),
+):
+    """
+    Bulk reassign items from one TA to another within a requisition.
+
+    Atomic — all items in a single transaction.
+    Delegates to RequisitionItemWorkflowEngine.bulk_reassign.
+
+    URL: POST /api/requisitions/{req_id}/bulk-reassign
+    Authorized: HR, Admin
+    """
+    try:
+        updated_items = RequisitionItemWorkflowEngine.bulk_reassign(
+            db=db,
+            req_id=req_id,
+            old_ta_id=request.old_ta_id,
+            new_ta_id=request.new_ta_id,
+            user_id=current_user.user_id,
+            user_roles=user_roles,
+            reason=request.reason,
+            item_ids=request.item_ids,
+        )
+        db.commit()
+
+        from services import notification_service
+        notification_service.send(
+            request.new_ta_id,
+            f"{len(updated_items)} item(s) from requisition #{req_id} "
+            f"have been reassigned to you. Reason: {request.reason}",
+        )
+
+        return BulkReassignResponse(
+            reassigned_count=len(updated_items),
+            req_id=req_id,
+            items=[
+                BulkReassignItemResult(
+                    item_id=item.item_id,
+                    role_position=item.role_position,
+                    old_ta_id=request.old_ta_id,
+                    new_ta_id=request.new_ta_id,
+                )
+                for item in updated_items
+            ],
         )
     except WorkflowException as e:
         db.rollback()

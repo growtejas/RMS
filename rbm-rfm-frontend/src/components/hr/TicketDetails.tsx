@@ -1,5 +1,5 @@
 // components/hr/TicketDetail.tsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   ArrowLeft,
   Calendar,
@@ -27,9 +27,16 @@ import {
   MapPin,
   ChevronDown,
   ChevronUp,
+  DollarSign,
+  UserCog,
+  ArrowRightLeft,
 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
 import { apiClient } from "../../api/client";
+import HRGatekeeperPanel from "./HRGatekeeperPanel";
+import ReassignTAModal from "./ReassignTAModal";
+import type { Requisition as WorkflowRequisition, RequisitionItem as WorkflowRequisitionItem } from "../../types/workflow";
+import { useAuth } from "../../contexts/AuthContext";
 
 interface TicketDetailsProps {
   ticketId?: string | null;
@@ -51,6 +58,7 @@ interface Employee {
 
 interface RequisitionItem {
   id: string;
+  numericItemId: number;
   skill: string;
   level: string;
   experience: number;
@@ -59,6 +67,7 @@ interface RequisitionItem {
   assignedEmployeeId?: string;
   assignedEmployeeName?: string;
   assignedDate?: string;
+  assignedTAId?: number | null;
   description: string;
   requirements?: string;
 }
@@ -117,6 +126,7 @@ interface BackendRequisitionItem {
   job_description: string;
   requirements?: string | null;
   item_status: string;
+  assigned_ta?: number | null;
 }
 
 interface BackendRequisition {
@@ -176,12 +186,21 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
 }) => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const effectiveTicketId = ticketId ?? id;
+
+  // Check if user is HR or Admin for Gatekeeper access
+  const isHRRole = (user?.roles || []).some(
+    (r) => r.toLowerCase() === "hr" || r.toLowerCase() === "admin"
+  );
+
+  // Raw requisition data for Gatekeeper panel
+  const [rawRequisition, setRawRequisition] = useState<WorkflowRequisition | null>(null);
   const getTodayDate = () =>
     new Date().toISOString().split("T")[0] ?? new Date().toISOString();
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "overview" | "items" | "employees" | "timeline"
+    "overview" | "items" | "employees" | "timeline" | "gatekeeper"
   >("overview");
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
   const [selectedItemForAssignment, setSelectedItemForAssignment] = useState<
@@ -194,6 +213,21 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
   const [usersById, setUsersById] = useState<Record<number, string>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // ---- Phase 7: TA Reassignment state ----
+  const [reassignModal, setReassignModal] = useState<{
+    mode: "item" | "bulk";
+    itemId?: number;
+    itemLabel?: string;
+    currentTAId: number | null;
+  } | null>(null);
+  const [bulkOldTAId, setBulkOldTAId] = useState<number | null>(null);
+
+  /** TA users extracted from usersById (populated after fetch) */
+  const taUsersList = Object.entries(usersById).map(([id, username]) => ({
+    user_id: Number(id),
+    username,
+  }));
 
   const parseReqId = (value?: string | null) => {
     if (!value) return null;
@@ -244,11 +278,13 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       items:
         req.items?.map((item) => ({
           id: `ITEM-${item.item_id}`,
+          numericItemId: item.item_id,
           skill: item.role_position,
           level: item.skill_level ?? "—",
           experience: item.experience_years ?? 0,
           education: item.education_requirement ?? "—",
           itemStatus: item.item_status,
+          assignedTAId: item.assigned_ta ?? null,
           description: item.job_description,
           requirements: item.requirements ?? undefined,
         })) ?? [],
@@ -340,7 +376,89 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
           `/requisitions/${reqId}`,
         );
         if (isMounted) {
-          setTicket(buildTicket(response.data));
+          const data = response.data;
+          setTicket(buildTicket(data));
+          
+          // Store raw data for Gatekeeper panel
+          const workflowReq: WorkflowRequisition = {
+            req_id: data.req_id,
+            project_name: data.project_name ?? null,
+            client_name: data.client_name ?? null,
+            overall_status: data.overall_status as WorkflowRequisition["overall_status"],
+            required_by_date: data.required_by_date ?? null,
+            priority: data.priority ?? null,
+            budget_amount: data.budget_amount ?? null,
+            created_at: data.created_at ?? null,
+            work_mode: data.work_mode ?? null,
+            office_location: data.office_location ?? null,
+            justification: data.justification ?? null,
+            duration: data.duration ?? null,
+            is_replacement: null,
+            manager_notes: null,
+            rejection_reason: null,
+            jd_file_key: null,
+            raised_by: data.raised_by ?? 0,
+            assigned_ta: data.assigned_ta ?? null,
+            budget_approved_by: data.budget_approved_by ?? null,
+            approved_by: data.approved_by ?? null,
+            approval_history: data.approval_history ?? null,
+            assigned_at: data.assigned_at ?? null,
+            total_items: data.items?.length ?? 0,
+            fulfilled_items: data.items?.filter((i) => i.item_status === "Fulfilled").length ?? 0,
+            cancelled_items: data.items?.filter((i) => i.item_status === "Cancelled").length ?? 0,
+            active_items: data.items?.filter((i) => i.item_status !== "Fulfilled" && i.item_status !== "Cancelled").length ?? 0,
+            progress_ratio: null,
+            progress_text: null,
+            total_estimated_budget: 0,
+            total_approved_budget: 0,
+            budget_approval_status: null,
+            items: (data.items || []).map((item) => {
+              const extItem = item as BackendRequisitionItem & {
+                estimated_budget?: number | null;
+                approved_budget?: number | null;
+                currency?: string | null;
+                replacement_hire?: boolean;
+                replaced_emp_id?: string | null;
+                assigned_ta?: number | null;
+                assigned_emp_id?: string | null;
+              };
+              return {
+                item_id: item.item_id,
+                req_id: item.req_id,
+                role_position: item.role_position,
+                skill_level: item.skill_level ?? null,
+                experience_years: item.experience_years ?? null,
+                education_requirement: item.education_requirement ?? null,
+                job_description: item.job_description,
+                requirements: item.requirements ?? null,
+                item_status: item.item_status as WorkflowRequisitionItem["item_status"],
+                replacement_hire: extItem.replacement_hire ?? false,
+                replaced_emp_id: extItem.replaced_emp_id ?? null,
+                estimated_budget: extItem.estimated_budget ?? null,
+                approved_budget: extItem.approved_budget ?? null,
+                currency: extItem.currency ?? "INR",
+                assigned_ta: extItem.assigned_ta ?? null,
+                assigned_emp_id: extItem.assigned_emp_id ?? null,
+              };
+            }),
+          };
+          
+          // Calculate totals
+          workflowReq.total_estimated_budget = workflowReq.items.reduce(
+            (sum, item) => sum + (item.estimated_budget || 0),
+            0
+          );
+          workflowReq.total_approved_budget = workflowReq.items.reduce(
+            (sum, item) => sum + (item.approved_budget || 0),
+            0
+          );
+          
+          setRawRequisition(workflowReq);
+          
+          // Auto-switch to Gatekeeper tab if status is Pending_Budget and user is HR
+          if (data.overall_status === "Pending_Budget" && isHRRole) {
+            setActiveTab("gatekeeper");
+          }
         }
       } catch (err) {
         if (!isMounted) return;
@@ -401,6 +519,105 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       isMounted = false;
     };
   }, [effectiveTicketId]);
+
+  // Refresh data callback for Gatekeeper panel
+  // IMPORTANT: This hook must be called before any early returns
+  const handleRefreshData = useCallback(async () => {
+    const reqId = parseReqId(effectiveTicketId);
+    if (!reqId) return;
+
+    try {
+      // Phase 7: Add cache-busting timestamp to ensure fresh data after reassignment
+      const response = await apiClient.get<BackendRequisition>(
+        `/requisitions/${reqId}?_t=${Date.now()}`,
+      );
+      const data = response.data;
+      setTicket(buildTicket(data));
+
+      // Update raw data for Gatekeeper panel
+      const workflowReq: WorkflowRequisition = {
+        req_id: data.req_id,
+        project_name: data.project_name ?? null,
+        client_name: data.client_name ?? null,
+        overall_status: data.overall_status as WorkflowRequisition["overall_status"],
+        required_by_date: data.required_by_date ?? null,
+        priority: data.priority ?? null,
+        budget_amount: data.budget_amount ?? null,
+        created_at: data.created_at ?? null,
+        work_mode: data.work_mode ?? null,
+        office_location: data.office_location ?? null,
+        justification: data.justification ?? null,
+        duration: data.duration ?? null,
+        is_replacement: null,
+        manager_notes: null,
+        rejection_reason: null,
+        jd_file_key: null,
+        raised_by: data.raised_by ?? 0,
+        assigned_ta: data.assigned_ta ?? null,
+        budget_approved_by: data.budget_approved_by ?? null,
+        approved_by: data.approved_by ?? null,
+        approval_history: data.approval_history ?? null,
+        assigned_at: data.assigned_at ?? null,
+        total_items: data.items?.length ?? 0,
+        fulfilled_items: data.items?.filter((i) => i.item_status === "Fulfilled").length ?? 0,
+        cancelled_items: data.items?.filter((i) => i.item_status === "Cancelled").length ?? 0,
+        active_items: data.items?.filter((i) => i.item_status !== "Fulfilled" && i.item_status !== "Cancelled").length ?? 0,
+        progress_ratio: null,
+        progress_text: null,
+        total_estimated_budget: 0,
+        total_approved_budget: 0,
+        budget_approval_status: null,
+        items: (data.items || []).map((item) => {
+          const extItem = item as BackendRequisitionItem & {
+            estimated_budget?: number | null;
+            approved_budget?: number | null;
+            currency?: string | null;
+            replacement_hire?: boolean;
+            replaced_emp_id?: string | null;
+            assigned_ta?: number | null;
+            assigned_emp_id?: string | null;
+          };
+          return {
+            item_id: item.item_id,
+            req_id: item.req_id,
+            role_position: item.role_position,
+            skill_level: item.skill_level ?? null,
+            experience_years: item.experience_years ?? null,
+            education_requirement: item.education_requirement ?? null,
+            job_description: item.job_description,
+            requirements: item.requirements ?? null,
+            item_status: item.item_status as WorkflowRequisitionItem["item_status"],
+            replacement_hire: extItem.replacement_hire ?? false,
+            replaced_emp_id: extItem.replaced_emp_id ?? null,
+            estimated_budget: extItem.estimated_budget ?? null,
+            approved_budget: extItem.approved_budget ?? null,
+            currency: extItem.currency ?? "INR",
+            assigned_ta: extItem.assigned_ta ?? null,
+            assigned_emp_id: extItem.assigned_emp_id ?? null,
+          };
+        }),
+      };
+
+      workflowReq.total_estimated_budget = workflowReq.items.reduce(
+        (sum, item) => sum + (item.estimated_budget || 0),
+        0
+      );
+      workflowReq.total_approved_budget = workflowReq.items.reduce(
+        (sum, item) => sum + (item.approved_budget || 0),
+        0
+      );
+
+      setRawRequisition(workflowReq);
+
+      // If status changed from Pending_Budget, switch to overview
+      if (data.overall_status !== "Pending_Budget" && activeTab === "gatekeeper") {
+        setActiveTab("overview");
+      }
+    } catch (err) {
+      // Silent refresh error
+      console.error("Failed to refresh requisition:", err);
+    }
+  }, [effectiveTicketId, activeTab]);
 
   if (isLoading) {
     return (
@@ -667,8 +884,23 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
     setNewNote("");
   };
 
+  // Check if Gatekeeper tab should be shown
+  const showGatekeeperTab =
+    isHRRole &&
+    (ticket?.overallStatus === "Pending_Budget" ||
+      ticket?.overallStatus === "Pending Budget Approval");
+
   // Tabs
   const tabs = [
+    ...(showGatekeeperTab
+      ? [
+          {
+            id: "gatekeeper" as const,
+            label: "Gatekeeper",
+            icon: <DollarSign size={16} />,
+          },
+        ]
+      : []),
     {
       id: "overview" as const,
       label: "Overview",
@@ -902,6 +1134,17 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       </div>
 
       {/* Content based on active tab */}
+      {activeTab === "gatekeeper" && rawRequisition && (
+        <HRGatekeeperPanel
+          requisition={rawRequisition}
+          onRefresh={handleRefreshData}
+          onApprovalComplete={() => {
+            // Refresh data and switch to overview after approval completes
+            handleRefreshData();
+          }}
+        />
+      )}
+
       {activeTab === "overview" && (
         <div
           style={{
@@ -1276,11 +1519,56 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
 
       {activeTab === "items" && (
         <div className="master-data-manager">
-          <div className="data-manager-header">
-            <h2>Requisition Items Management</h2>
-            <p className="subtitle">
-              Manage individual positions - Update status or assign resources
-            </p>
+          <div className="data-manager-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <h2>Requisition Items Management</h2>
+              <p className="subtitle">
+                Manage individual positions - Update status or assign resources
+              </p>
+            </div>
+
+            {/* Phase 7: Bulk Change TA — HR Admin only */}
+            {isHRRole && ticket.items.some(
+              (i) => i.itemStatus !== "Fulfilled" && i.itemStatus !== "Cancelled" && i.assignedTAId,
+            ) && (
+              <button
+                className="action-button"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  fontSize: "13px",
+                  padding: "10px 16px",
+                  whiteSpace: "nowrap",
+                }}
+                onClick={() => {
+                  // Find the most common currently assigned TA for pre-selection
+                  const taCounts: Record<number, number> = {};
+                  ticket.items.forEach((i) => {
+                    if (
+                      i.assignedTAId &&
+                      i.itemStatus !== "Fulfilled" &&
+                      i.itemStatus !== "Cancelled"
+                    ) {
+                      taCounts[i.assignedTAId] =
+                        (taCounts[i.assignedTAId] ?? 0) + 1;
+                    }
+                  });
+                  const topTA = Object.entries(taCounts).sort(
+                    (a, b) => b[1] - a[1],
+                  )[0];
+                  const defaultOldTA = topTA ? Number(topTA[0]) : null;
+                  setBulkOldTAId(defaultOldTA);
+                  setReassignModal({
+                    mode: "bulk",
+                    currentTAId: defaultOldTA,
+                  });
+                }}
+              >
+                <ArrowRightLeft size={14} />
+                Bulk Change TA
+              </button>
+            )}
           </div>
 
           <div
@@ -1360,6 +1648,29 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                             ? `👤 Assigned: ${item.assignedEmployeeName}`
                             : "👤 Unassigned"}
                         </span>
+                        {/* TA Badge */}
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            padding: "2px 8px",
+                            borderRadius: "6px",
+                            backgroundColor: item.assignedTAId
+                              ? "rgba(59, 130, 246, 0.08)"
+                              : "rgba(245, 158, 11, 0.08)",
+                            color: item.assignedTAId
+                              ? "var(--primary-accent)"
+                              : "var(--warning)",
+                            fontSize: "11px",
+                            fontWeight: 500,
+                          }}
+                        >
+                          <UserCog size={10} />
+                          {item.assignedTAId
+                            ? `TA: ${usersById[item.assignedTAId] ?? `#${item.assignedTAId}`}`
+                            : "No TA Assigned"}
+                        </span>
                       </div>
                     </div>
 
@@ -1370,6 +1681,33 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                         gap: "8px",
                       }}
                     >
+                      {/* Phase 7: Change TA / Assign TA — HR Admin only, non-terminal items */}
+                      {isHRRole &&
+                        item.itemStatus !== "Fulfilled" &&
+                        item.itemStatus !== "Cancelled" && (
+                          <button
+                            className="action-button"
+                            style={{
+                              fontSize: "12px",
+                              padding: "8px 12px",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                            }}
+                            onClick={() =>
+                              setReassignModal({
+                                mode: "item",
+                                itemId: item.numericItemId,
+                                itemLabel: `${item.skill} (Item #${item.numericItemId})`,
+                                currentTAId: item.assignedTAId ?? null,
+                              })
+                            }
+                          >
+                            <ArrowRightLeft size={12} />
+                            {item.assignedTAId ? "Change TA" : "Assign TA"}
+                          </button>
+                        )}
+
                       {item.itemStatus === "Pending" && (
                         <button
                           className="action-button primary"
@@ -2651,20 +2989,31 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       </div> */}
 
       {/* Help Section */}
-      <div
-      // style={{
-      //   marginTop: "16px",
-      //   padding: "12px",
-      //   backgroundColor: "var(--bg-secondary)",
-      //   borderRadius: "8px",
-      //   border: "1px solid var(--border-subtle)",
-      //   fontSize: "11px",
-      //   color: "var(--text-tertiary)",
-      //   textAlign: "center",
-      // }}
-      >
-        <strong></strong>
-      </div>
+      {/* Phase 7: TA Reassignment Modal */}
+      {reassignModal && (
+        <ReassignTAModal
+          mode={reassignModal.mode}
+          reqId={parseReqId(effectiveTicketId) ?? 0}
+          itemId={reassignModal.itemId}
+          itemLabel={reassignModal.itemLabel}
+          currentTAId={reassignModal.currentTAId}
+          oldTAId={reassignModal.mode === "bulk" ? bulkOldTAId : undefined}
+          taUsers={taUsersList}
+          usersById={usersById}
+          activeItemCount={
+            reassignModal.mode === "bulk" && bulkOldTAId
+              ? ticket.items.filter(
+                  (i) =>
+                    i.assignedTAId === bulkOldTAId &&
+                    i.itemStatus !== "Fulfilled" &&
+                    i.itemStatus !== "Cancelled",
+                ).length
+              : undefined
+          }
+          onSuccess={handleRefreshData}
+          onClose={() => setReassignModal(null)}
+        />
+      )}
     </div>
   );
 };

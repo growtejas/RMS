@@ -112,28 +112,27 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
       try {
         setIsLoading(true);
         setError(null);
+        // Phase 7: Add cache-busting to ensure fresh data after reassignment
         const response = await apiClient.get<BackendRequisition[]>(
-          "/requisitions?my_assignments=true",
+          `/requisitions?my_assignments=true&_t=${Date.now()}`,
         );
         if (!isMounted) return;
-        const mapped = (response.data ?? [])
-          .filter((req) =>
-            currentUserId ? req.assigned_ta === currentUserId : true,
-          )
-          .map((req) => {
-            const primaryRole = req.items?.[0]?.role_position ?? "—";
-            return {
-              id: `REQ-${req.req_id}`,
-              project: req.project_name ?? "—",
-              role: primaryRole,
-              status: req.overall_status ?? "—",
-              priority: req.priority ?? "—",
-              slaDaysRemaining: Math.max(
-                0,
-                getSlaDaysRemaining(req.created_at),
-              ),
-            };
-          });
+        // Phase 7: Backend already filters by item-level assigned_ta,
+        // so no need to filter by header-level assigned_ta here
+        const mapped = (response.data ?? []).map((req) => {
+          const primaryRole = req.items?.[0]?.role_position ?? "—";
+          return {
+            id: `REQ-${req.req_id}`,
+            project: req.project_name ?? "—",
+            role: primaryRole,
+            status: req.overall_status ?? "—",
+            priority: req.priority ?? "—",
+            slaDaysRemaining: Math.max(
+              0,
+              getSlaDaysRemaining(req.created_at),
+            ),
+          };
+        });
         setRequisitions(mapped);
       } catch (err) {
         if (!isMounted) return;
@@ -146,9 +145,17 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
     };
 
     fetchRequisitions();
+    
+    // Phase 7: Listen for TA reassignment events to refresh the list
+    const handleReassignment = () => {
+      fetchRequisitions();
+    };
+    
+    window.addEventListener("requisition-reassigned", handleReassignment);
 
     return () => {
       isMounted = false;
+      window.removeEventListener("requisition-reassigned", handleReassignment);
     };
   }, [currentUserId]);
 

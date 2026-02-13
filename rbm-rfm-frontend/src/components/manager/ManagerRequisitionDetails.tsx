@@ -18,15 +18,6 @@ import {
 } from "lucide-react";
 import { apiClient } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
-import type { RequisitionStatus } from "../../types/workflow";
-import {
-  normalizeStatus,
-  getStatusLabel,
-  getStatusClass,
-} from "../../types/workflow";
-import { StatusBadge } from "../common/StatusBadge";
-import "../../styles/hr/hr-dashboard.css";
-import "../../styles/manager/manager-detail.css";
 
 // Types
 interface RequisitionItem {
@@ -38,7 +29,6 @@ interface RequisitionItem {
   job_description: string;
   requirements?: string | null;
   item_status: string;
-  // Item-level budget fields
   estimated_budget?: number | null;
   approved_budget?: number | null;
   currency?: string;
@@ -53,12 +43,11 @@ interface Requisition {
   required_by_date?: string | null;
   priority?: string | null;
   justification?: string | null;
-  // DEPRECATED: Header-level budget - use computed totals instead
   budget_amount?: number | null;
   duration?: string | null;
   is_replacement?: boolean | null;
   manager_notes?: string | null;
-  overall_status: RequisitionStatus;
+  overall_status: string;
   raised_by: number;
   raised_by_name?: string | null;
   jd_file_key?: string | null;
@@ -69,7 +58,6 @@ interface Requisition {
   budget_approved_at?: string | null;
   hr_approved_by?: number | null;
   hr_approved_at?: string | null;
-  // Computed budget totals (from items)
   total_estimated_budget?: number | null;
   total_approved_budget?: number | null;
   budget_approval_status?: "none" | "pending" | "partial" | "approved" | null;
@@ -85,6 +73,68 @@ interface StatusHistoryEntry {
   changed_at: string;
   justification?: string | null;
   comments?: string | null;
+}
+
+interface WorkflowAuditRecord {
+  id: number;
+  entity_type: "requisition" | "requisition_item";
+  entity_id: number;
+  from_status: string | null;
+  to_status: string;
+  action: string;
+  performed_by?: number | null;
+  performed_by_username?: string | null;
+  performed_by_full_name?: string | null;
+  reason?: string | null;
+  transition_metadata?: string | null;
+  created_at: string;
+}
+
+interface WorkflowAuditResponse {
+  entries: Array<{
+    audit_id: number;
+    entity_type: "requisition" | "requisition_item";
+    entity_id: number;
+    action: string;
+    from_status: string;
+    to_status: string;
+    performed_by?: number | null;
+    performed_by_username?: string | null;
+    performed_by_full_name?: string | null;
+    reason?: string | null;
+    transition_metadata?: string | null;
+    created_at: string;
+  }>;
+}
+
+interface GenericAuditLog {
+  audit_id: number;
+  entity_name: string;
+  entity_id: string;
+  action: string;
+  performed_by_username?: string | null;
+  performed_by_full_name?: string | null;
+  old_value?: unknown;
+  new_value?: unknown;
+  performed_at: string;
+}
+
+type TimelinePhase =
+  | "Creation"
+  | "Budget"
+  | "Authorization"
+  | "Assignment"
+  | "Recruitment"
+  | "Workflow";
+
+interface MasterTimelineEvent {
+  id: string;
+  timestamp: string;
+  phase: TimelinePhase;
+  title: string;
+  description: string;
+  actor?: string | null;
+  reason?: string | null;
 }
 
 interface ItemFormData {
@@ -112,41 +162,44 @@ interface RequisitionFormData {
   items: ItemFormData[];
 }
 
-/** Axios-shaped error for typed catch blocks. */
-interface ApiError {
-  response?: {
-    data?: {
-      detail?: string | Array<{ msg?: string }>;
-      [key: string]: unknown;
-    };
+// Status helpers
+const normalizeStatus = (status: string): string => {
+  const statusMap: Record<string, string> = {
+    draft: "Draft",
+    pending: "Pending Budget Approval",
+    budget_approved: "Budget Approved",
+    hr_review: "HR Review",
+    hr_approved: "HR Approved",
+    fulfilled: "Fulfilled",
+    rejected: "Rejected",
+    cancelled: "Cancelled",
   };
-}
+  return statusMap[status.toLowerCase()] || status;
+};
 
-/** Extract a user-facing message from an Axios error. */
-function extractErrorMessage(err: unknown, fallback: string): string {
-  const apiErr = err as ApiError;
-  const detail = apiErr?.response?.data?.detail;
+const getStatusLabel = (status: string): string => {
+  return normalizeStatus(status);
+};
 
-  if (Array.isArray(detail)) {
-    return (
-      detail
-        .map((item) => item?.msg || JSON.stringify(item))
-        .filter(Boolean)
-        .join("\n") || fallback
-    );
-  }
-  if (typeof detail === "string") {
-    return detail;
-  }
-  if (apiErr?.response?.data) {
-    try {
-      return JSON.stringify(apiErr.response.data);
-    } catch {
-      // keep fallback
-    }
-  }
-  return fallback;
-}
+const getStatusClass = (status: string): string => {
+  const normalized = normalizeStatus(status).toLowerCase();
+  if (normalized.includes("draft")) return "bg-slate-100 text-slate-700";
+  if (normalized.includes("pending")) return "bg-amber-100 text-amber-700";
+  if (normalized.includes("approved")) return "bg-green-100 text-green-700";
+  if (normalized.includes("rejected")) return "bg-red-100 text-red-700";
+  if (normalized.includes("cancelled")) return "bg-gray-100 text-gray-700";
+  return "bg-blue-100 text-blue-700";
+};
+
+const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
+  const label = getStatusLabel(status);
+  const className = getStatusClass(status);
+  return (
+    <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${className}`}>
+      {label}
+    </span>
+  );
+};
 
 // Date formatting
 const formatDate = (value?: string | null) => {
@@ -183,64 +236,120 @@ const formatCurrency = (amount?: number | null) => {
   }).format(amount);
 };
 
-// Timeline component
-interface TimelineProps {
-  history: StatusHistoryEntry[];
+const getPhaseStyle = (phase: TimelinePhase): { bg: string; border: string; dot: string; text: string } => {
+  switch (phase) {
+    case "Creation":
+      return { bg: "bg-indigo-50", border: "border-indigo-200", dot: "bg-indigo-500", text: "text-indigo-700" };
+    case "Budget":
+      return { bg: "bg-emerald-50", border: "border-emerald-200", dot: "bg-emerald-500", text: "text-emerald-700" };
+    case "Authorization":
+      return { bg: "bg-blue-50", border: "border-blue-200", dot: "bg-blue-500", text: "text-blue-700" };
+    case "Assignment":
+      return { bg: "bg-violet-50", border: "border-violet-200", dot: "bg-violet-500", text: "text-violet-700" };
+    case "Recruitment":
+      return { bg: "bg-amber-50", border: "border-amber-200", dot: "bg-amber-500", text: "text-amber-700" };
+    default:
+      return { bg: "bg-slate-50", border: "border-slate-200", dot: "bg-slate-500", text: "text-slate-700" };
+  }
+};
+
+const getInitials = (name: string): string => {
+  if (!name || name.startsWith("User ")) return "U";
+  return name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+};
+
+const formatRelativeTime = (dateStr: string): string => {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+};
+
+interface MasterTimelineProps {
+  events: MasterTimelineEvent[];
 }
 
-const Timeline: React.FC<TimelineProps> = ({ history }) => {
-  const getTimelineColor = (status: string): string => {
-    const normalized = normalizeStatus(status);
-    const cls = getStatusClass(normalized);
-    if (cls.includes("rejected") || cls.includes("cancelled"))
-      return "var(--error)";
-    if (cls.includes("fulfilled") || cls.includes("active"))
-      return "var(--success)";
-    if (cls.includes("pending")) return "var(--warning)";
-    return "var(--primary-accent)";
-  };
+const MasterTimeline: React.FC<MasterTimelineProps> = ({ events }) => {
+  if (events.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-500">
+        No activity recorded yet.
+      </div>
+    );
+  }
 
   return (
-    <div className="milestone-timeline">
-      {history.map((entry, index) => (
-        <div className="milestone-row" key={entry.history_id}>
-          <div className="milestone-track">
-            <div
-              className="milestone-node"
-              style={{
-                backgroundColor: getTimelineColor(entry.new_status),
-              }}
-            />
-            {index < history.length - 1 && <div className="milestone-line" />}
-          </div>
-          <div className="milestone-card">
-            <div className="milestone-title">
-              {getStatusLabel(entry.new_status)}
+    <div className="relative">
+      {events.map((event, index) => {
+        const phaseStyle = getPhaseStyle(event.phase);
+        const isLast = index === events.length - 1;
+
+        return (
+          <div key={event.id} className="relative flex gap-4 pb-6">
+            {/* Timeline track */}
+            <div className="flex flex-col items-center">
+              <div
+                className={`w-3 h-3 rounded-full ${phaseStyle.dot} ring-4 ring-white z-10`}
+              />
+              {!isLast && (
+                <div className="w-0.5 flex-1 bg-gray-200 -mt-1" />
+              )}
             </div>
-            <div className="milestone-meta">
-              <div className="milestone-avatar">
-                {entry.changed_by_name?.charAt(0) || "U"}
+
+            {/* Event card */}
+            <div className={`flex-1 ${phaseStyle.bg} ${phaseStyle.border} border rounded-lg p-4 -mt-1`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <h4 className={`font-semibold ${phaseStyle.text}`}>
+                    {event.title}
+                  </h4>
+                  <p className="text-sm text-gray-600 mt-1">{event.description}</p>
+                </div>
               </div>
-              <span className="milestone-actor">
-                {entry.changed_by_name || `User ${entry.changed_by}`}
-              </span>
-              <span className="milestone-time">
-                {formatDateTime(entry.changed_at)}
-              </span>
+
+              <div className="flex items-center gap-3 mt-3">
+                {event.actor && (
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`w-6 h-6 rounded-full ${phaseStyle.dot} text-white text-xs font-medium flex items-center justify-center`}
+                    >
+                      {getInitials(event.actor)}
+                    </div>
+                    <span className="text-sm text-gray-700 font-medium">
+                      {event.actor}
+                    </span>
+                  </div>
+                )}
+                <span className="text-xs text-gray-500 ml-auto">
+                  {formatRelativeTime(event.timestamp)} · {formatDateTime(event.timestamp)}
+                </span>
+              </div>
+
+              {event.reason && (
+                <div className="mt-3 p-3 bg-white/60 rounded-md border border-gray-100">
+                  <div className="text-xs font-medium text-gray-500 mb-1">
+                    Notes / Reason
+                  </div>
+                  <p className="text-sm text-gray-700">{event.reason}</p>
+                </div>
+              )}
             </div>
-            {entry.justification && (
-              <div className="milestone-note">
-                <strong>Reason:</strong> {entry.justification}
-              </div>
-            )}
-            {entry.comments && (
-              <div className="milestone-note">
-                <strong>Comments:</strong> {entry.comments}
-              </div>
-            )}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };
@@ -254,6 +363,7 @@ const ManagerRequisitionDetails: React.FC = () => {
   // State
   const [requisition, setRequisition] = useState<Requisition | null>(null);
   const [statusHistory, setStatusHistory] = useState<StatusHistoryEntry[]>([]);
+  const [masterTimeline, setMasterTimeline] = useState<MasterTimelineEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -284,6 +394,328 @@ const ManagerRequisitionDetails: React.FC = () => {
     return status === "Draft";
   }, [requisition, user]);
 
+  /**
+   * Map workflow engine action to timeline phase.
+   * Actions match exactly what workflow_engine_v2.py logs.
+   */
+  const inferPhaseFromAction = useCallback((action: string): TimelinePhase => {
+    // Exact action names from workflow_engine_v2.py
+    const budgetActions = [
+      "SUBMIT",
+      "APPROVE_BUDGET",
+      "ALL_BUDGETS_APPROVED",
+      "ITEM_BUDGET_EDITED",
+      "ITEM_BUDGET_APPROVED",
+      "ITEM_BUDGET_REJECTED",
+    ];
+    const authorizationActions = ["APPROVE_HR"];
+    const assignmentActions = [
+      "TA_ASSIGN",
+      "TA_ASSIGN_AUTO_SOURCING",
+      "SWAP_TA",
+    ];
+    const recruitmentActions = [
+      "SHORTLIST",
+      "START_INTERVIEW",
+      "MAKE_OFFER",
+      "FULFILL",
+      "OFFER_DECLINED",
+      "RE_SOURCE",
+      "RETURN_TO_SHORTLIST",
+    ];
+    const workflowActions = [
+      "REJECT",
+      "CANCEL",
+      "REOPEN_FOR_REVISION",
+      "AUTO_RECALCULATE",
+    ];
+
+    const upper = action.toUpperCase();
+
+    if (budgetActions.includes(upper)) return "Budget";
+    if (authorizationActions.includes(upper)) return "Authorization";
+    if (assignmentActions.includes(upper)) return "Assignment";
+    if (recruitmentActions.includes(upper)) return "Recruitment";
+    if (workflowActions.includes(upper)) return "Workflow";
+
+    // Fallback for status history events
+    const normalized = action.toLowerCase();
+    if (normalized.includes("pending_budget") || normalized.includes("budget")) {
+      return "Budget";
+    }
+    if (normalized.includes("pending_hr") || normalized.includes("active")) {
+      return "Authorization";
+    }
+    return "Workflow";
+  }, []);
+
+  /**
+   * Map workflow engine action to a business-friendly title.
+   * Actions match exactly what workflow_engine_v2.py logs.
+   */
+  const actionLabel = useCallback((action: string): string => {
+    const labelMap: Record<string, string> = {
+      // Header actions
+      SUBMIT: "Requisition Submitted for Budget Approval",
+      APPROVE_BUDGET: "Budget Approved (Header)",
+      APPROVE_HR: "HR Authorization Granted",
+      REJECT: "Requisition Rejected",
+      CANCEL: "Requisition Cancelled",
+      REOPEN_FOR_REVISION: "Reopened for Revision",
+      AUTO_RECALCULATE: "Status Auto-Recalculated",
+      ALL_BUDGETS_APPROVED: "All Item Budgets Cleared",
+
+      // Item budget actions
+      ITEM_BUDGET_EDITED: "Item Budget Edited",
+      ITEM_BUDGET_APPROVED: "Item Budget Approved",
+      ITEM_BUDGET_REJECTED: "Item Budget Rejected",
+
+      // Assignment actions
+      TA_ASSIGN: "TA Assigned",
+      TA_ASSIGN_AUTO_SOURCING: "TA Assigned (Auto-Sourcing Started)",
+      SWAP_TA: "TA Reassigned",
+
+      // Recruitment actions
+      SHORTLIST: "Candidates Shortlisted",
+      START_INTERVIEW: "Interview Process Started",
+      MAKE_OFFER: "Offer Extended",
+      FULFILL: "Position Fulfilled",
+      OFFER_DECLINED: "Offer Declined",
+      RE_SOURCE: "Returned to Sourcing",
+      RETURN_TO_SHORTLIST: "Returned to Shortlist",
+    };
+
+    const upper = action.toUpperCase();
+    if (labelMap[upper]) {
+      return labelMap[upper];
+    }
+
+    // Fallback: format as title case
+    return action
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }, []);
+
+  /**
+   * Build business-friendly description for workflow events.
+   * Based on exact actions from workflow_engine_v2.py
+   */
+  const buildWorkflowDescription = useCallback(
+    (
+      action: string,
+      entityType: "requisition" | "requisition_item",
+      entityId: number,
+      fromStatus: string | null,
+      toStatus: string
+    ): string => {
+      const upper = action.toUpperCase();
+      const isItem = entityType === "requisition_item";
+      const entityRef = isItem ? `Item #${entityId}` : "Requisition";
+
+      // Business-friendly descriptions per action
+      const descriptionMap: Record<string, string> = {
+        // Header actions
+        SUBMIT: "Requisition submitted for budget review.",
+        APPROVE_BUDGET: "Header-level budget approved. Moved to HR review.",
+        APPROVE_HR: "HR authorization granted. Requisition is now Active.",
+        REJECT: `${entityRef} was rejected.`,
+        CANCEL: `${entityRef} was cancelled.`,
+        REOPEN_FOR_REVISION:
+          "Requisition reopened for revision after rejection.",
+        AUTO_RECALCULATE:
+          "Status automatically recalculated based on item changes.",
+        ALL_BUDGETS_APPROVED:
+          "All item budgets have been approved. Requisition moved to HR review.",
+
+        // Item budget actions
+        ITEM_BUDGET_EDITED: `Budget for ${entityRef} was edited.`,
+        ITEM_BUDGET_APPROVED: `Budget for ${entityRef} was approved.`,
+        ITEM_BUDGET_REJECTED: `Budget for ${entityRef} was rejected. Revision required.`,
+
+        // Assignment actions
+        TA_ASSIGN: `Talent Acquisition assigned to ${entityRef}.`,
+        TA_ASSIGN_AUTO_SOURCING: `TA assigned to ${entityRef}. Sourcing started automatically.`,
+        SWAP_TA: `TA reassigned for ${entityRef}.`,
+
+        // Recruitment actions
+        SHORTLIST: `Candidates shortlisted for ${entityRef}.`,
+        START_INTERVIEW: `Interview process started for ${entityRef}.`,
+        MAKE_OFFER: `Offer extended for ${entityRef}.`,
+        FULFILL: `${entityRef} fulfilled. Employee assigned.`,
+        OFFER_DECLINED: `Offer declined for ${entityRef}. Returning to interview stage.`,
+        RE_SOURCE: `${entityRef} returned to sourcing for more candidates.`,
+        RETURN_TO_SHORTLIST: `${entityRef} returned to shortlist stage.`,
+      };
+
+      if (descriptionMap[upper]) {
+        return descriptionMap[upper];
+      }
+
+      // Fallback: generic transition description
+      if (fromStatus && toStatus && fromStatus !== toStatus) {
+        return `${entityRef} moved from ${fromStatus} to ${toStatus}.`;
+      }
+      return `${entityRef}: ${actionLabel(action)}.`;
+    },
+    [actionLabel]
+  );
+
+  const buildMasterTimeline = useCallback(
+    (
+      reqData: Requisition,
+      reqStatusHistory: StatusHistoryEntry[],
+      reqWorkflowAudit: WorkflowAuditRecord[],
+      itemWorkflowAudit: WorkflowAuditRecord[],
+      reqAuditLogs: GenericAuditLog[],
+      itemAuditLogs: GenericAuditLog[]
+    ): MasterTimelineEvent[] => {
+      const events: MasterTimelineEvent[] = [];
+      const seenKeys = new Set<string>();
+
+      // Helper to avoid duplicates
+      const addEvent = (event: MasterTimelineEvent) => {
+        const key = `${event.phase}-${event.timestamp}-${event.title}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          events.push(event);
+        }
+      };
+
+      // Phase 1: Creation - Requisition raised
+      addEvent({
+        id: `creation-${reqData.req_id}`,
+        timestamp: reqData.created_at,
+        phase: "Creation",
+        title: "Requisition Raised",
+        description: `Requisition REQ-${reqData.req_id} created${
+          reqData.project_name ? ` for project "${reqData.project_name}"` : ""
+        }${reqData.client_name ? ` (Client: ${reqData.client_name})` : ""}.`,
+        actor: reqData.raised_by_name ?? `User ${reqData.raised_by}`,
+      });
+
+      // Helper to resolve actor name from workflow audit entry
+      const resolveActor = (entry: WorkflowAuditRecord): string => {
+        if (entry.performed_by_full_name) return entry.performed_by_full_name;
+        if (entry.performed_by_username) return entry.performed_by_username;
+        if (entry.performed_by) return `User #${entry.performed_by}`;
+        return "System";
+      };
+
+      // Workflow audit events (requisition-level) - these are the source of truth
+      reqWorkflowAudit.forEach((entry) => {
+        addEvent({
+          id: `wf-req-${entry.id}`,
+          timestamp: entry.created_at,
+          phase: inferPhaseFromAction(entry.action),
+          title: actionLabel(entry.action),
+          description: buildWorkflowDescription(
+            entry.action,
+            "requisition",
+            entry.entity_id,
+            entry.from_status,
+            entry.to_status
+          ),
+          actor: resolveActor(entry),
+          reason: entry.reason ?? null,
+        });
+      });
+
+      // Workflow audit events (item-level)
+      itemWorkflowAudit.forEach((entry) => {
+        addEvent({
+          id: `wf-item-${entry.id}`,
+          timestamp: entry.created_at,
+          phase: inferPhaseFromAction(entry.action),
+          title: actionLabel(entry.action),
+          description: buildWorkflowDescription(
+            entry.action,
+            "requisition_item",
+            entry.entity_id,
+            entry.from_status,
+            entry.to_status
+          ),
+          actor: resolveActor(entry),
+          reason: entry.reason ?? null,
+        });
+      });
+
+      // Status history (fallback for older events or supplementary info)
+      // Only include if workflow audit doesn't already cover this transition
+      reqStatusHistory.forEach((entry) => {
+        const transitionKey = `${entry.old_status ?? "null"}->${entry.new_status}`;
+        const alreadyCovered = reqWorkflowAudit.some(
+          (wf) =>
+            wf.from_status === entry.old_status &&
+            wf.to_status === entry.new_status &&
+            Math.abs(
+              new Date(wf.created_at).getTime() -
+                new Date(entry.changed_at).getTime()
+            ) < 60000 // within 1 minute
+        );
+
+        if (!alreadyCovered) {
+          addEvent({
+            id: `status-${entry.history_id}`,
+            timestamp: entry.changed_at,
+            phase: inferPhaseFromAction(entry.new_status),
+            title: `Status: ${actionLabel(entry.new_status)}`,
+            description: entry.old_status
+              ? `Requisition transitioned from ${entry.old_status} to ${entry.new_status}.`
+              : `Requisition status set to ${entry.new_status}.`,
+            actor: entry.changed_by_name ?? `User ${entry.changed_by}`,
+            reason: entry.justification ?? entry.comments ?? null,
+          });
+        }
+      });
+
+      // Generic audit logs (supplementary - for non-workflow actions like field edits)
+      [...reqAuditLogs, ...itemAuditLogs].forEach((log) => {
+        // Skip if it looks like a workflow action we already covered
+        const upper = log.action.toUpperCase();
+        const isWorkflowAction = [
+          "SUBMIT",
+          "APPROVE_BUDGET",
+          "APPROVE_HR",
+          "REJECT",
+          "CANCEL",
+          "ITEM_BUDGET_EDITED",
+          "ITEM_BUDGET_APPROVED",
+          "ITEM_BUDGET_REJECTED",
+          "TA_ASSIGN",
+          "TA_ASSIGN_AUTO_SOURCING",
+          "SHORTLIST",
+          "START_INTERVIEW",
+          "MAKE_OFFER",
+          "FULFILL",
+        ].includes(upper);
+
+        if (!isWorkflowAction) {
+          const entityRef =
+            log.entity_name === "requisition_item"
+              ? `Item #${log.entity_id}`
+              : `Requisition #${log.entity_id}`;
+
+          addEvent({
+            id: `audit-${log.audit_id}`,
+            timestamp: log.performed_at,
+            phase: inferPhaseFromAction(log.action),
+            title: actionLabel(log.action),
+            description: `${entityRef}: ${actionLabel(log.action)}.`,
+            actor:
+              log.performed_by_full_name ?? log.performed_by_username ?? "System",
+          });
+        }
+      });
+
+      // Sort by timestamp descending (most recent first)
+      return events.sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+    },
+    [actionLabel, inferPhaseFromAction, buildWorkflowDescription]
+  );
+
   // Fetch data
   useEffect(() => {
     if (!id) {
@@ -297,20 +729,83 @@ const ManagerRequisitionDetails: React.FC = () => {
         setIsLoading(true);
         setError(null);
 
-        const [requisitionRes, historyRes] = await Promise.all([
+        const [requisitionRes, historyRes, reqWorkflowAuditRes, reqAuditLogsRes] =
+          await Promise.all([
           apiClient.get<Requisition>(`/requisitions/${id}`),
           apiClient.get<StatusHistoryEntry[]>(
-            `/requisitions/${id}/status-history`,
+            `/requisitions/${id}/status-history`
           ),
+          apiClient
+            .get<WorkflowAuditResponse>(`/workflow/audit/${id}`, {
+              params: { include_items: true, page: 1, page_size: 200 },
+            })
+            .catch(() => ({ data: { entries: [] } })),
+          apiClient
+            .get<GenericAuditLog[]>(`/audit-logs/`, {
+              params: { entity_name: "requisition", entity_id: id },
+            })
+            .catch(() => ({ data: [] })),
         ]);
 
-        setRequisition(requisitionRes.data);
+        const reqData = requisitionRes.data;
+        const workflowEntries = (reqWorkflowAuditRes.data.entries || []).map(
+          (entry) => ({
+            id: entry.audit_id,
+            entity_type: entry.entity_type,
+            entity_id: entry.entity_id,
+            from_status: entry.from_status,
+            to_status: entry.to_status,
+            action: entry.action,
+            performed_by: entry.performed_by ?? null,
+            performed_by_username: entry.performed_by_username ?? null,
+            performed_by_full_name: entry.performed_by_full_name ?? null,
+            reason: entry.reason ?? null,
+            transition_metadata: entry.transition_metadata ?? null,
+            created_at: entry.created_at,
+          })
+        );
+        const reqWorkflowAudit = workflowEntries.filter(
+          (entry) => entry.entity_type === "requisition"
+        );
+        const itemWorkflowAudit = workflowEntries.filter(
+          (entry) => entry.entity_type === "requisition_item"
+        );
+
+        const itemIds = reqData.items.map((item) => item.item_id);
+        const itemAuditLogResponses = await Promise.all(
+          itemIds.map((itemId) =>
+            apiClient
+              .get<GenericAuditLog[]>(`/audit-logs/`, {
+                params: {
+                  entity_name: "requisition_item",
+                  entity_id: String(itemId),
+                },
+              })
+              .catch(() => ({ data: [] }))
+          )
+        );
+
+        const itemAuditLogs = itemAuditLogResponses.flatMap(
+          (response) => response.data ?? []
+        );
+
+        setRequisition(reqData);
         setStatusHistory(historyRes.data || []);
+        setMasterTimeline(
+          buildMasterTimeline(
+            reqData,
+            historyRes.data || [],
+            reqWorkflowAudit,
+            itemWorkflowAudit,
+            reqAuditLogsRes.data || [],
+            itemAuditLogs
+          )
+        );
       } catch (err: unknown) {
         const axiosErr = err as { response?: { data?: { detail?: string } } };
         setError(
           axiosErr.response?.data?.detail ||
-            "Failed to load requisition details",
+            "Failed to load requisition details"
         );
       } finally {
         setIsLoading(false);
@@ -318,7 +813,7 @@ const ManagerRequisitionDetails: React.FC = () => {
     };
 
     fetchData();
-  }, [id]);
+  }, [id, buildMasterTimeline]);
 
   // Handle before unload for unsaved changes
   useEffect(() => {
@@ -374,7 +869,7 @@ const ManagerRequisitionDetails: React.FC = () => {
     if (
       hasUnsavedChanges &&
       !window.confirm(
-        "You have unsaved changes. Are you sure you want to cancel?",
+        "You have unsaved changes. Are you sure you want to cancel?"
       )
     ) {
       return;
@@ -388,7 +883,7 @@ const ManagerRequisitionDetails: React.FC = () => {
   // Update form field
   const handleFieldChange = <K extends keyof RequisitionFormData>(
     field: K,
-    value: RequisitionFormData[K],
+    value: RequisitionFormData[K]
   ) => {
     if (!formData) return;
     setFormData({ ...formData, [field]: value });
@@ -399,7 +894,7 @@ const ManagerRequisitionDetails: React.FC = () => {
   const handleItemUpdate = (
     index: number,
     field: keyof ItemFormData,
-    value: string | number,
+    value: string | number
   ) => {
     if (!formData) return;
 
@@ -511,16 +1006,79 @@ const ManagerRequisitionDetails: React.FC = () => {
 
       await apiClient.put(`/requisitions/${requisition.req_id}`, payload);
 
-      // Refresh data
-      const [requisitionRes, historyRes] = await Promise.all([
+      // Refresh data (including master timeline sources)
+      const [requisitionRes, historyRes, reqWorkflowAuditRes, reqAuditLogsRes] =
+        await Promise.all([
         apiClient.get<Requisition>(`/requisitions/${id}`),
         apiClient.get<StatusHistoryEntry[]>(
-          `/requisitions/${id}/status-history`,
+          `/requisitions/${id}/status-history`
         ),
+        apiClient
+          .get<WorkflowAuditResponse>(`/workflow/audit/${id}`, {
+            params: { include_items: true, page: 1, page_size: 200 },
+          })
+          .catch(() => ({ data: { entries: [] } })),
+        apiClient
+          .get<GenericAuditLog[]>(`/audit-logs/`, {
+            params: { entity_name: "requisition", entity_id: id },
+          })
+          .catch(() => ({ data: [] })),
       ]);
 
-      setRequisition(requisitionRes.data);
+      const reqData = requisitionRes.data;
+      const workflowEntries = (reqWorkflowAuditRes.data.entries || []).map(
+        (entry) => ({
+          id: entry.audit_id,
+          entity_type: entry.entity_type,
+          entity_id: entry.entity_id,
+          from_status: entry.from_status,
+          to_status: entry.to_status,
+          action: entry.action,
+          performed_by: entry.performed_by ?? null,
+          performed_by_username: entry.performed_by_username ?? null,
+          performed_by_full_name: entry.performed_by_full_name ?? null,
+          reason: entry.reason ?? null,
+          transition_metadata: entry.transition_metadata ?? null,
+          created_at: entry.created_at,
+        })
+      );
+      const reqWorkflowAudit = workflowEntries.filter(
+        (entry) => entry.entity_type === "requisition"
+      );
+      const itemWorkflowAudit = workflowEntries.filter(
+        (entry) => entry.entity_type === "requisition_item"
+      );
+
+      const itemIds = reqData.items.map((item) => item.item_id);
+      const itemAuditLogResponses = await Promise.all(
+        itemIds.map((itemId) =>
+          apiClient
+            .get<GenericAuditLog[]>(`/audit-logs/`, {
+              params: {
+                entity_name: "requisition_item",
+                entity_id: String(itemId),
+              },
+            })
+            .catch(() => ({ data: [] }))
+        )
+      );
+
+      const itemAuditLogs = itemAuditLogResponses.flatMap(
+        (response) => response.data ?? []
+      );
+
+      setRequisition(reqData);
       setStatusHistory(historyRes.data || []);
+      setMasterTimeline(
+        buildMasterTimeline(
+          reqData,
+          historyRes.data || [],
+          reqWorkflowAudit,
+          itemWorkflowAudit,
+          reqAuditLogsRes.data || [],
+          itemAuditLogs
+        )
+      );
 
       setSaveMessage({
         type: "success",
@@ -534,7 +1092,7 @@ const ManagerRequisitionDetails: React.FC = () => {
     } catch (err: unknown) {
       setSaveMessage({
         type: "error",
-        message: extractErrorMessage(err, "Failed to update requisition"),
+        message: "Failed to update requisition",
       });
     } finally {
       setIsSaving(false);
@@ -546,20 +1104,22 @@ const ManagerRequisitionDetails: React.FC = () => {
     if (!requisition?.jd_file_key) return;
 
     try {
-      const response = await apiClient.get(
+      const response = await apiClient.get<any>(
         `/requisitions/${requisition.req_id}/jd`,
         {
           responseType: "blob",
-        },
+        }
       );
 
-      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const blob = new Blob([response.data as BlobPart], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.setAttribute("download", `JD_REQ-${requisition.req_id}.pdf`);
       document.body.appendChild(link);
       link.click();
       link.remove();
+      window.URL.revokeObjectURL(url);
     } catch (err) {
       setSaveMessage({
         type: "error",
@@ -611,12 +1171,12 @@ const ManagerRequisitionDetails: React.FC = () => {
           headers: {
             "Content-Type": "multipart/form-data",
           },
-        },
+        }
       );
 
       const jdKey = response.data?.jd_file_key ?? requisition.jd_file_key;
       setRequisition((prev) =>
-        prev ? { ...prev, jd_file_key: jdKey || prev.jd_file_key } : prev,
+        prev ? { ...prev, jd_file_key: jdKey || prev.jd_file_key } : prev
       );
       setJdFile(null);
       setJdInputKey((prev) => prev + 1);
@@ -630,7 +1190,7 @@ const ManagerRequisitionDetails: React.FC = () => {
     } catch (err: unknown) {
       setSaveMessage({
         type: "error",
-        message: extractErrorMessage(err, "Failed to upload job description"),
+        message: "Failed to upload job description",
       });
     } finally {
       setIsUploadingJd(false);
@@ -656,7 +1216,7 @@ const ManagerRequisitionDetails: React.FC = () => {
     } catch (err: unknown) {
       setSaveMessage({
         type: "error",
-        message: extractErrorMessage(err, "Failed to remove job description"),
+        message: "Failed to remove job description",
       });
     } finally {
       setIsRemovingJd(false);
@@ -666,10 +1226,10 @@ const ManagerRequisitionDetails: React.FC = () => {
   // Loading state
   if (isLoading) {
     return (
-      <div className="admin-content-area">
-        <div className="loading-container">
-          <div className="spinner"></div>
-          <p>Loading requisition details...</p>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-4"></div>
+          <p className="text-gray-600">Loading requisition details...</p>
         </div>
       </div>
     );
@@ -678,16 +1238,18 @@ const ManagerRequisitionDetails: React.FC = () => {
   // Error state
   if (error || !requisition) {
     return (
-      <div className="admin-content-area">
-        <div className="empty-state">
-          <AlertCircle size={48} />
-          <h3>Unable to Load Requisition</h3>
-          <p>{error || "Requisition not found"}</p>
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            Unable to Load Requisition
+          </h3>
+          <p className="text-gray-600 mb-6">{error || "Requisition not found"}</p>
           <button
-            className="action-button primary"
             onClick={() => navigate(-1)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
           >
-            <ArrowLeft size={16} />
+            <ArrowLeft className="h-4 w-4" />
             Back to List
           </button>
         </div>
@@ -696,897 +1258,1028 @@ const ManagerRequisitionDetails: React.FC = () => {
   }
 
   return (
-    <div className="admin-content-area">
-      {/* Sticky Header */}
-      <div className="manager-header sticky-header">
-        <div className="manager-header-row">
-          <div className="manager-header-left">
-            <button
-              className="action-button"
-              onClick={() => navigate(-1)}
-              style={{ minWidth: "100px" }}
-            >
-              <ArrowLeft size={16} />
-              Back
-            </button>
-
-            <div>
-              <h1 style={{ fontSize: "24px", marginBottom: "4px" }}>
-                REQ-{requisition.req_id}
-              </h1>
-              <div className="manager-header-meta">
-                <StatusBadge status={requisition.overall_status} />
-                <span className="meta-text">
-                  Created: {formatDate(requisition.created_at)}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="manager-header-actions">
-            {!isEditing ? (
-              <button
-                className={`action-button ${canEdit ? "primary" : ""}`}
-                onClick={handleEditStart}
-                disabled={!canEdit}
-                title={
-                  canEdit
-                    ? "Edit requisition"
-                    : "Editing is locked. HR has already acted on this requisition."
-                }
-              >
-                {canEdit ? <Edit size={16} /> : <Lock size={16} />}
-                {canEdit ? "Edit Requisition" : "Editing Locked"}
-              </button>
-            ) : (
-              <div className="manager-header-actions">
-                {hasUnsavedChanges && (
-                  <span className="unsaved-indicator">
-                    <AlertCircle size={12} />
-                    Unsaved changes
-                  </span>
-                )}
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+        {/* Sticky Header */}
+        <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-gray-200 rounded-t-xl -mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+          <div className="py-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="flex items-center gap-4">
                 <button
-                  className="action-button"
-                  onClick={handleEditCancel}
-                  disabled={isSaving}
+                  onClick={() => navigate(-1)}
+                  className="inline-flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
                 >
-                  <X size={16} />
-                  Cancel
+                  <ArrowLeft className="h-4 w-4" />
+                  <span className="text-sm font-medium">Back</span>
                 </button>
-                <button
-                  className="action-button primary"
-                  onClick={handleSave}
-                  disabled={isSaving}
-                >
-                  {isSaving ? (
-                    <>
-                      <div className="spinner-small" />
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      <Save size={16} />
-                      Save Changes
-                    </>
-                  )}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Save message */}
-        {saveMessage && (
-          <div
-            className={`save-message ${saveMessage.type === "success" ? "save-message--success" : "save-message--error"}`}
-          >
-            <div className="save-message-content">
-              {saveMessage.type === "success" ? (
-                <CheckCircle size={16} />
-              ) : (
-                <AlertCircle size={16} />
-              )}
-              <span>{saveMessage.message}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Permission warning */}
-        {!canEdit && !isEditing && (
-          <div className="save-message save-message--warning">
-            <div className="save-message-content">
-              <Lock size={16} />
-              <span>
-                <strong>Editing is locked.</strong> This requisition has
-                progressed beyond the point where manager edits are allowed.
-              </span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Quick Stats */}
-      <div className="admin-metrics">
-        <div className="stat-card">
-          <div className="stat-icon-wrapper users">
-            <Calendar size={20} />
-          </div>
-          <span className="stat-number">
-            {formatDate(requisition.required_by_date)}
-          </span>
-          <span className="stat-label">Required By</span>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon-wrapper total-employees">
-            <DollarSign size={20} />
-          </div>
-          <span className="stat-number">
-            {formatCurrency(requisition.total_estimated_budget ?? requisition.budget_amount)}
-          </span>
-          <span className="stat-label">Total Estimated</span>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon-wrapper uptime">
-            <DollarSign size={20} />
-          </div>
-          <span className="stat-number">
-            {formatCurrency(requisition.total_approved_budget)}
-          </span>
-          <span className="stat-label">Total Approved</span>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon-wrapper total-departments">
-            <Briefcase size={20} />
-          </div>
-          <span className="stat-number">{requisition.items.length}</span>
-          <span className="stat-label">Positions</span>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon-wrapper">
-            <Clock size={20} />
-          </div>
-          <span className="stat-number">{requisition.duration || "—"}</span>
-          <span className="stat-label">Duration</span>
-        </div>
-      </div>
-
-      <div className="manager-detail-grid">
-        {/* Left Column - Main Details */}
-        <div className="manager-detail-main">
-          {/* Basic Information */}
-          <div className="master-data-manager">
-            <div className="data-manager-header">
-              <h3>Basic Information</h3>
-              <p className="subtitle">Core requisition details</p>
-            </div>
-
-            {!isEditing ? (
-              <div className="field-grid">
                 <div>
-                  <div className="field-label">Project Name</div>
-                  <div className="field-value--bold">
-                    {requisition.project_name || "—"}
-                  </div>
-                </div>
-                <div>
-                  <div className="field-label">Client Name</div>
-                  <div className="field-value">
-                    {requisition.client_name || "—"}
-                  </div>
-                </div>
-                <div>
-                  <div className="field-label">Required By Date</div>
-                  <div className="field-value">
-                    {formatDate(requisition.required_by_date)}
-                  </div>
-                </div>
-                <div>
-                  <div className="field-label">Priority</div>
-                  <div>
-                    <span
-                      className={`priority-indicator priority-${requisition.priority?.toLowerCase()}`}
-                    >
-                      {requisition.priority || "Medium"}
+                  <h1 className="text-2xl font-bold text-gray-900">
+                    REQ-{requisition.req_id}
+                  </h1>
+                  <div className="flex items-center gap-3 mt-1">
+                    <StatusBadge status={requisition.overall_status} />
+                    <span className="text-sm text-gray-500">
+                      Created: {formatDate(requisition.created_at)}
                     </span>
                   </div>
                 </div>
               </div>
-            ) : (
-              formData && (
-                <div className="field-grid">
-                  <div className="form-field">
-                    <label>Project Name *</label>
-                    <input
-                      value={formData.project_name}
-                      onChange={(e) =>
-                        handleFieldChange("project_name", e.target.value)
-                      }
-                      placeholder="Enter project name"
-                    />
-                  </div>
-                  <div className="form-field">
-                    <label>Client Name</label>
-                    <input
-                      value={formData.client_name}
-                      onChange={(e) =>
-                        handleFieldChange("client_name", e.target.value)
-                      }
-                      placeholder="Enter client name"
-                    />
-                  </div>
-                  <div className="form-field">
-                    <label>Required By Date *</label>
-                    <input
-                      type="date"
-                      value={formData.required_by_date}
-                      onChange={(e) =>
-                        handleFieldChange("required_by_date", e.target.value)
-                      }
-                      min={new Date().toISOString().split("T")[0]}
-                    />
-                  </div>
-                  <div className="form-field">
-                    <label>Priority</label>
-                    <select
-                      value={formData.priority}
-                      onChange={(e) =>
-                        handleFieldChange("priority", e.target.value)
-                      }
-                    >
-                      <option value="Low">Low</option>
-                      <option value="Medium">Medium</option>
-                      <option value="High">High</option>
-                      <option value="Critical">Critical</option>
-                    </select>
-                  </div>
-                </div>
-              )
-            )}
-          </div>
 
-          {/* Project Details */}
-          <div className="master-data-manager">
-            <div className="data-manager-header">
-              <h3>Project Details</h3>
-              <p className="subtitle">Work arrangement and location</p>
-            </div>
-
-            {!isEditing ? (
-              <div className="field-grid">
-                <div>
-                  <div className="field-label">Work Mode</div>
-                  <div className="field-value">
-                    {requisition.work_mode || "—"}
-                  </div>
-                </div>
-                <div>
-                  <div className="field-label">Office Location</div>
-                  <div className="field-value">
-                    {requisition.office_location || "—"}
-                  </div>
-                </div>
-                <div>
-                  <div className="field-label">Duration</div>
-                  <div className="field-value">
-                    {requisition.duration || "—"}
-                  </div>
-                </div>
-                <div>
-                  <div className="field-label">Replacement Position</div>
-                  <div className="field-value">
-                    {requisition.is_replacement ? "Yes" : "No"}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              formData && (
-                <div className="field-grid">
-                  <div className="form-field">
-                    <label>Work Mode</label>
-                    <select
-                      value={formData.work_mode}
-                      onChange={(e) =>
-                        handleFieldChange("work_mode", e.target.value)
-                      }
-                    >
-                      <option value="Remote">Remote</option>
-                      <option value="Hybrid">Hybrid</option>
-                      <option value="On-site">On-site</option>
-                    </select>
-                  </div>
-                  <div className="form-field">
-                    <label>Office Location</label>
-                    <input
-                      value={formData.office_location}
-                      onChange={(e) =>
-                        handleFieldChange("office_location", e.target.value)
-                      }
-                      placeholder="Enter office location"
-                    />
-                  </div>
-                  <div className="form-field">
-                    <label>Duration</label>
-                    <input
-                      value={formData.duration}
-                      onChange={(e) =>
-                        handleFieldChange("duration", e.target.value)
-                      }
-                      placeholder="e.g., 6 months, 1 year"
-                    />
-                  </div>
-                  <div className="form-field">
-                    <label>Replacement Position</label>
-                    <select
-                      value={formData.is_replacement ? "yes" : "no"}
-                      onChange={(e) =>
-                        handleFieldChange(
-                          "is_replacement",
-                          e.target.value === "yes",
-                        )
-                      }
-                    >
-                      <option value="no">No</option>
-                      <option value="yes">Yes</option>
-                    </select>
-                  </div>
-                </div>
-              )
-            )}
-          </div>
-
-          {/* Skills Required */}
-          <div className="master-data-manager">
-            <div className="data-manager-header">
-              <h3>Skills Required</h3>
-              <p className="subtitle">Position requirements and descriptions</p>
-            </div>
-
-            {!isEditing ? (
-              requisition.items.length === 0 ? (
-                <div className="empty-state">
-                  <AlertCircle size={32} />
-                  <p>No positions added</p>
-                </div>
-              ) : (
-                <div className="position-card-list">
-                  {requisition.items.map((item, index) => (
-                    <div key={item.item_id} className="position-card">
-                      <div className="position-card-header">
-                        <div>
-                          <h4 className="position-card-title">
-                            {item.role_position}
-                          </h4>
-                          <div className="position-card-meta">
-                            <span className="position-badge">
-                              {item.skill_level || "Not specified"}
-                            </span>
-                            <span className="meta-text">
-                              {item.experience_years || "—"} years experience
-                            </span>
-                            <span className="meta-text">
-                              {item.education_requirement || "—"}
-                            </span>
-                          </div>
-                        </div>
-                        <span className="position-number">
-                          Position {index + 1}
-                        </span>
-                      </div>
-
-                      {/* Item Budget Section */}
-                      <div className="position-section" style={{ backgroundColor: "#f8fafc", borderRadius: "6px", padding: "12px", marginTop: "12px" }}>
-                        <div className="position-section-label" style={{ marginBottom: "8px", fontWeight: 600 }}>
-                          <DollarSign size={14} style={{ display: "inline", marginRight: "4px", verticalAlign: "middle" }} />
-                          Budget
-                        </div>
-                        <div style={{ display: "flex", gap: "24px", flexWrap: "wrap" }}>
-                          <div>
-                            <span style={{ fontSize: "12px", color: "#64748b" }}>Estimated: </span>
-                            <span style={{ fontWeight: 500 }}>
-                              {item.estimated_budget != null
-                                ? `${item.currency || "INR"} ${item.estimated_budget.toLocaleString()}`
-                                : "—"}
-                            </span>
-                          </div>
-                          <div>
-                            <span style={{ fontSize: "12px", color: "#64748b" }}>Approved: </span>
-                            <span style={{ fontWeight: 500, color: item.approved_budget != null ? "#16a34a" : "#64748b" }}>
-                              {item.approved_budget != null
-                                ? `${item.currency || "INR"} ${item.approved_budget.toLocaleString()}`
-                                : "Pending"}
-                            </span>
-                          </div>
-                          <div>
-                            <span
-                              style={{
-                                fontSize: "11px",
-                                padding: "2px 8px",
-                                borderRadius: "9999px",
-                                backgroundColor: item.approved_budget != null ? "#dcfce7" : "#fef3c7",
-                                color: item.approved_budget != null ? "#166534" : "#92400e",
-                              }}
-                            >
-                              {item.approved_budget != null ? "Approved" : "Pending Approval"}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="position-section">
-                        <div className="position-section-label">
-                          Job Description
-                        </div>
-                        <p className="position-section-text">
-                          {item.job_description}
-                        </p>
-                      </div>
-
-                      {item.requirements && (
-                        <div className="position-section">
-                          <div className="position-section-label">
-                            Additional Requirements
-                          </div>
-                          <p className="position-section-text">
-                            {item.requirements}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )
-            ) : (
-              formData && (
-                <div className="position-card-list">
-                  {formData.items.map((item, index) => (
-                    <div
-                      key={index}
-                      className="position-card position-card--editing"
-                    >
-                      <div className="position-edit-header">
-                        <h4 className="position-edit-title">
-                          Position {index + 1}
-                        </h4>
-                        {formData.items.length > 1 && (
-                          <button
-                            type="button"
-                            className="position-remove-btn"
-                            onClick={() => handleRemoveItem(index)}
-                          >
-                            Remove
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="field-grid">
-                        <div className="form-field">
-                          <label>Role / Position *</label>
-                          <input
-                            value={item.role_position}
-                            onChange={(e) =>
-                              handleItemUpdate(
-                                index,
-                                "role_position",
-                                e.target.value,
-                              )
-                            }
-                            placeholder="e.g., Senior Frontend Developer"
-                          />
-                        </div>
-                        <div className="form-field">
-                          <label>Skill Level</label>
-                          <select
-                            value={item.skill_level}
-                            onChange={(e) =>
-                              handleItemUpdate(
-                                index,
-                                "skill_level",
-                                e.target.value,
-                              )
-                            }
-                          >
-                            <option value="Junior">Junior</option>
-                            <option value="Mid">Mid</option>
-                            <option value="Senior">Senior</option>
-                            <option value="Lead">Lead</option>
-                            <option value="Architect">Architect</option>
-                          </select>
-                        </div>
-                        <div className="form-field">
-                          <label>Experience (years)</label>
-                          <input
-                            type="number"
-                            min="0"
-                            max="50"
-                            value={item.experience_years}
-                            onChange={(e) =>
-                              handleItemUpdate(
-                                index,
-                                "experience_years",
-                                parseInt(e.target.value) || 0,
-                              )
-                            }
-                          />
-                        </div>
-                        <div className="form-field">
-                          <label>Education Requirement</label>
-                          <input
-                            value={item.education_requirement}
-                            onChange={(e) =>
-                              handleItemUpdate(
-                                index,
-                                "education_requirement",
-                                e.target.value,
-                              )
-                            }
-                            placeholder="e.g., B.Tech, MBA"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="form-field mt-4">
-                        <label>Job Description *</label>
-                        <textarea
-                          rows={3}
-                          value={item.job_description}
-                          onChange={(e) =>
-                            handleItemUpdate(
-                              index,
-                              "job_description",
-                              e.target.value,
-                            )
-                          }
-                          placeholder="Describe the role responsibilities..."
-                        />
-                      </div>
-
-                      <div className="form-field mt-4">
-                        <label>Additional Requirements</label>
-                        <textarea
-                          rows={2}
-                          value={item.requirements}
-                          onChange={(e) =>
-                            handleItemUpdate(
-                              index,
-                              "requirements",
-                              e.target.value,
-                            )
-                          }
-                          placeholder="Any specific certifications, skills, or requirements..."
-                        />
-                      </div>
-                    </div>
-                  ))}
-
+              <div className="flex items-center gap-3">
+                {!isEditing ? (
                   <button
-                    type="button"
-                    className="action-button"
-                    onClick={handleAddItem}
+                    onClick={handleEditStart}
+                    disabled={!canEdit}
+                    title={
+                      canEdit
+                        ? "Edit requisition"
+                        : "Editing is locked. HR has already acted on this requisition."
+                    }
+                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                      canEdit
+                        ? "bg-indigo-600 text-white hover:bg-indigo-700"
+                        : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                    }`}
                   >
-                    <Briefcase size={16} />
-                    Add Another Position
+                    {canEdit ? (
+                      <Edit className="h-4 w-4" />
+                    ) : (
+                      <Lock className="h-4 w-4" />
+                    )}
+                    <span>{canEdit ? "Edit Requisition" : "Editing Locked"}</span>
                   </button>
-                </div>
-              )
-            )}
-          </div>
-
-          {/* Budget & Justification */}
-          <div className="master-data-manager">
-            <div className="data-manager-header">
-              <h3>Budget Summary & Justification</h3>
-              <p className="subtitle">Computed budget totals and business case</p>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    {hasUnsavedChanges && (
+                      <span className="inline-flex items-center gap-1 text-amber-600">
+                        <AlertCircle className="h-3 w-3" />
+                        <span className="text-xs font-medium">Unsaved changes</span>
+                      </span>
+                    )}
+                    <button
+                      onClick={handleEditCancel}
+                      disabled={isSaving}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium transition-colors"
+                    >
+                      <X className="h-4 w-4" />
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSave}
+                      disabled={isSaving}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 rounded-lg font-medium transition-colors"
+                    >
+                      {isSaving ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="h-4 w-4" />
+                          Save Changes
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {!isEditing ? (
-              <div className="budget-section-stack">
-                {/* Computed Budget Summary */}
-                <div style={{ backgroundColor: "#f0fdf4", borderRadius: "8px", padding: "16px", marginBottom: "16px" }}>
-                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#166534", marginBottom: "12px" }}>
-                    Budget Overview (Computed from Items)
-                  </div>
-                  <div className="field-grid">
-                    <div>
-                      <div className="field-label">Total Estimated</div>
-                      <div className="field-value--bold" style={{ color: "#1e40af" }}>
-                        {formatCurrency(requisition.total_estimated_budget ?? requisition.budget_amount)}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="field-label">Total Approved</div>
-                      <div className="field-value--bold" style={{ color: "#16a34a" }}>
-                        {formatCurrency(requisition.total_approved_budget)}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="field-label">Approval Status</div>
-                      <div className="field-value">
-                        <span
-                          style={{
-                            fontSize: "12px",
-                            padding: "4px 12px",
-                            borderRadius: "9999px",
-                            backgroundColor:
-                              requisition.budget_approval_status === "approved"
-                                ? "#dcfce7"
-                                : requisition.budget_approval_status === "partial"
-                                ? "#fef3c7"
-                                : "#e2e8f0",
-                            color:
-                              requisition.budget_approval_status === "approved"
-                                ? "#166534"
-                                : requisition.budget_approval_status === "partial"
-                                ? "#92400e"
-                                : "#475569",
-                          }}
-                        >
-                          {requisition.budget_approval_status === "approved"
-                            ? "All Items Approved"
-                            : requisition.budget_approval_status === "partial"
-                            ? "Partially Approved"
-                            : "Pending Approval"}
-                        </span>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="field-label">Replacement</div>
-                      <div className="field-value">
-                        {requisition.is_replacement ? "Yes" : "No"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="field-label">Justification</div>
-                  <div className="text-block">
-                    {requisition.justification || "No justification provided"}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="field-label">Manager Notes</div>
-                  <div className="text-block">
-                    {requisition.manager_notes || "No additional notes"}
-                  </div>
+            {/* Save message */}
+            {saveMessage && (
+              <div
+                className={`mt-4 p-4 rounded-lg border ${
+                  saveMessage.type === "success"
+                    ? "bg-green-50 border-green-200 text-green-800"
+                    : "bg-red-50 border-red-200 text-red-800"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  {saveMessage.type === "success" ? (
+                    <CheckCircle className="h-4 w-4" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4" />
+                  )}
+                  <span className="text-sm font-medium">{saveMessage.message}</span>
                 </div>
               </div>
-            ) : (
-              formData && (
-                <div className="budget-section-stack">
-                  <div className="field-grid">
-                    <div className="form-field">
-                      <label>Budget Amount</label>
-                      <div className="currency-input-wrapper">
-                        <span className="currency-symbol">₹</span>
-                        <input
-                          type="number"
-                          min="0"
-                          value={formData.budget_amount}
-                          onChange={(e) =>
-                            handleFieldChange("budget_amount", e.target.value)
-                          }
-                          placeholder="Enter amount"
-                        />
-                      </div>
-                    </div>
-                    <div className="form-field">
-                      <label>Replacement Position</label>
-                      <select
-                        value={formData.is_replacement ? "yes" : "no"}
-                        onChange={(e) =>
-                          handleFieldChange(
-                            "is_replacement",
-                            e.target.value === "yes",
-                          )
-                        }
-                      >
-                        <option value="no">No - New Position</option>
-                        <option value="yes">Yes - Backfill</option>
-                      </select>
-                    </div>
-                  </div>
+            )}
 
-                  <div className="form-field">
-                    <label>Justification *</label>
-                    <textarea
-                      rows={4}
-                      value={formData.justification}
-                      onChange={(e) =>
-                        handleFieldChange("justification", e.target.value)
-                      }
-                      placeholder="Explain why this position is needed, business impact, etc."
-                    />
-                  </div>
-
-                  <div className="form-field">
-                    <label>Manager Notes</label>
-                    <textarea
-                      rows={3}
-                      value={formData.manager_notes}
-                      onChange={(e) =>
-                        handleFieldChange("manager_notes", e.target.value)
-                      }
-                      placeholder="Any additional notes or context..."
-                    />
-                  </div>
+            {/* Permission warning */}
+            {!canEdit && !isEditing && (
+              <div className="mt-4 p-4 rounded-lg border border-amber-200 bg-amber-50 text-amber-800">
+                <div className="flex items-center gap-2">
+                  <Lock className="h-4 w-4" />
+                  <span className="text-sm">
+                    <strong>Editing is locked.</strong> This requisition has progressed beyond the point where manager edits are allowed.
+                  </span>
                 </div>
-              )
+              </div>
             )}
           </div>
         </div>
 
-        {/* Right Column - Timeline & Attachments */}
-        <div className="manager-detail-sidebar">
-          {/* Job Description PDF */}
-          <div className="master-data-manager">
-            <div className="data-manager-header">
-              <h3>Job Description</h3>
-              <p className="subtitle">Attached documents</p>
+        {/* Quick Stats */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+          <div className="bg-white rounded-xl p-4 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-blue-100 text-blue-600 rounded-lg">
+                <Calendar className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="text-lg font-semibold text-gray-900">
+                  {formatDate(requisition.required_by_date)}
+                </div>
+                <div className="text-xs text-gray-500">Required By</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl p-4 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-amber-100 text-amber-600 rounded-lg">
+                <DollarSign className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="text-lg font-semibold text-gray-900">
+                  {formatCurrency(
+                    requisition.total_estimated_budget ??
+                      requisition.budget_amount
+                  )}
+                </div>
+                <div className="text-xs text-gray-500">Total Estimated</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl p-4 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-green-100 text-green-600 rounded-lg">
+                <DollarSign className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="text-lg font-semibold text-gray-900">
+                  {formatCurrency(requisition.total_approved_budget)}
+                </div>
+                <div className="text-xs text-gray-500">Total Approved</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl p-4 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-purple-100 text-purple-600 rounded-lg">
+                <Briefcase className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="text-lg font-semibold text-gray-900">
+                  {requisition.items.length}
+                </div>
+                <div className="text-xs text-gray-500">Positions</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl p-4 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-gray-100 text-gray-600 rounded-lg">
+                <Clock className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="text-lg font-semibold text-gray-900">
+                  {requisition.duration || "—"}
+                </div>
+                <div className="text-xs text-gray-500">Duration</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column - Main Details */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Basic Information */}
+            <div className="bg-white rounded-xl border border-gray-200">
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Basic Information
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Core requisition details
+                </p>
+              </div>
+              <div className="p-6">
+                {!isEditing ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+                        Project Name
+                      </div>
+                      <div className="text-gray-900 font-medium">
+                        {requisition.project_name || "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+                        Client Name
+                      </div>
+                      <div className="text-gray-900">
+                        {requisition.client_name || "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+                        Required By Date
+                      </div>
+                      <div className="text-gray-900">
+                        {formatDate(requisition.required_by_date)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+                        Priority
+                      </div>
+                      <span
+                        className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                          requisition.priority?.toLowerCase() === "high"
+                            ? "bg-red-100 text-red-700"
+                            : requisition.priority?.toLowerCase() === "critical"
+                            ? "bg-purple-100 text-purple-700"
+                            : requisition.priority?.toLowerCase() === "low"
+                            ? "bg-gray-100 text-gray-700"
+                            : "bg-amber-100 text-amber-700"
+                        }`}
+                      >
+                        {requisition.priority || "Medium"}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  formData && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Project Name *
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.project_name}
+                          onChange={(e) =>
+                            handleFieldChange("project_name", e.target.value)
+                          }
+                          placeholder="Enter project name"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Client Name
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.client_name}
+                          onChange={(e) =>
+                            handleFieldChange("client_name", e.target.value)
+                          }
+                          placeholder="Enter client name"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Required By Date *
+                        </label>
+                        <input
+                          type="date"
+                          value={formData.required_by_date}
+                          onChange={(e) =>
+                            handleFieldChange(
+                              "required_by_date",
+                              e.target.value
+                            )
+                          }
+                          min={new Date().toISOString().split("T")[0]}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Priority
+                        </label>
+                        <select
+                          value={formData.priority}
+                          onChange={(e) =>
+                            handleFieldChange("priority", e.target.value)
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                          <option value="Low">Low</option>
+                          <option value="Medium">Medium</option>
+                          <option value="High">High</option>
+                          <option value="Critical">Critical</option>
+                        </select>
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
             </div>
 
-            {requisition.jd_file_key ? (
-              <div>
-                <div className="jd-file-row">
-                  <div className="jd-file-info">
-                    <FileText size={20} />
+            {/* Project Details */}
+            <div className="bg-white rounded-xl border border-gray-200">
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Project Details
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Work arrangement and location
+                </p>
+              </div>
+              <div className="p-6">
+                {!isEditing ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                      <div className="jd-file-name">Job Description.pdf</div>
-                      <div className="jd-file-sub">
-                        Uploaded with requisition
+                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+                        Work Mode
+                      </div>
+                      <div className="text-gray-900">
+                        {requisition.work_mode || "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+                        Office Location
+                      </div>
+                      <div className="text-gray-900">
+                        {requisition.office_location || "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+                        Duration
+                      </div>
+                      <div className="text-gray-900">
+                        {requisition.duration || "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+                        Replacement Position
+                      </div>
+                      <div className="text-gray-900">
+                        {requisition.is_replacement ? "Yes" : "No"}
                       </div>
                     </div>
                   </div>
-                  <button
-                    className="action-button primary"
-                    onClick={handleDownloadJD}
-                  >
-                    <Download size={16} />
-                    Download
-                  </button>
-                </div>
+                ) : (
+                  formData && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Work Mode
+                        </label>
+                        <select
+                          value={formData.work_mode}
+                          onChange={(e) =>
+                            handleFieldChange("work_mode", e.target.value)
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                          <option value="Remote">Remote</option>
+                          <option value="Hybrid">Hybrid</option>
+                          <option value="On-site">On-site</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Office Location
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.office_location}
+                          onChange={(e) =>
+                            handleFieldChange("office_location", e.target.value)
+                          }
+                          placeholder="Enter office location"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Duration
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.duration}
+                          onChange={(e) =>
+                            handleFieldChange("duration", e.target.value)
+                          }
+                          placeholder="e.g., 6 months, 1 year"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Replacement Position
+                        </label>
+                        <select
+                          value={formData.is_replacement ? "yes" : "no"}
+                          onChange={(e) =>
+                            handleFieldChange(
+                              "is_replacement",
+                              e.target.value === "yes"
+                            )
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                          <option value="no">No - New Position</option>
+                          <option value="yes">Yes - Backfill</option>
+                        </select>
+                      </div>
+                    </div>
+                  )
+                )}
               </div>
-            ) : (
-              <div className="empty-state">
-                <FileText size={32} />
-                <p>No job description uploaded</p>
-              </div>
-            )}
+            </div>
 
-            {canEdit && (
-              <div className="jd-upload-controls">
-                <input
-                  key={jdInputKey}
-                  type="file"
-                  accept="application/pdf"
-                  onChange={handleJdFileChange}
-                  disabled={isUploadingJd || isRemovingJd}
-                />
-                {jdError && <div className="jd-upload-error">{jdError}</div>}
-                <div className="jd-upload-buttons">
-                  <button
-                    className="action-button primary"
-                    onClick={handleUploadJD}
-                    disabled={!jdFile || isUploadingJd || isRemovingJd}
-                  >
-                    {isUploadingJd
-                      ? "Uploading..."
-                      : requisition.jd_file_key
-                        ? "Replace JD"
-                        : "Upload JD"}
-                  </button>
-                  {requisition.jd_file_key && (
-                    <button
-                      className="action-button"
-                      onClick={handleRemoveJD}
-                      disabled={isRemovingJd || isUploadingJd}
-                    >
-                      {isRemovingJd ? "Removing..." : "Remove"}
-                    </button>
+            {/* Skills Required */}
+            <div className="bg-white rounded-xl border border-gray-200">
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Skills Required
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Position requirements and descriptions
+                </p>
+              </div>
+              <div className="p-6">
+                {!isEditing ? (
+                  requisition.items.length === 0 ? (
+                    <div className="text-center py-12">
+                      <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <p className="text-gray-500">No positions added</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {requisition.items.map((item, index) => (
+                        <div key={item.item_id} className="border border-gray-200 rounded-lg p-4">
+                          <div className="flex items-start justify-between mb-4">
+                            <div>
+                              <h4 className="font-semibold text-gray-900">
+                                {item.role_position}
+                              </h4>
+                              <div className="flex items-center gap-3 mt-2">
+                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                                  {item.skill_level || "Not specified"}
+                                </span>
+                                <span className="text-sm text-gray-500">
+                                  {item.experience_years || "—"} years experience
+                                </span>
+                                <span className="text-sm text-gray-500">
+                                  {item.education_requirement || "—"}
+                                </span>
+                              </div>
+                            </div>
+                            <span className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-gray-100 text-gray-600 text-sm font-medium">
+                              {index + 1}
+                            </span>
+                          </div>
+
+                          {/* Item Budget Section */}
+                          <div className="bg-green-50 rounded-lg p-3 mb-4">
+                            <div className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+                              <DollarSign className="h-4 w-4" />
+                              Budget
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                              <div>
+                                <span className="text-gray-500">Estimated:</span>{" "}
+                                <span className="font-medium text-gray-900">
+                                  {item.estimated_budget != null
+                                    ? `${item.currency || "INR"} ${item.estimated_budget.toLocaleString()}`
+                                    : "—"}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-gray-500">Approved:</span>{" "}
+                                <span
+                                  className={`font-medium ${
+                                    item.approved_budget != null
+                                      ? "text-green-700"
+                                      : "text-gray-500"
+                                  }`}
+                                >
+                                  {item.approved_budget != null
+                                    ? `${item.currency || "INR"} ${item.approved_budget.toLocaleString()}`
+                                    : "Pending"}
+                                </span>
+                              </div>
+                              <div>
+                                <span
+                                  className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                    item.approved_budget != null
+                                      ? "bg-green-100 text-green-700"
+                                      : "bg-amber-100 text-amber-700"
+                                  }`}
+                                >
+                                  {item.approved_budget != null
+                                    ? "Approved"
+                                    : "Pending Approval"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mb-4">
+                            <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
+                              Job Description
+                            </div>
+                            <p className="text-gray-700 text-sm leading-relaxed">
+                              {item.job_description}
+                            </p>
+                          </div>
+
+                          {item.requirements && (
+                            <div>
+                              <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
+                                Additional Requirements
+                              </div>
+                              <p className="text-gray-700 text-sm leading-relaxed">
+                                {item.requirements}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                ) : (
+                  formData && (
+                    <div className="space-y-4">
+                      {formData.items.map((item, index) => (
+                        <div key={index} className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                          <div className="flex items-center justify-between mb-4">
+                            <h4 className="font-medium text-gray-900">
+                              Position {index + 1}
+                            </h4>
+                            {formData.items.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItem(index)}
+                                className="text-sm text-red-600 hover:text-red-700 font-medium"
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Role / Position *
+                              </label>
+                              <input
+                                type="text"
+                                value={item.role_position}
+                                onChange={(e) =>
+                                  handleItemUpdate(
+                                    index,
+                                    "role_position",
+                                    e.target.value
+                                  )
+                                }
+                                placeholder="e.g., Senior Frontend Developer"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Skill Level
+                              </label>
+                              <select
+                                value={item.skill_level}
+                                onChange={(e) =>
+                                  handleItemUpdate(
+                                    index,
+                                    "skill_level",
+                                    e.target.value
+                                  )
+                                }
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                              >
+                                <option value="Junior">Junior</option>
+                                <option value="Mid">Mid</option>
+                                <option value="Senior">Senior</option>
+                                <option value="Lead">Lead</option>
+                                <option value="Architect">Architect</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Experience (years)
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="50"
+                                value={item.experience_years}
+                                onChange={(e) =>
+                                  handleItemUpdate(
+                                    index,
+                                    "experience_years",
+                                    parseInt(e.target.value) || 0
+                                  )
+                                }
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Education Requirement
+                              </label>
+                              <input
+                                type="text"
+                                value={item.education_requirement}
+                                onChange={(e) =>
+                                  handleItemUpdate(
+                                    index,
+                                    "education_requirement",
+                                    e.target.value
+                                  )
+                                }
+                                placeholder="e.g., B.Tech, MBA"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="mt-4">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Job Description *
+                            </label>
+                            <textarea
+                              rows={3}
+                              value={item.job_description}
+                              onChange={(e) =>
+                                handleItemUpdate(
+                                  index,
+                                  "job_description",
+                                  e.target.value
+                                )
+                              }
+                              placeholder="Describe the role responsibilities..."
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                            />
+                          </div>
+
+                          <div className="mt-4">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Additional Requirements
+                            </label>
+                            <textarea
+                              rows={2}
+                              value={item.requirements}
+                              onChange={(e) =>
+                                handleItemUpdate(
+                                  index,
+                                  "requirements",
+                                  e.target.value
+                                )
+                              }
+                              placeholder="Any specific certifications, skills, or requirements..."
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                            />
+                          </div>
+                        </div>
+                      ))}
+
+                      <button
+                        type="button"
+                        onClick={handleAddItem}
+                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 text-gray-600 hover:border-gray-400 hover:text-gray-700 rounded-lg font-medium transition-colors"
+                      >
+                        <Briefcase className="h-4 w-4" />
+                        Add Another Position
+                      </button>
+                    </div>
+                  )
+                )}
+              </div>
+            </div>
+
+            {/* Budget & Justification */}
+            <div className="bg-white rounded-xl border border-gray-200">
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Budget Summary & Justification
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Computed budget totals and business case
+                </p>
+              </div>
+              <div className="p-6">
+                {!isEditing ? (
+                  <div className="space-y-6">
+                    {/* Computed Budget Summary */}
+                    <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                      <div className="flex items-center gap-2 text-sm font-medium text-green-800 mb-4">
+                        <DollarSign className="h-4 w-4" />
+                        Budget Overview (Computed from Items)
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1">
+                            Total Estimated
+                          </div>
+                          <div className="font-semibold text-gray-900">
+                            {formatCurrency(
+                              requisition.total_estimated_budget ??
+                                requisition.budget_amount
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1">
+                            Total Approved
+                          </div>
+                          <div className="font-semibold text-green-700">
+                            {formatCurrency(
+                              requisition.total_approved_budget
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1">
+                            Approval Status
+                          </div>
+                          <span
+                            className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                              requisition.budget_approval_status === "approved"
+                                ? "bg-green-100 text-green-700"
+                                : requisition.budget_approval_status === "partial"
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-gray-100 text-gray-700"
+                            }`}
+                          >
+                            {requisition.budget_approval_status === "approved"
+                              ? "All Items Approved"
+                              : requisition.budget_approval_status === "partial"
+                              ? "Partially Approved"
+                              : "Pending Approval"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="text-sm font-medium text-gray-700 mb-3">
+                        Justification
+                      </div>
+                      <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
+                        {requisition.justification || "No justification provided"}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="text-sm font-medium text-gray-700 mb-3">
+                        Manager Notes
+                      </div>
+                      <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
+                        {requisition.manager_notes || "No additional notes"}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  formData && (
+                    <div className="space-y-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Budget Amount
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
+                              ₹
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              value={formData.budget_amount}
+                              onChange={(e) =>
+                                handleFieldChange("budget_amount", e.target.value)
+                              }
+                              placeholder="Enter amount"
+                              className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Replacement Position
+                          </label>
+                          <select
+                            value={formData.is_replacement ? "yes" : "no"}
+                            onChange={(e) =>
+                              handleFieldChange(
+                                "is_replacement",
+                                e.target.value === "yes"
+                              )
+                            }
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                          >
+                            <option value="no">No - New Position</option>
+                            <option value="yes">Yes - Backfill</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Justification *
+                        </label>
+                        <textarea
+                          rows={4}
+                          value={formData.justification}
+                          onChange={(e) =>
+                            handleFieldChange("justification", e.target.value)
+                          }
+                          placeholder="Explain why this position is needed, business impact, etc."
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Manager Notes
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={formData.manager_notes}
+                          onChange={(e) =>
+                            handleFieldChange("manager_notes", e.target.value)
+                          }
+                          placeholder="Any additional notes or context..."
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column - Timeline & Attachments */}
+          <div className="space-y-6">
+            {/* Job Description PDF */}
+            <div className="bg-white rounded-xl border border-gray-200">
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Job Description
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Attached documents
+                </p>
+              </div>
+              <div className="p-6">
+                {requisition.jd_file_key ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <FileText className="h-5 w-5 text-gray-600" />
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">
+                            Job Description.pdf
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            Uploaded with requisition
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleDownloadJD}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
+                      >
+                        <Download className="h-4 w-4" />
+                        Download
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-500">No job description uploaded</p>
+                  </div>
+                )}
+
+                {canEdit && (
+                  <div className="mt-6 pt-6 border-t border-gray-200">
+                    <input
+                      key={jdInputKey}
+                      type="file"
+                      accept="application/pdf"
+                      onChange={handleJdFileChange}
+                      disabled={isUploadingJd || isRemovingJd}
+                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                    />
+                    {jdError && (
+                      <div className="mt-2 text-sm text-red-600">{jdError}</div>
+                    )}
+                    <div className="flex gap-2 mt-4">
+                      <button
+                        onClick={handleUploadJD}
+                        disabled={!jdFile || isUploadingJd || isRemovingJd}
+                        className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                      >
+                        {isUploadingJd
+                          ? "Uploading..."
+                          : requisition.jd_file_key
+                          ? "Replace JD"
+                          : "Upload JD"}
+                      </button>
+                      {requisition.jd_file_key && (
+                        <button
+                          onClick={handleRemoveJD}
+                          disabled={isRemovingJd || isUploadingJd}
+                          className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 disabled:opacity-50 transition-colors"
+                        >
+                          {isRemovingJd ? "Removing..." : "Remove"}
+                        </button>
+                      )}
+                    </div>
+                    <p className="mt-2 text-xs text-gray-500">PDF only. Max 10MB.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Master Activity Timeline */}
+            <div className="bg-white rounded-xl border border-gray-200">
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Master Activity Timeline
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Creation, budget, authorization, assignment and recruitment events
+                </p>
+              </div>
+              <div className="p-6">
+                {masterTimeline.length === 0 ? (
+                  <div className="text-center py-8">
+                    <History className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-500">No activity history available</p>
+                  </div>
+                ) : (
+                  <MasterTimeline events={masterTimeline} />
+                )}
+              </div>
+            </div>
+
+            {/* Approval Information */}
+            {(requisition.budget_approved_at || requisition.hr_approved_at) && (
+              <div className="bg-white rounded-xl border border-gray-200">
+                <div className="p-6 border-b border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Approval Details
+                  </h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Review and approval information
+                  </p>
+                </div>
+                <div className="p-6 space-y-4">
+                  {requisition.budget_approved_at && (
+                    <div className="flex items-start gap-3 p-3 bg-green-50 rounded-lg">
+                      <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
+                      <div>
+                        <div className="font-medium text-gray-900">
+                          Budget Approved
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          Approved on: {" "}
+                          {formatDateTime(requisition.budget_approved_at)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {requisition.hr_approved_at && (
+                    <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg">
+                      <CheckCircle className="h-5 w-5 text-blue-600 mt-0.5" />
+                      <div>
+                        <div className="font-medium text-gray-900">
+                          HR Approved
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          Approved on: {formatDateTime(requisition.hr_approved_at)}
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
-                <p className="jd-upload-hint">PDF only. Max 10MB.</p>
               </div>
             )}
           </div>
-
-          {/* Status Timeline */}
-          <div className="master-data-manager">
-            <div className="data-manager-header">
-              <h3>Status Timeline</h3>
-              <p className="subtitle">History of status transitions</p>
-            </div>
-
-            {statusHistory.length === 0 ? (
-              <div className="empty-state">
-                <History size={32} />
-                <p>No status history available</p>
-              </div>
-            ) : (
-              <Timeline history={statusHistory} />
-            )}
-          </div>
-
-          {/* Approval Information */}
-          {(requisition.budget_approved_at || requisition.hr_approved_at) && (
-            <div className="master-data-manager">
-              <div className="data-manager-header">
-                <h3>Approval Details</h3>
-                <p className="subtitle">Review and approval information</p>
-              </div>
-
-              <div className="approval-stack">
-                {requisition.budget_approved_at && (
-                  <div className="approval-card">
-                    <div className="approval-card-header">
-                      <CheckCircle size={16} />
-                      <span className="approval-card-title">
-                        Budget Approved
-                      </span>
-                    </div>
-                    <div className="approval-card-date">
-                      Approved on:{" "}
-                      {formatDateTime(requisition.budget_approved_at)}
-                    </div>
-                  </div>
-                )}
-
-                {requisition.hr_approved_at && (
-                  <div className="approval-card">
-                    <div className="approval-card-header">
-                      <CheckCircle size={16} />
-                      <span className="approval-card-title">HR Approved</span>
-                    </div>
-                    <div className="approval-card-date">
-                      Approved on: {formatDateTime(requisition.hr_approved_at)}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Quick Actions */}
-          {/* <div className="data-manager-header">
-              <h3>Actions</h3>
-              <p className="subtitle">Quick actions for this requisition</p>
-            </div> */}
-
-          {/* <div className="space-y-2">
-              <button
-                className="action-button"
-                onClick={() => navigate(`/manager/requisitions/${id}/print`)}
-                style={{ width: "100%", justifyContent: "center" }}
-              >
-                <FileText size={16} />
-                Print Summary
-              </button>
-
-              <button
-                className="action-button"
-                onClick={() => window.print()}
-                style={{ width: "100%", justifyContent: "center" }}
-              >
-                <Download size={16} />
-                Export as PDF
-              </button>
-
-              <button
-                className="action-button"
-                onClick={() =>
-                  navigator.clipboard.writeText(window.location.href)
-                }
-                style={{ width: "100%", justifyContent: "center" }}
-              >
-                <LinkIcon size={16} />
-                Copy Link
-              </button>
-            </div> */}
         </div>
       </div>
     </div>

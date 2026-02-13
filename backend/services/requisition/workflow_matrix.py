@@ -385,6 +385,7 @@ ITEM_BUDGET_APPROVABLE_HEADER_STATES: FrozenSet[RequisitionStatus] = frozenset({
 # Header fields that cannot be directly edited via API
 HEADER_FORBIDDEN_FIELDS: FrozenSet[str] = frozenset({
     "overall_status",
+    "budget_amount",       # PHASE 2 GATEKEEPER: Header budget derived from item totals
     "budget_approved_at",
     "budget_approved_by",
     "hr_approved_at",

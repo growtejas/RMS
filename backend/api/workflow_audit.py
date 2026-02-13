@@ -54,8 +54,11 @@ class AuditLogEntry(BaseModel):
     version_before: int
     version_after: int
     performed_by: Optional[int] = None
+    performed_by_username: Optional[str] = None
+    performed_by_full_name: Optional[str] = None
     user_roles: Optional[str] = None
     reason: Optional[str] = None
+    transition_metadata: Optional[str] = None
     created_at: datetime
     
     class Config:
@@ -126,6 +129,8 @@ def get_requisition_audit_log(
     Returns all workflow transitions for the requisition header
     and optionally its items.
     """
+    from sqlalchemy.orm import aliased
+    
     # Verify requisition exists
     requisition = db.query(Requisition).filter(
         Requisition.req_id == req_id
@@ -134,8 +139,18 @@ def get_requisition_audit_log(
     if not requisition:
         raise HTTPException(status_code=404, detail="Requisition not found")
     
-    # Build query
-    query = db.query(WorkflowTransitionAudit)
+    # Alias for User table join
+    PerformerUser = aliased(User)
+    
+    # Build query with user join
+    # Note: User model only has username, not full_name
+    query = db.query(
+        WorkflowTransitionAudit,
+        PerformerUser.username.label("performer_username"),
+    ).outerjoin(
+        PerformerUser,
+        WorkflowTransitionAudit.performed_by == PerformerUser.user_id
+    )
     
     if include_items:
         # Get item IDs
@@ -158,11 +173,28 @@ def get_requisition_audit_log(
             WorkflowTransitionAudit.entity_id == req_id,
         )
     
-    # Count total
-    total = query.count()
+    # Count total (without join)
+    count_query = db.query(WorkflowTransitionAudit)
+    if include_items:
+        item_ids_for_count = db.query(RequisitionItem.item_id).filter(
+            RequisitionItem.req_id == req_id
+        ).all()
+        item_ids_for_count = [i[0] for i in item_ids_for_count]
+        count_query = count_query.filter(
+            ((WorkflowTransitionAudit.entity_type == 'requisition') & 
+             (WorkflowTransitionAudit.entity_id == req_id)) |
+            ((WorkflowTransitionAudit.entity_type == 'requisition_item') & 
+             (WorkflowTransitionAudit.entity_id.in_(item_ids_for_count)))
+        )
+    else:
+        count_query = count_query.filter(
+            WorkflowTransitionAudit.entity_type == 'requisition',
+            WorkflowTransitionAudit.entity_id == req_id,
+        )
+    total = count_query.count()
     
     # Apply ordering and pagination
-    entries = (
+    rows = (
         query
         .order_by(desc(WorkflowTransitionAudit.created_at))
         .offset((page - 1) * page_size)
@@ -170,11 +202,36 @@ def get_requisition_audit_log(
         .all()
     )
     
+    # Build entries with user info
+    entries = []
+    for row in rows:
+        audit_record = row[0]
+        performer_username = row[1] if len(row) > 1 else None
+        
+        entry = AuditLogEntry(
+            audit_id=audit_record.audit_id,
+            entity_type=audit_record.entity_type,
+            entity_id=audit_record.entity_id,
+            action=audit_record.action,
+            from_status=audit_record.from_status or "",
+            to_status=audit_record.to_status,
+            version_before=audit_record.version_before or 0,
+            version_after=audit_record.version_after or 0,
+            performed_by=audit_record.performed_by,
+            performed_by_username=performer_username,
+            performed_by_full_name=performer_username,  # Use username as fallback
+            user_roles=audit_record.user_roles,
+            reason=audit_record.reason,
+            transition_metadata=audit_record.transition_metadata,
+            created_at=audit_record.created_at,
+        )
+        entries.append(entry)
+    
     return AuditLogResponse(
         total=total,
         page=page,
         page_size=page_size,
-        entries=[AuditLogEntry.model_validate(e) for e in entries],
+        entries=entries,
     )
 
 

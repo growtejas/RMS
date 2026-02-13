@@ -196,6 +196,10 @@ export function formatRelativeAuditTime(isoTimestamp: string): string {
 
 /**
  * Action type classification for icon/color mapping.
+ * Phase 6 compliant - supports all timeline event types:
+ * - Creation, Budget edits, Budget clearance, HR approval
+ * - Assignments, Shortlists, Interviews, Rejections
+ * - Reassignments, Fulfillment, Cancellations
  */
 export type AuditActionType =
   | "approve"
@@ -206,16 +210,50 @@ export type AuditActionType =
   | "create"
   | "fulfill"
   | "assign"
+  | "reassign"
   | "update"
+  | "shortlist"
+  | "interview"
+  | "offer"
+  | "budget"
   | "unknown";
 
 /**
  * Classify an action string into a known action type.
  * Used for icon and color selection.
+ * Phase 6: Supports all timeline event types.
  */
 export function classifyAction(action: string): AuditActionType {
   const normalized = action.toLowerCase();
 
+  // Phase 6: Budget-related actions
+  if (
+    normalized.includes("budget") ||
+    normalized.includes("financial")
+  ) {
+    if (normalized.includes("approve") || normalized.includes("clear")) {
+      return "approve";
+    }
+    return "budget";
+  }
+
+  // Phase 6: Item workflow actions
+  if (normalized.includes("shortlist")) {
+    return "shortlist";
+  }
+  if (normalized.includes("interview")) {
+    return "interview";
+  }
+  if (normalized.includes("offer")) {
+    return "offer";
+  }
+
+  // Phase 6: Reassignment
+  if (normalized.includes("reassign") || normalized.includes("swap") || normalized.includes("transfer")) {
+    return "reassign";
+  }
+
+  // Standard workflow actions
   if (normalized.includes("approve") || normalized.includes("accept")) {
     return "approve";
   }
@@ -249,6 +287,7 @@ export function classifyAction(action: string): AuditActionType {
 
 /**
  * Get CSS class for audit action type.
+ * Phase 6: Supports all timeline event styling.
  */
 export function getActionClass(action: string): string {
   const type = classifyAction(action);
@@ -262,7 +301,12 @@ export function getActionClass(action: string): string {
     create: "audit-action--created",
     fulfill: "audit-action--fulfilled",
     assign: "audit-action--assigned",
+    reassign: "audit-action--reassigned",
     update: "audit-action--updated",
+    shortlist: "audit-action--shortlisted",
+    interview: "audit-action--interviewing",
+    offer: "audit-action--offered",
+    budget: "audit-action--budget",
     unknown: "audit-action--unknown",
   };
 

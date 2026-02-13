@@ -16,7 +16,6 @@ import HrAuditLog from "./HrAuditLog";
 import HrRequisitions from "./HrTickets";
 import TicketDetails from "./TicketDetails";
 import HRDashboardView from "./HRDashboardView";
-
 const viewLabels: Record<HrDashboardView, string> = {
   dashboard: "Dashboard",
   employees: "Employees",
@@ -84,7 +83,6 @@ const HrDashboard: React.FC = () => {
             onBack={() => setActiveView("ticket")}
           />
         );
-
       default:
         return (
           <>

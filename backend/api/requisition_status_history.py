@@ -60,7 +60,7 @@ def create_requisition_status_history(
 def list_requisition_status_history(
     req_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee"))
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee", "TA"))
 ):
     return (
         db.query(RequisitionStatusHistory)

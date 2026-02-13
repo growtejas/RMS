@@ -392,6 +392,79 @@ export async function rejectItemBudget(
 }
 
 // ============================================================================
+// TA REASSIGNMENT API (Phase 7)
+// ============================================================================
+
+/**
+ * Item-level reassignment response.
+ */
+export interface ReassignItemResponse {
+  success: boolean;
+  item_id: number;
+  role_position: string;
+  old_ta_id: number | null;
+  new_ta_id: number;
+}
+
+/**
+ * Reassign the TA for a single requisition item.
+ * Endpoint: POST /requisition-items/{itemId}/reassign
+ * Authorized: HR, Admin
+ */
+export async function reassignItemTA(
+  itemId: number,
+  newTaId: number,
+  reason: string,
+): Promise<ReassignItemResponse> {
+  const response = await apiClient.post<ReassignItemResponse>(
+    `/requisition-items/${itemId}/reassign`,
+    { new_ta_id: newTaId, reason },
+  );
+  return response.data;
+}
+
+/**
+ * Response type for bulk reassignment.
+ */
+export interface BulkReassignItemResult {
+  item_id: number;
+  role_position: string;
+  old_ta_id: number | null;
+  new_ta_id: number;
+}
+
+export interface BulkReassignResponse {
+  success: boolean;
+  reassigned_count: number;
+  req_id: number;
+  items: BulkReassignItemResult[];
+}
+
+export interface BulkReassignRequest {
+  old_ta_id: number;
+  new_ta_id: number;
+  reason: string;
+  item_ids?: number[];
+}
+
+/**
+ * Bulk reassign items from one TA to another within a requisition.
+ * Atomic server-side transaction — all items or none.
+ * Endpoint: POST /requisitions/{reqId}/bulk-reassign
+ * Authorized: HR, Admin
+ */
+export async function bulkReassignTA(
+  reqId: number,
+  payload: BulkReassignRequest,
+): Promise<BulkReassignResponse> {
+  const response = await apiClient.post<BulkReassignResponse>(
+    `/requisitions/${reqId}/bulk-reassign`,
+    payload,
+  );
+  return response.data;
+}
+
+// ============================================================================
 // ERROR HANDLING UTILITIES
 // ============================================================================
 
