@@ -15,7 +15,7 @@ from db.models.interview import Interview
 from db.models.audit_log import AuditLog
 
 from schemas.candidate import InterviewCreate, InterviewUpdate, InterviewResponse
-from utils.dependencies import require_any_role
+from utils.dependencies import require_any_role, get_current_user_roles, check_ta_ownership_for_candidate
 
 router = APIRouter(prefix="/interviews", tags=["Interviews"])
 
@@ -58,6 +58,7 @@ def create_interview(
     payload: InterviewCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("TA", "HR", "Admin")),
+    roles: List[str] = Depends(get_current_user_roles),
 ):
     # Validate candidate
     candidate = db.query(Candidate).filter(
@@ -65,6 +66,9 @@ def create_interview(
     ).first()
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
+    check_ta_ownership_for_candidate(
+        db, payload.candidate_id, current_user, roles
+    )
 
     # Pydantic validation: no past dates
     if payload.scheduled_at.replace(tzinfo=None) < datetime.now():
@@ -116,10 +120,14 @@ def update_interview(
     payload: InterviewUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("TA", "HR", "Admin")),
+    roles: List[str] = Depends(get_current_user_roles),
 ):
     interview = db.query(Interview).filter(Interview.id == interview_id).first()
     if not interview:
         raise HTTPException(status_code=404, detail="Interview not found")
+    check_ta_ownership_for_candidate(
+        db, interview.candidate_id, current_user, roles
+    )
 
     update_data = payload.model_dump(exclude_unset=True)
 
@@ -171,10 +179,14 @@ def delete_interview(
     interview_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("TA", "HR", "Admin")),
+    roles: List[str] = Depends(get_current_user_roles),
 ):
     interview = db.query(Interview).filter(Interview.id == interview_id).first()
     if not interview:
         raise HTTPException(status_code=404, detail="Interview not found")
+    check_ta_ownership_for_candidate(
+        db, interview.candidate_id, current_user, roles
+    )
 
     audit = AuditLog(
         entity_name="interview",

@@ -1184,14 +1184,22 @@ class RequisitionItemWorkflowEngine:
         Returns:
             Updated item
         """
-        # Only HR or Admin can assign TA
+        # HR/Admin can assign any TA; TA can only self-assign (ta_user_id == performed_by)
         if "HR" not in user_roles and "Admin" not in user_roles:
-            raise AuthorizationException(
-                action="assign TA to item",
-                user_roles=user_roles,
-                required_roles=["HR", "Admin"],
-            )
-        
+            if "TA" not in user_roles:
+                raise AuthorizationException(
+                    action="assign TA to item",
+                    user_roles=user_roles,
+                    required_roles=["HR", "Admin", "TA"],
+                )
+            if ta_user_id != performed_by:
+                raise AuthorizationException(
+                    action="assign another TA to item",
+                    user_roles=user_roles,
+                    required_roles=["HR", "Admin"],
+                    reason="TA can only self-assign. To assign another TA, use HR or Admin.",
+                )
+
         item = cls._get_locked_item(db, item_id)
         cls._validate_header_allows_item_change(db, item.req_id)
         

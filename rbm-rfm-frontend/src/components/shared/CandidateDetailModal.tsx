@@ -31,8 +31,12 @@ import {
   updateCandidateStage,
   deleteInterview,
   getCandidate,
+  getCandidateActionErrorMessage,
 } from "../../api/candidateApi";
 import { apiClient } from "../../api/client";
+
+/** Re-export for callers that need the 403 message text. */
+export { TA_OWNERSHIP_DENIED_MESSAGE } from "../../api/candidateApi";
 
 interface CandidateDetailModalProps {
   candidate: Candidate;
@@ -150,7 +154,9 @@ export default function CandidateDetailModal({
       setCandidate(updated);
       onUpdate(updated);
     } catch (err: any) {
-      setError(err?.response?.data?.detail ?? `Failed to move to ${newStage}`);
+      setError(
+        getCandidateActionErrorMessage(err, `Failed to move to ${newStage}`),
+      );
     } finally {
       setTransitioning(false);
     }
@@ -181,7 +187,9 @@ export default function CandidateDetailModal({
       setShowScheduler(false);
       await refresh();
     } catch (err: any) {
-      setError(err?.response?.data?.detail ?? "Failed to schedule interview");
+      setError(
+        getCandidateActionErrorMessage(err, "Failed to schedule interview"),
+      );
     } finally {
       setScheduling(false);
     }
@@ -201,7 +209,9 @@ export default function CandidateDetailModal({
       setEditingInterview(null);
       await refresh();
     } catch (err: any) {
-      setError(err?.response?.data?.detail ?? "Failed to update interview");
+      setError(
+        getCandidateActionErrorMessage(err, "Failed to update interview"),
+      );
     }
   };
 
@@ -211,7 +221,9 @@ export default function CandidateDetailModal({
       await deleteInterview(id);
       await refresh();
     } catch (err: any) {
-      setError(err?.response?.data?.detail ?? "Failed to delete interview");
+      setError(
+        getCandidateActionErrorMessage(err, "Failed to delete interview"),
+      );
     }
   };
 

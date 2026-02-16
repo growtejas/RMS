@@ -9,6 +9,24 @@
 
 import { apiClient } from "./client";
 
+/** Message shown when backend returns 403 (user is not the assigned TA for the requisition). */
+export const TA_OWNERSHIP_DENIED_MESSAGE =
+  "Access Denied: You are not the assigned TA for this requisition.";
+
+export function getCandidateActionErrorMessage(
+  err: unknown,
+  fallback: string,
+): string {
+  const ax = err as {
+    response?: { status?: number; data?: { detail?: string } };
+  };
+  if (ax?.response?.status === 403) {
+    return TA_OWNERSHIP_DENIED_MESSAGE;
+  }
+  const detail = ax?.response?.data?.detail;
+  return typeof detail === "string" ? detail : fallback;
+}
+
 // ============================================================================
 // TYPES
 // ============================================================================

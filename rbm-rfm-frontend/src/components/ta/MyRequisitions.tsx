@@ -114,7 +114,7 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
         setError(null);
         // Phase 7: Add cache-busting to ensure fresh data after reassignment
         const response = await apiClient.get<BackendRequisition[]>(
-          `/requisitions?my_assignments=true&_t=${Date.now()}`,
+          `/requisitions?assigned_to=me&_t=${Date.now()}`,
         );
         if (!isMounted) return;
         // Phase 7: Backend already filters by item-level assigned_ta,

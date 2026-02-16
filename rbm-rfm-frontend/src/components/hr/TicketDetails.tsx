@@ -191,6 +191,25 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
     (r) => r.toLowerCase() === "hr" || r.toLowerCase() === "admin",
   );
 
+  // TA can add candidates to:
+  // - items explicitly assigned to them, or
+  // - items with no item-level TA when they are the header-level TA.
+  // HR/Admin can add to any item.
+  const canEditItemForAddCandidate = (item: RequisitionItem) => {
+    if (isHRRole) return true;
+    if (!user?.user_id) return false;
+
+    const headerAssignedToMe =
+      ticket?.assignedTAId != null && ticket.assignedTAId === user.user_id;
+
+    if (item.assignedTAId != null) {
+      return item.assignedTAId === user.user_id;
+    }
+
+    // Unassigned item: allow header-level TA to act as owner.
+    return headerAssignedToMe;
+  };
+
   // Raw requisition data for Gatekeeper panel
   const [rawRequisition, setRawRequisition] =
     useState<WorkflowRequisition | null>(null);
@@ -229,6 +248,8 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
   const [addingCandidate, setAddingCandidate] = useState(false);
   const [candidateStageFilter, setCandidateStageFilter] =
     useState<string>("all");
+  const [candidateItemFilter, setCandidateItemFilter] =
+    useState<number | "all">("all");
   const [candidateError, setCandidateError] = useState<string | null>(null);
 
   // ---- Phase 7: TA Reassignment state ----
@@ -597,7 +618,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       await loadCandidates();
     } catch (err: any) {
       setCandidateError(
-        err?.response?.data?.detail ?? "Failed to add candidate",
+        getCandidateActionErrorMessage(err, "Failed to add candidate"),
       );
     } finally {
       setAddingCandidate(false);
@@ -1957,22 +1978,24 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                             <span style={{ fontSize: "13px", fontWeight: 600 }}>
                               Candidates ({itemCandidates.length})
                             </span>
-                            <button
-                              className="action-button primary"
-                              style={{
-                                fontSize: "11px",
-                                padding: "4px 10px",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "4px",
-                              }}
-                              onClick={() => {
-                                setAddCandidateItemId(item.numericItemId);
-                                setShowAddCandidate(true);
-                              }}
-                            >
-                              <UserPlus size={12} /> Add Candidate
-                            </button>
+                            {canEditItemForAddCandidate(item) && (
+                              <button
+                                className="action-button primary"
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "4px 10px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                }}
+                                onClick={() => {
+                                  setAddCandidateItemId(item.numericItemId);
+                                  setShowAddCandidate(true);
+                                }}
+                              >
+                                <UserPlus size={12} /> Add Candidate
+                              </button>
+                            )}
                           </div>
                           {itemCandidates.length === 0 ? (
                             <div
@@ -2117,67 +2140,142 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                 Track and manage candidates across all positions
               </p>
             </div>
-            <button
-              className="action-button primary"
-              style={{ display: "flex", alignItems: "center", gap: "6px" }}
-              onClick={() => {
-                setAddCandidateItemId(ticket.items[0]?.numericItemId ?? null);
-                setShowAddCandidate(true);
-              }}
-              disabled={!ticket.items.length}
-            >
-              <UserPlus size={14} /> Add Candidate
-            </button>
+            {ticket.items.some((it) => canEditItemForAddCandidate(it)) && (
+              <button
+                className="action-button primary"
+                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+                onClick={() => {
+                  const editableItem = ticket.items.find((it) =>
+                    canEditItemForAddCandidate(it)
+                  );
+                  setAddCandidateItemId(
+                    editableItem?.numericItemId ??
+                      ticket.items[0]?.numericItemId ??
+                      null
+                  );
+                  setShowAddCandidate(true);
+                }}
+                disabled={!ticket.items.length}
+              >
+                <UserPlus size={14} /> Add Candidate
+              </button>
+            )}
           </div>
 
-          {/* Stage filter tabs */}
+          {/* Filters: Item and Stage */}
           <div
             style={{
               display: "flex",
-              gap: "8px",
+              flexDirection: "column",
+              gap: "12px",
               marginBottom: "20px",
-              flexWrap: "wrap",
             }}
           >
-            {[
-              "all",
-              "Sourced",
-              "Shortlisted",
-              "Interviewing",
-              "Offered",
-              "Hired",
-              "Rejected",
-            ].map((stage) => {
-              const count =
-                stage === "all"
-                  ? candidates.length
-                  : candidates.filter((c) => c.current_stage === stage).length;
-              const isActive = candidateStageFilter === stage;
-              return (
-                <button
-                  key={stage}
-                  onClick={() => setCandidateStageFilter(stage)}
-                  style={{
-                    padding: "6px 14px",
-                    borderRadius: "20px",
-                    fontSize: "12px",
-                    fontWeight: isActive ? 600 : 400,
-                    border: isActive
-                      ? "2px solid var(--primary-accent)"
-                      : "1px solid var(--border-subtle)",
-                    backgroundColor: isActive
-                      ? "rgba(59,130,246,0.08)"
-                      : "transparent",
-                    color: isActive
-                      ? "var(--primary-accent)"
-                      : "var(--text-secondary)",
-                    cursor: "pointer",
-                  }}
-                >
-                  {stage === "all" ? "All" : stage} ({count})
-                </button>
-              );
-            })}
+            {/* Item filter */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                flexWrap: "wrap",
+              }}
+            >
+              <label
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 500,
+                  color: "var(--text-secondary)",
+                }}
+              >
+                Filter by Position:
+              </label>
+              <select
+                value={candidateItemFilter === "all" ? "all" : candidateItemFilter}
+                onChange={(e) =>
+                  setCandidateItemFilter(
+                    e.target.value === "all" ? "all" : Number(e.target.value)
+                  )
+                }
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-subtle)",
+                  fontSize: "12px",
+                  backgroundColor: "var(--bg-primary)",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                  minWidth: "200px",
+                }}
+              >
+                <option value="all">All Positions</option>
+                {ticket.items.map((item) => {
+                  const itemCandidateCount = candidates.filter(
+                    (c) => c.requisition_item_id === item.numericItemId
+                  ).length;
+                  return (
+                    <option key={item.numericItemId} value={item.numericItemId}>
+                      {item.skill} ({itemCandidateCount})
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            {/* Stage filter tabs */}
+            <div
+              style={{
+                display: "flex",
+                gap: "8px",
+                flexWrap: "wrap",
+              }}
+            >
+              {[
+                "all",
+                "Sourced",
+                "Shortlisted",
+                "Interviewing",
+                "Offered",
+                "Hired",
+                "Rejected",
+              ].map((stage) => {
+                const filteredByItem =
+                  candidateItemFilter === "all"
+                    ? candidates
+                    : candidates.filter(
+                        (c) => c.requisition_item_id === candidateItemFilter
+                      );
+                const count =
+                  stage === "all"
+                    ? filteredByItem.length
+                    : filteredByItem.filter((c) => c.current_stage === stage)
+                        .length;
+                const isActive = candidateStageFilter === stage;
+                return (
+                  <button
+                    key={stage}
+                    onClick={() => setCandidateStageFilter(stage)}
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: "20px",
+                      fontSize: "12px",
+                      fontWeight: isActive ? 600 : 400,
+                      border: isActive
+                        ? "2px solid var(--primary-accent)"
+                        : "1px solid var(--border-subtle)",
+                      backgroundColor: isActive
+                        ? "rgba(59,130,246,0.08)"
+                        : "transparent",
+                      color: isActive
+                        ? "var(--primary-accent)"
+                        : "var(--text-secondary)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {stage === "all" ? "All" : stage} ({count})
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Add Candidate Form */}
@@ -2414,11 +2512,23 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
               style={{ display: "flex", flexDirection: "column", gap: "12px" }}
             >
               {candidates
-                .filter(
-                  (c) =>
-                    candidateStageFilter === "all" ||
-                    c.current_stage === candidateStageFilter,
-                )
+                .filter((c) => {
+                  // Item filter
+                  if (
+                    candidateItemFilter !== "all" &&
+                    c.requisition_item_id !== candidateItemFilter
+                  ) {
+                    return false;
+                  }
+                  // Stage filter
+                  if (
+                    candidateStageFilter !== "all" &&
+                    c.current_stage !== candidateStageFilter
+                  ) {
+                    return false;
+                  }
+                  return true;
+                })
                 .map((c) => {
                   const linkedItem = ticket.items.find(
                     (it) => it.numericItemId === c.requisition_item_id,

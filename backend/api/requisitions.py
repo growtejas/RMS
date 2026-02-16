@@ -186,12 +186,17 @@ def list_requisitions(
     status: Optional[str] = None,
     raised_by: Optional[int] = None,
     my_assignments: bool = False,
+    assigned_to: Optional[str] = None,
     assigned_ta: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "Employee", "TA")),
     roles: List[str] = Depends(get_current_user_roles),
 ):
     query = db.query(Requisition).options(selectinload(Requisition.items))
+
+    # assigned_to=me is alias for "only requisitions where I am the assigned TA"
+    if assigned_to == "me":
+        my_assignments = True
 
     if "TA" in roles:
         query = query.filter(
@@ -226,7 +231,7 @@ def list_requisitions(
     if raised_by is not None:
         query = query.filter(Requisition.raised_by == raised_by)
 
-    return query.all()
+    return query.order_by(Requisition.req_id.desc()).all()
 
 
 @router.get("/my", response_model=list[RequisitionResponse])
@@ -238,6 +243,7 @@ def list_my_requisitions(
         db.query(Requisition)
         .options(selectinload(Requisition.items))
         .filter(Requisition.raised_by == current_user.user_id)
+        .order_by(Requisition.req_id.desc())
         .all()
     )
 
@@ -621,18 +627,24 @@ def assign_ta(
     req_id: int,
     payload: RequisitionAssign,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("Admin", "HR")),
+    current_user: User = Depends(require_any_role("Admin", "HR", "TA")),
     roles: List[str] = Depends(get_current_user_roles),
 ):
     """
     Assign a TA to a requisition header.
-    
+    TA users may only assign themselves (self-assign); HR/Admin may assign any TA.
     NOTE: In the V2 workflow model, TAs are assigned at item level.
-    This endpoint is maintained for backward compatibility.
     For new integrations, use POST /api/requisition-items/{item_id}/workflow/assign-ta
     """
     from services.requisition.status_protection import workflow_transition_context
-    
+
+    is_ta_only = "TA" in roles and "HR" not in roles and "Admin" not in roles
+    if is_ta_only and payload.ta_user_id != current_user.user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="TA can only self-assign. To assign another TA, use HR or Admin.",
+        )
+
     requisition = (
         db.query(Requisition)
         .filter(Requisition.req_id == req_id)

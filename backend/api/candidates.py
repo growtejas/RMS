@@ -1,6 +1,7 @@
 """
 Candidates API Router
 CRUD + stage transitions for candidates linked to requisition items.
+TA ownership enforced for create/update/delete/stage; Hired triggers auto-fulfill and onboarding.
 """
 from typing import List, Optional
 
@@ -20,7 +21,15 @@ from schemas.candidate import (
     CandidateStageUpdate,
     CandidateResponse,
 )
-from utils.dependencies import require_any_role
+from utils.dependencies import (
+    require_any_role,
+    get_current_user_roles,
+    require_ta_ownership_for_candidate,
+    check_ta_ownership_for_requisition_item,
+)
+from services.requisition.workflow_engine_v2 import RequisitionItemWorkflowEngine
+from services.requisition.workflow_exceptions import WorkflowException
+from services.onboarding import create_employee_from_candidate
 
 router = APIRouter(prefix="/candidates", tags=["Candidates"])
 
@@ -76,6 +85,7 @@ def create_candidate(
     payload: CandidateCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("TA", "HR", "Admin")),
+    roles: List[str] = Depends(get_current_user_roles),
 ):
     # Validate requisition item exists
     item = db.query(RequisitionItem).filter(
@@ -88,6 +98,9 @@ def create_candidate(
             status_code=400,
             detail="Requisition item does not belong to the given requisition",
         )
+    check_ta_ownership_for_requisition_item(
+        db, payload.requisition_item_id, current_user, roles
+    )
 
     candidate = Candidate(
         requisition_item_id=payload.requisition_item_id,
@@ -126,6 +139,7 @@ def update_candidate(
     payload: CandidateUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("TA", "HR", "Admin")),
+    _ownership: User = Depends(require_ta_ownership_for_candidate),
 ):
     candidate = db.query(Candidate).filter(
         Candidate.candidate_id == candidate_id
@@ -160,6 +174,8 @@ def update_candidate_stage(
     payload: CandidateStageUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("TA", "HR", "Admin")),
+    roles: List[str] = Depends(get_current_user_roles),
+    _ownership: User = Depends(require_ta_ownership_for_candidate),
 ):
     candidate = (
         db.query(Candidate)
@@ -193,6 +209,61 @@ def update_candidate_stage(
                 detail="At least one interview must be scheduled before moving to Interviewing",
             )
 
+    # Hired: auto-fulfill item, create employee, reject other candidates
+    if new_stage == "Hired":
+        item = (
+            db.query(RequisitionItem)
+            .filter(RequisitionItem.item_id == candidate.requisition_item_id)
+            .first()
+        )
+        if not item:
+            raise HTTPException(status_code=404, detail="Requisition item not found")
+        if item.item_status == "Fulfilled":
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot hire; Requisition already fulfilled.",
+            )
+        if item.item_status != "Offered":
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot hire; Requisition item must be in Offered status before marking candidate as Hired.",
+            )
+        employee = create_employee_from_candidate(db, candidate)
+        try:
+            RequisitionItemWorkflowEngine.fulfill(
+                db=db,
+                item_id=item.item_id,
+                user_id=current_user.user_id,
+                user_roles=roles,
+                employee_id=employee.emp_id,
+            )
+        except WorkflowException as e:
+            raise HTTPException(status_code=e.http_status, detail=e.message)
+        # Reject other candidates for this item (Position Filled)
+        others = (
+            db.query(Candidate)
+            .filter(
+                Candidate.requisition_item_id == candidate.requisition_item_id,
+                Candidate.candidate_id != candidate.candidate_id,
+                Candidate.current_stage.notin_(["Hired", "Rejected"]),
+            )
+            .all()
+        )
+        for other in others:
+            prev_stage = other.current_stage
+            other.current_stage = "Rejected"
+            db.add(
+                AuditLog(
+                    entity_name="candidate",
+                    entity_id=str(other.candidate_id),
+                    action="STAGE_CHANGE",
+                    performed_by=current_user.user_id,
+                    old_value=prev_stage,
+                    new_value="Rejected (Position Filled)",
+                )
+            )
+        # Audit for the hired candidate is added below with STAGE_CHANGE
+
     # Atomic: update stage + audit in one transaction
     candidate.current_stage = new_stage
 
@@ -218,6 +289,7 @@ def delete_candidate(
     candidate_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("TA", "HR", "Admin")),
+    _ownership: User = Depends(require_ta_ownership_for_candidate),
 ):
     candidate = db.query(Candidate).filter(
         Candidate.candidate_id == candidate_id

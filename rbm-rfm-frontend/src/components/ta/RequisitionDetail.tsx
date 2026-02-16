@@ -58,6 +58,7 @@ import {
   fetchCandidates,
   createCandidate,
   uploadResume,
+  getCandidateActionErrorMessage,
   type Candidate,
   type CandidateCreate,
 } from "../../api/candidateApi";
@@ -253,13 +254,23 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   );
 
   // Phase 7: Per-item edit permission check
-  // TA can only edit items assigned to them
+  // TA can edit items explicitly assigned to them OR,
+  // if they are the header-level TA and the item has no item-level TA yet.
   const canEditItem = (item: RequisitionItem): boolean => {
     if (!currentUserId) return false;
     // HR/Admin can edit any item
     if (isHRUser) return true;
-    // TA can only edit items assigned to them
-    return item.assignedTAId === currentUserId;
+
+    const headerAssignedToMe =
+      ticket?.assignedTAId != null && ticket.assignedTAId === currentUserId;
+
+    // If item has an explicit TA, require it to match current user.
+    if (item.assignedTAId != null) {
+      return item.assignedTAId === currentUserId;
+    }
+
+    // Unassigned item: allow header-level TA to act as owner.
+    return headerAssignedToMe;
   };
 
   // Legacy: Header-level check (kept for backward compatibility)
@@ -305,6 +316,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [addingCandidate, setAddingCandidate] = useState(false);
   const [candidateStageFilter, setCandidateStageFilter] =
     useState<string>("all");
+  const [candidateItemFilter, setCandidateItemFilter] =
+    useState<number | "all">("all");
 
   const parseReqId = (value?: string | null) => {
     if (!value) return null;
@@ -573,7 +586,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       await loadCandidates();
     } catch (err: any) {
       setTransitionError(
-        err?.response?.data?.detail ?? "Failed to add candidate",
+        getCandidateActionErrorMessage(err, "Failed to add candidate"),
       );
     } finally {
       setAddingCandidate(false);
@@ -2198,22 +2211,24 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                               >
                                 Candidates ({itemCandidates.length})
                               </span>
-                              <button
-                                className="action-button primary"
-                                style={{
-                                  fontSize: "11px",
-                                  padding: "4px 10px",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "4px",
-                                }}
-                                onClick={() => {
-                                  setAddCandidateItemId(item.numericItemId);
-                                  setShowAddCandidate(true);
-                                }}
-                              >
-                                <UserPlus size={12} /> Add Candidate
-                              </button>
+                              {canEditItem(item) && (
+                                <button
+                                  className="action-button primary"
+                                  style={{
+                                    fontSize: "11px",
+                                    padding: "4px 10px",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "4px",
+                                  }}
+                                  onClick={() => {
+                                    setAddCandidateItemId(item.numericItemId);
+                                    setShowAddCandidate(true);
+                                  }}
+                                >
+                                  <UserPlus size={12} /> Add Candidate
+                                </button>
+                              )}
                             </div>
                             {itemCandidates.length === 0 ? (
                               <div
@@ -2558,67 +2573,142 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 Track and manage candidates across all positions
               </p>
             </div>
-            <button
-              className="action-button primary"
-              style={{ display: "flex", alignItems: "center", gap: "6px" }}
-              onClick={() => {
-                setAddCandidateItemId(ticket.items[0]?.numericItemId ?? null);
-                setShowAddCandidate(true);
-              }}
-              disabled={!ticket.items.length}
-            >
-              <UserPlus size={14} /> Add Candidate
-            </button>
+            {ticket.items.some((it) => canEditItem(it)) && (
+              <button
+                className="action-button primary"
+                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+                onClick={() => {
+                  const editableItem = ticket.items.find((it) =>
+                    canEditItem(it)
+                  );
+                  setAddCandidateItemId(
+                    editableItem?.numericItemId ??
+                      ticket.items[0]?.numericItemId ??
+                      null
+                  );
+                  setShowAddCandidate(true);
+                }}
+                disabled={!ticket.items.length}
+              >
+                <UserPlus size={14} /> Add Candidate
+              </button>
+            )}
           </div>
 
-          {/* Stage filter tabs */}
+          {/* Filters: Item and Stage */}
           <div
             style={{
               display: "flex",
-              gap: "8px",
+              flexDirection: "column",
+              gap: "12px",
               marginBottom: "20px",
-              flexWrap: "wrap",
             }}
           >
-            {[
-              "all",
-              "Sourced",
-              "Shortlisted",
-              "Interviewing",
-              "Offered",
-              "Hired",
-              "Rejected",
-            ].map((stage) => {
-              const count =
-                stage === "all"
-                  ? candidates.length
-                  : candidates.filter((c) => c.current_stage === stage).length;
-              const isActive = candidateStageFilter === stage;
-              return (
-                <button
-                  key={stage}
-                  onClick={() => setCandidateStageFilter(stage)}
-                  style={{
-                    padding: "6px 14px",
-                    borderRadius: "20px",
-                    fontSize: "12px",
-                    fontWeight: isActive ? 600 : 400,
-                    border: isActive
-                      ? "2px solid var(--primary-accent)"
-                      : "1px solid var(--border-subtle)",
-                    backgroundColor: isActive
-                      ? "rgba(59,130,246,0.08)"
-                      : "transparent",
-                    color: isActive
-                      ? "var(--primary-accent)"
-                      : "var(--text-secondary)",
-                    cursor: "pointer",
-                  }}
-                >
-                  {stage === "all" ? "All" : stage} ({count})
-                </button>
-              );
-            })}
+            {/* Item filter */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                flexWrap: "wrap",
+              }}
+            >
+              <label
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 500,
+                  color: "var(--text-secondary)",
+                }}
+              >
+                Filter by Position:
+              </label>
+              <select
+                value={candidateItemFilter === "all" ? "all" : candidateItemFilter}
+                onChange={(e) =>
+                  setCandidateItemFilter(
+                    e.target.value === "all" ? "all" : Number(e.target.value)
+                  )
+                }
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-subtle)",
+                  fontSize: "12px",
+                  backgroundColor: "var(--bg-primary)",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                  minWidth: "200px",
+                }}
+              >
+                <option value="all">All Positions</option>
+                {ticket.items.map((item) => {
+                  const itemCandidateCount = candidates.filter(
+                    (c) => c.requisition_item_id === item.numericItemId
+                  ).length;
+                  return (
+                    <option key={item.numericItemId} value={item.numericItemId}>
+                      {item.skill} ({itemCandidateCount})
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            {/* Stage filter tabs */}
+            <div
+              style={{
+                display: "flex",
+                gap: "8px",
+                flexWrap: "wrap",
+              }}
+            >
+              {[
+                "all",
+                "Sourced",
+                "Shortlisted",
+                "Interviewing",
+                "Offered",
+                "Hired",
+                "Rejected",
+              ].map((stage) => {
+                const filteredByItem =
+                  candidateItemFilter === "all"
+                    ? candidates
+                    : candidates.filter(
+                        (c) => c.requisition_item_id === candidateItemFilter
+                      );
+                const count =
+                  stage === "all"
+                    ? filteredByItem.length
+                    : filteredByItem.filter((c) => c.current_stage === stage)
+                        .length;
+                const isActive = candidateStageFilter === stage;
+                return (
+                  <button
+                    key={stage}
+                    onClick={() => setCandidateStageFilter(stage)}
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: "20px",
+                      fontSize: "12px",
+                      fontWeight: isActive ? 600 : 400,
+                      border: isActive
+                        ? "2px solid var(--primary-accent)"
+                        : "1px solid var(--border-subtle)",
+                      backgroundColor: isActive
+                        ? "rgba(59,130,246,0.08)"
+                        : "transparent",
+                      color: isActive
+                        ? "var(--primary-accent)"
+                        : "var(--text-secondary)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {stage === "all" ? "All" : stage} ({count})
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Add Candidate Form */}
@@ -2855,11 +2945,23 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
               style={{ display: "flex", flexDirection: "column", gap: "12px" }}
             >
               {candidates
-                .filter(
-                  (c) =>
-                    candidateStageFilter === "all" ||
-                    c.current_stage === candidateStageFilter,
-                )
+                .filter((c) => {
+                  // Item filter
+                  if (
+                    candidateItemFilter !== "all" &&
+                    c.requisition_item_id !== candidateItemFilter
+                  ) {
+                    return false;
+                  }
+                  // Stage filter
+                  if (
+                    candidateStageFilter !== "all" &&
+                    c.current_stage !== candidateStageFilter
+                  ) {
+                    return false;
+                  }
+                  return true;
+                })
                 .map((c) => {
                   const linkedItem = ticket.items.find(
                     (it) => it.numericItemId === c.requisition_item_id,

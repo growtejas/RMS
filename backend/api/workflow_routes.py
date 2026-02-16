@@ -745,14 +745,13 @@ async def assign_ta_to_item(
     item_id: int,
     request: AssignTARequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("HR", "Admin")),
+    current_user: User = Depends(require_any_role("HR", "Admin", "TA")),
     user_roles: List[str] = Depends(get_current_user_roles),
 ):
     """
     Assign TA to item.
-    
     GC-003: Auto-transitions PENDING → SOURCING
-    Authorized: HR, Admin
+    Authorized: HR, Admin, or TA (self-assign only).
     """
     try:
         # Get current status before transition

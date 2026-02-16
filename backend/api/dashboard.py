@@ -158,10 +158,10 @@ def get_bench_employee_count(db: Session) -> int:
 
 
 def get_pending_hr_approval_count(db: Session) -> int:
-    """Get count of requisitions pending HR approval"""
+    """Get count of requisitions pending HR approval (status Pending_HR)."""
     return (
         db.query(func.count(Requisition.req_id))
-        .filter(Requisition.overall_status == "Pending HR Approval")
+        .filter(Requisition.overall_status == "Pending_HR")
         .scalar()
     ) or 0
 
@@ -190,12 +190,12 @@ def get_upcoming_probation_count(db: Session, days: int = 30) -> int:
 
 
 def get_pending_approvals(db: Session, limit: int = 10) -> list[dict]:
-    """Get requisitions pending HR approval with requester info"""
+    """Get requisitions pending HR approval with requester info (status Pending_HR), ordered by req_id descending (newest first)."""
     requisitions = (
         db.query(Requisition, User.username)
         .outerjoin(User, User.user_id == Requisition.raised_by)
-        .filter(Requisition.overall_status == "Pending HR Approval")
-        .order_by(Requisition.created_at.desc())
+        .filter(Requisition.overall_status == "Pending_HR")
+        .order_by(Requisition.req_id.desc())
         .limit(limit)
         .all()
     )
@@ -218,16 +218,12 @@ def get_pending_approvals(db: Session, limit: int = 10) -> list[dict]:
 
 
 def get_hr_pending_approvals(db: Session, limit: Optional[int] = None) -> list[dict]:
-    """Get requisitions pending HR approval ordered by oldest first."""
+    """Get requisitions pending HR approval (status Pending_HR) ordered by req_id descending (newest first)."""
     query = (
         db.query(Requisition, User.username)
         .outerjoin(User, User.user_id == Requisition.raised_by)
-        .filter(
-            Requisition.overall_status.in_(
-                ["Pending HR Approval", "Pending Budget Approval"]
-            )
-        )
-        .order_by(Requisition.created_at.asc())
+        .filter(Requisition.overall_status == "Pending_HR")
+        .order_by(Requisition.req_id.desc())
     )
 
     if limit:
