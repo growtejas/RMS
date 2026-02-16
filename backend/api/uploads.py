@@ -80,11 +80,13 @@ async def download_resume(
 ):
     """Download / serve a candidate resume file."""
     import os
+    import mimetypes
     file_path = storage.get_url(filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Resume file not found")
+    media_type, _ = mimetypes.guess_type(file_path)
     return FileResponse(
         path=file_path,
         filename=filename,
-        media_type="application/octet-stream",
+        media_type=media_type or "application/octet-stream",
     )

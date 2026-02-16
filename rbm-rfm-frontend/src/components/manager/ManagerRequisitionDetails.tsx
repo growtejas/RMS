@@ -17,6 +17,9 @@ import {
   History,
 } from "lucide-react";
 import { apiClient } from "../../api/client";
+import type { Candidate } from "../../api/candidateApi";
+import { fetchCandidates } from "../../api/candidateApi";
+import CandidateDetailModal from "../shared/CandidateDetailModal";
 import { useAuth } from "../../contexts/AuthContext";
 
 // Types
@@ -379,6 +382,19 @@ const ManagerRequisitionDetails: React.FC = () => {
   const [isUploadingJd, setIsUploadingJd] = useState(false);
   const [isRemovingJd, setIsRemovingJd] = useState(false);
   const [jdInputKey, setJdInputKey] = useState(0);
+
+  // Candidate pipeline (read-only for Manager)
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [candidateError, setCandidateError] = useState<string | null>(null);
+  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(
+    null,
+  );
+  const [candidateStageFilter, setCandidateStageFilter] =
+    useState<string>("all");
+  const [candidateItemFilter, setCandidateItemFilter] = useState<
+    number | "all"
+  >("all");
 
   // Permission check - Backend is single source of truth
   // Only Draft status allows editing by the creator
@@ -814,6 +830,37 @@ const ManagerRequisitionDetails: React.FC = () => {
 
     fetchData();
   }, [id, buildMasterTimeline]);
+
+  // Load candidates for this requisition (read-only view)
+  useEffect(() => {
+    if (!requisition) return;
+
+    let isMounted = true;
+    const loadCandidates = async () => {
+      try {
+        setCandidatesLoading(true);
+        setCandidateError(null);
+        const data = await fetchCandidates(requisition.req_id);
+        if (!isMounted) return;
+        setCandidates(data);
+      } catch (err: unknown) {
+        if (!isMounted) return;
+        const message =
+          err instanceof Error ? err.message : "Failed to load candidates";
+        setCandidateError(message);
+      } finally {
+        if (isMounted) {
+          setCandidatesLoading(false);
+        }
+      }
+    };
+
+    loadCandidates();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [requisition?.req_id]);
 
   // Handle before unload for unsaved changes
   useEffect(() => {
@@ -2130,8 +2177,206 @@ const ManagerRequisitionDetails: React.FC = () => {
             </div>
           </div>
 
-          {/* Right Column - Timeline & Attachments */}
+          {/* Right Column - Candidates, Timeline & Attachments */}
           <div className="space-y-6">
+            {/* Candidate Pipeline (read-only) */}
+            <div className="bg-white rounded-xl border border-gray-200">
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Candidate Pipeline
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Read-only view of candidates linked to this requisition and their
+                  current stages.
+                </p>
+              </div>
+              <div className="p-6 space-y-4">
+                {candidateError && (
+                  <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">
+                    {candidateError}
+                  </div>
+                )}
+
+                {candidatesLoading ? (
+                  <div className="py-6 text-center text-gray-500 text-sm">
+                    Loading candidates...
+                  </div>
+                ) : candidates.length === 0 ? (
+                  <div className="py-6 text-center text-gray-500 text-sm">
+                    No candidates have been added yet for this requisition.
+                  </div>
+                ) : (
+                  <>
+                    {/* Filters */}
+                    <div className="flex flex-col gap-3 mb-4">
+                      {/* Item filter */}
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="text-xs font-medium text-gray-600">
+                          Filter by Position:
+                        </span>
+                        <select
+                          value={
+                            candidateItemFilter === "all"
+                              ? "all"
+                              : candidateItemFilter
+                          }
+                          onChange={(e) =>
+                            setCandidateItemFilter(
+                              e.target.value === "all"
+                                ? "all"
+                                : Number(e.target.value),
+                            )
+                          }
+                          className="px-3 py-1.5 rounded-lg border border-gray-300 text-xs bg-white"
+                        >
+                          <option value="all">All Positions</option>
+                          {requisition.items.map((item) => {
+                            const countForItem = candidates.filter(
+                              (c) => c.requisition_item_id === item.item_id,
+                            ).length;
+                            return (
+                              <option key={item.item_id} value={item.item_id}>
+                                {item.role_position} ({countForItem})
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+
+                      {/* Stage filter */}
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          "all",
+                          "Sourced",
+                          "Shortlisted",
+                          "Interviewing",
+                          "Offered",
+                          "Hired",
+                          "Rejected",
+                        ].map((stage) => {
+                          const filteredByItem =
+                            candidateItemFilter === "all"
+                              ? candidates
+                              : candidates.filter(
+                                  (c) =>
+                                    c.requisition_item_id === candidateItemFilter,
+                                );
+                          const count =
+                            stage === "all"
+                              ? filteredByItem.length
+                              : filteredByItem.filter(
+                                  (c) => c.current_stage === stage,
+                                ).length;
+                          const isActive = candidateStageFilter === stage;
+                          return (
+                            <button
+                              key={stage}
+                              type="button"
+                              onClick={() => setCandidateStageFilter(stage)}
+                              className={`px-3 py-1.5 rounded-full text-xs font-medium border ${
+                                isActive
+                                  ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                                  : "border-gray-200 text-gray-600 bg-white"
+                              }`}
+                            >
+                              {stage === "all" ? "All" : stage} ({count})
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Candidate list */}
+                    <div className="space-y-3">
+                      {candidates
+                        .filter((c) => {
+                          if (
+                            candidateItemFilter !== "all" &&
+                            c.requisition_item_id !== candidateItemFilter
+                          ) {
+                            return false;
+                          }
+                          if (
+                            candidateStageFilter !== "all" &&
+                            c.current_stage !== candidateStageFilter
+                          ) {
+                            return false;
+                          }
+                          return true;
+                        })
+                        .map((c) => {
+                          const linkedItem = requisition.items.find(
+                            (it) => it.item_id === c.requisition_item_id,
+                          );
+                          const stageColors: Record<
+                            string,
+                            { bg: string; text: string }
+                          > = {
+                            Sourced: {
+                              bg: "bg-slate-100 text-slate-700",
+                              text: "",
+                            },
+                            Shortlisted: {
+                              bg: "bg-blue-100 text-blue-700",
+                              text: "",
+                            },
+                            Interviewing: {
+                              bg: "bg-purple-100 text-purple-700",
+                              text: "",
+                            },
+                            Offered: {
+                              bg: "bg-amber-100 text-amber-700",
+                              text: "",
+                            },
+                            Hired: {
+                              bg: "bg-emerald-100 text-emerald-700",
+                              text: "",
+                            },
+                            Rejected: {
+                              bg: "bg-red-100 text-red-700",
+                              text: "",
+                            },
+                          };
+                          const stageClass =
+                            stageColors[c.current_stage]?.bg ??
+                            "bg-slate-100 text-slate-700";
+
+                          return (
+                            <button
+                              key={c.candidate_id}
+                              type="button"
+                              onClick={() => setSelectedCandidate(c)}
+                              className="w-full text-left border border-gray-200 rounded-lg p-3 hover:border-indigo-300 hover:bg-indigo-50/40 transition-colors"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="font-medium text-gray-900 text-sm">
+                                    {c.full_name}
+                                  </div>
+                                  <div className="text-xs text-gray-600 mt-1">
+                                    {c.email}
+                                    {c.phone ? ` • ${c.phone}` : ""}
+                                  </div>
+                                  {linkedItem && (
+                                    <div className="text-xs text-gray-500 mt-1">
+                                      Position: {linkedItem.role_position}
+                                    </div>
+                                  )}
+                                </div>
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${stageClass}`}
+                                >
+                                  {c.current_stage}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
             {/* Job Description PDF */}
             <div className="bg-white rounded-xl border border-gray-200">
               <div className="p-6 border-b border-gray-200">
@@ -2282,6 +2527,23 @@ const ManagerRequisitionDetails: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Candidate Detail Modal (read-only actions for Manager) */}
+      {selectedCandidate && (
+        <CandidateDetailModal
+          candidate={selectedCandidate}
+          onClose={() => setSelectedCandidate(null)}
+          onUpdate={(updated) => {
+            setCandidates((prev) =>
+              prev.map((c) =>
+                c.candidate_id === updated.candidate_id ? updated : c,
+              ),
+            );
+            setSelectedCandidate(null);
+          }}
+          userRoles={user?.roles || []}
+        />
+      )}
     </div>
   );
 };

@@ -268,9 +268,10 @@ export default function CandidateDetailModal({
     : null;
 
   const isPdf = resumeUrl
-    ? candidate.resume_path?.startsWith("http")
-      ? resumeUrl.toLowerCase().endsWith(".pdf")
-      : (resumeMimeType ?? "").toLowerCase().includes("pdf")
+    ? // Remote URL: decide by extension
+      candidate.resume_path?.toLowerCase().endsWith(".pdf") ||
+      // Local blob: decide by MIME type OR original filename
+      (resumeMimeType ?? "").toLowerCase().includes("pdf")
     : false;
 
   const resumeFilename =
