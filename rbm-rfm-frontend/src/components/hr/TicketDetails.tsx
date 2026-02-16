@@ -35,25 +35,23 @@ import { useParams, useNavigate } from "react-router-dom";
 import { apiClient } from "../../api/client";
 import HRGatekeeperPanel from "./HRGatekeeperPanel";
 import ReassignTAModal from "./ReassignTAModal";
-import type { Requisition as WorkflowRequisition, RequisitionItem as WorkflowRequisitionItem } from "../../types/workflow";
+import type {
+  Requisition as WorkflowRequisition,
+  RequisitionItem as WorkflowRequisitionItem,
+} from "../../types/workflow";
 import { useAuth } from "../../contexts/AuthContext";
+import {
+  fetchCandidates,
+  createCandidate,
+  uploadResume,
+  type Candidate,
+} from "../../api/candidateApi";
+import CandidateDetailModal from "../shared/CandidateDetailModal";
 
 interface TicketDetailsProps {
   ticketId?: string | null;
   onBack?: () => void;
   onUpdate?: (ticket: any) => void;
-}
-
-interface Employee {
-  id: string;
-  name: string;
-  skill: string;
-  level: string;
-  experience: number;
-  location: string;
-  availability: "Available" | "On Project" | "On Notice";
-  matchScore: number;
-  department: string;
 }
 
 interface RequisitionItem {
@@ -111,7 +109,6 @@ interface TicketData {
   budget: string;
   projectDuration: string;
   items: RequisitionItem[];
-  availableEmployees: Employee[];
   timeline: TimelineEvent[];
   notes: NoteEntry[];
 }
@@ -191,16 +188,17 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
 
   // Check if user is HR or Admin for Gatekeeper access
   const isHRRole = (user?.roles || []).some(
-    (r) => r.toLowerCase() === "hr" || r.toLowerCase() === "admin"
+    (r) => r.toLowerCase() === "hr" || r.toLowerCase() === "admin",
   );
 
   // Raw requisition data for Gatekeeper panel
-  const [rawRequisition, setRawRequisition] = useState<WorkflowRequisition | null>(null);
+  const [rawRequisition, setRawRequisition] =
+    useState<WorkflowRequisition | null>(null);
   const getTodayDate = () =>
     new Date().toISOString().split("T")[0] ?? new Date().toISOString();
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "overview" | "items" | "employees" | "timeline" | "gatekeeper"
+    "overview" | "items" | "candidates" | "timeline" | "gatekeeper"
   >("overview");
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
   const [selectedItemForAssignment, setSelectedItemForAssignment] = useState<
@@ -213,6 +211,25 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
   const [usersById, setUsersById] = useState<Record<number, string>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // ---- Candidate Pipeline state ----
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(
+    null,
+  );
+  const [showAddCandidate, setShowAddCandidate] = useState(false);
+  const [addCandidateItemId, setAddCandidateItemId] = useState<number | null>(
+    null,
+  );
+  const [newCandidateName, setNewCandidateName] = useState("");
+  const [newCandidateEmail, setNewCandidateEmail] = useState("");
+  const [newCandidatePhone, setNewCandidatePhone] = useState("");
+  const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [addingCandidate, setAddingCandidate] = useState(false);
+  const [candidateStageFilter, setCandidateStageFilter] =
+    useState<string>("all");
+  const [candidateError, setCandidateError] = useState<string | null>(null);
 
   // ---- Phase 7: TA Reassignment state ----
   const [reassignModal, setReassignModal] = useState<{
@@ -288,7 +305,6 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
           description: item.job_description,
           requirements: item.requirements ?? undefined,
         })) ?? [],
-      availableEmployees: [],
       timeline: [],
       notes: [],
     };
@@ -378,13 +394,14 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
         if (isMounted) {
           const data = response.data;
           setTicket(buildTicket(data));
-          
+
           // Store raw data for Gatekeeper panel
           const workflowReq: WorkflowRequisition = {
             req_id: data.req_id,
             project_name: data.project_name ?? null,
             client_name: data.client_name ?? null,
-            overall_status: data.overall_status as WorkflowRequisition["overall_status"],
+            overall_status:
+              data.overall_status as WorkflowRequisition["overall_status"],
             required_by_date: data.required_by_date ?? null,
             priority: data.priority ?? null,
             budget_amount: data.budget_amount ?? null,
@@ -404,9 +421,18 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
             approval_history: data.approval_history ?? null,
             assigned_at: data.assigned_at ?? null,
             total_items: data.items?.length ?? 0,
-            fulfilled_items: data.items?.filter((i) => i.item_status === "Fulfilled").length ?? 0,
-            cancelled_items: data.items?.filter((i) => i.item_status === "Cancelled").length ?? 0,
-            active_items: data.items?.filter((i) => i.item_status !== "Fulfilled" && i.item_status !== "Cancelled").length ?? 0,
+            fulfilled_items:
+              data.items?.filter((i) => i.item_status === "Fulfilled").length ??
+              0,
+            cancelled_items:
+              data.items?.filter((i) => i.item_status === "Cancelled").length ??
+              0,
+            active_items:
+              data.items?.filter(
+                (i) =>
+                  i.item_status !== "Fulfilled" &&
+                  i.item_status !== "Cancelled",
+              ).length ?? 0,
             progress_ratio: null,
             progress_text: null,
             total_estimated_budget: 0,
@@ -431,7 +457,8 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                 education_requirement: item.education_requirement ?? null,
                 job_description: item.job_description,
                 requirements: item.requirements ?? null,
-                item_status: item.item_status as WorkflowRequisitionItem["item_status"],
+                item_status:
+                  item.item_status as WorkflowRequisitionItem["item_status"],
                 replacement_hire: extItem.replacement_hire ?? false,
                 replaced_emp_id: extItem.replaced_emp_id ?? null,
                 estimated_budget: extItem.estimated_budget ?? null,
@@ -442,19 +469,19 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
               };
             }),
           };
-          
+
           // Calculate totals
           workflowReq.total_estimated_budget = workflowReq.items.reduce(
             (sum, item) => sum + (item.estimated_budget || 0),
-            0
+            0,
           );
           workflowReq.total_approved_budget = workflowReq.items.reduce(
             (sum, item) => sum + (item.approved_budget || 0),
-            0
+            0,
           );
-          
+
           setRawRequisition(workflowReq);
-          
+
           // Auto-switch to Gatekeeper tab if status is Pending_Budget and user is HR
           if (data.overall_status === "Pending_Budget" && isHRRole) {
             setActiveTab("gatekeeper");
@@ -520,6 +547,63 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
     };
   }, [effectiveTicketId]);
 
+  // ---- Load candidates when requisition is available ----
+  const loadCandidates = useCallback(async () => {
+    const reqId = parseReqId(effectiveTicketId);
+    if (!reqId) return;
+    setCandidatesLoading(true);
+    try {
+      const data = await fetchCandidates(reqId);
+      setCandidates(data);
+    } catch {
+      setCandidates([]);
+    } finally {
+      setCandidatesLoading(false);
+    }
+  }, [effectiveTicketId]);
+
+  useEffect(() => {
+    loadCandidates();
+  }, [loadCandidates]);
+
+  // ---- Add candidate handler ----
+  const handleAddCandidate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ticket || !addCandidateItemId) return;
+    setAddingCandidate(true);
+    setCandidateError(null);
+    try {
+      let resumePath: string | undefined;
+      if (resumeFile) {
+        const uploaded = await uploadResume(resumeFile);
+        resumePath = uploaded.filename;
+      }
+      const reqId = parseReqId(effectiveTicketId);
+      if (!reqId) return;
+      await createCandidate({
+        requisition_item_id: addCandidateItemId,
+        requisition_id: reqId,
+        full_name: newCandidateName.trim(),
+        email: newCandidateEmail.trim(),
+        phone: newCandidatePhone.trim() || undefined,
+        resume_path: resumePath,
+      });
+      setNewCandidateName("");
+      setNewCandidateEmail("");
+      setNewCandidatePhone("");
+      setResumeFile(null);
+      setShowAddCandidate(false);
+      setAddCandidateItemId(null);
+      await loadCandidates();
+    } catch (err: any) {
+      setCandidateError(
+        err?.response?.data?.detail ?? "Failed to add candidate",
+      );
+    } finally {
+      setAddingCandidate(false);
+    }
+  };
+
   // Refresh data callback for Gatekeeper panel
   // IMPORTANT: This hook must be called before any early returns
   const handleRefreshData = useCallback(async () => {
@@ -539,7 +623,8 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
         req_id: data.req_id,
         project_name: data.project_name ?? null,
         client_name: data.client_name ?? null,
-        overall_status: data.overall_status as WorkflowRequisition["overall_status"],
+        overall_status:
+          data.overall_status as WorkflowRequisition["overall_status"],
         required_by_date: data.required_by_date ?? null,
         priority: data.priority ?? null,
         budget_amount: data.budget_amount ?? null,
@@ -559,9 +644,15 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
         approval_history: data.approval_history ?? null,
         assigned_at: data.assigned_at ?? null,
         total_items: data.items?.length ?? 0,
-        fulfilled_items: data.items?.filter((i) => i.item_status === "Fulfilled").length ?? 0,
-        cancelled_items: data.items?.filter((i) => i.item_status === "Cancelled").length ?? 0,
-        active_items: data.items?.filter((i) => i.item_status !== "Fulfilled" && i.item_status !== "Cancelled").length ?? 0,
+        fulfilled_items:
+          data.items?.filter((i) => i.item_status === "Fulfilled").length ?? 0,
+        cancelled_items:
+          data.items?.filter((i) => i.item_status === "Cancelled").length ?? 0,
+        active_items:
+          data.items?.filter(
+            (i) =>
+              i.item_status !== "Fulfilled" && i.item_status !== "Cancelled",
+          ).length ?? 0,
         progress_ratio: null,
         progress_text: null,
         total_estimated_budget: 0,
@@ -586,7 +677,8 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
             education_requirement: item.education_requirement ?? null,
             job_description: item.job_description,
             requirements: item.requirements ?? null,
-            item_status: item.item_status as WorkflowRequisitionItem["item_status"],
+            item_status:
+              item.item_status as WorkflowRequisitionItem["item_status"],
             replacement_hire: extItem.replacement_hire ?? false,
             replaced_emp_id: extItem.replaced_emp_id ?? null,
             estimated_budget: extItem.estimated_budget ?? null,
@@ -600,17 +692,20 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
 
       workflowReq.total_estimated_budget = workflowReq.items.reduce(
         (sum, item) => sum + (item.estimated_budget || 0),
-        0
+        0,
       );
       workflowReq.total_approved_budget = workflowReq.items.reduce(
         (sum, item) => sum + (item.approved_budget || 0),
-        0
+        0,
       );
 
       setRawRequisition(workflowReq);
 
       // If status changed from Pending_Budget, switch to overview
-      if (data.overall_status !== "Pending_Budget" && activeTab === "gatekeeper") {
+      if (
+        data.overall_status !== "Pending_Budget" &&
+        activeTab === "gatekeeper"
+      ) {
         setActiveTab("overview");
       }
     } catch (err) {
@@ -804,46 +899,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
 
   // Handle employee assignment
   const handleAssignEmployee = (itemId: string, employeeId: string) => {
-    if (!ticket) return;
-    const employee = ticket.availableEmployees.find(
-      (emp) => emp.id === employeeId,
-    );
-    if (!employee) return;
-
-    const updatedItems = ticket.items.map((item) =>
-      item.id === itemId
-        ? {
-            ...item,
-            itemStatus: "Fulfilled" as const,
-            assignedEmployeeId: employeeId,
-            assignedEmployeeName: employee.name,
-            assignedDate: getTodayDate(),
-          }
-        : item,
-    );
-
-    setTicket({ ...ticket, items: updatedItems });
-    setSelectedItemForAssignment(null);
-
-    // Add to timeline
-    setTicket((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        timeline: [
-          ...prev.timeline,
-          {
-            date: getTodayDate(),
-            event: `Assigned ${employee.name} to ${prev.items.find((i) => i.id === itemId)?.skill ?? "resource"}`,
-            user: "Current User",
-          },
-        ],
-      };
-    });
-
-    if (onUpdate) {
-      onUpdate({ ...ticket, items: updatedItems });
-    }
+    // Legacy stub — assignments now go through the Candidate Pipeline
   };
 
   // Toggle item expansion
@@ -912,9 +968,9 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       icon: <Briefcase size={16} />,
     },
     {
-      id: "employees" as const,
-      label: "Available Employees",
-      icon: <Users size={16} />,
+      id: "candidates" as const,
+      label: "Candidates",
+      icon: <UserPlus size={16} />,
     },
     { id: "timeline" as const, label: "Timeline", icon: <History size={16} /> },
   ];
@@ -1484,10 +1540,10 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                 {/* <button
                   className="action-button"
                   style={{ justifyContent: "flex-start", textAlign: "left" }}
-                  onClick={() => setActiveTab("employees")}
+                  onClick={() => setActiveTab("candidates")}
                 >
                   <Users size={16} />
-                  View Available Employees
+                  View Candidates
                 </button> */}
                 {/* <button
                   className="action-button"
@@ -1519,7 +1575,14 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
 
       {activeTab === "items" && (
         <div className="master-data-manager">
-          <div className="data-manager-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div
+            className="data-manager-header"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
             <div>
               <h2>Requisition Items Management</h2>
               <p className="subtitle">
@@ -1528,47 +1591,51 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
             </div>
 
             {/* Phase 7: Bulk Change TA — HR Admin only */}
-            {isHRRole && ticket.items.some(
-              (i) => i.itemStatus !== "Fulfilled" && i.itemStatus !== "Cancelled" && i.assignedTAId,
-            ) && (
-              <button
-                className="action-button"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  fontSize: "13px",
-                  padding: "10px 16px",
-                  whiteSpace: "nowrap",
-                }}
-                onClick={() => {
-                  // Find the most common currently assigned TA for pre-selection
-                  const taCounts: Record<number, number> = {};
-                  ticket.items.forEach((i) => {
-                    if (
-                      i.assignedTAId &&
-                      i.itemStatus !== "Fulfilled" &&
-                      i.itemStatus !== "Cancelled"
-                    ) {
-                      taCounts[i.assignedTAId] =
-                        (taCounts[i.assignedTAId] ?? 0) + 1;
-                    }
-                  });
-                  const topTA = Object.entries(taCounts).sort(
-                    (a, b) => b[1] - a[1],
-                  )[0];
-                  const defaultOldTA = topTA ? Number(topTA[0]) : null;
-                  setBulkOldTAId(defaultOldTA);
-                  setReassignModal({
-                    mode: "bulk",
-                    currentTAId: defaultOldTA,
-                  });
-                }}
-              >
-                <ArrowRightLeft size={14} />
-                Bulk Change TA
-              </button>
-            )}
+            {isHRRole &&
+              ticket.items.some(
+                (i) =>
+                  i.itemStatus !== "Fulfilled" &&
+                  i.itemStatus !== "Cancelled" &&
+                  i.assignedTAId,
+              ) && (
+                <button
+                  className="action-button"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    fontSize: "13px",
+                    padding: "10px 16px",
+                    whiteSpace: "nowrap",
+                  }}
+                  onClick={() => {
+                    // Find the most common currently assigned TA for pre-selection
+                    const taCounts: Record<number, number> = {};
+                    ticket.items.forEach((i) => {
+                      if (
+                        i.assignedTAId &&
+                        i.itemStatus !== "Fulfilled" &&
+                        i.itemStatus !== "Cancelled"
+                      ) {
+                        taCounts[i.assignedTAId] =
+                          (taCounts[i.assignedTAId] ?? 0) + 1;
+                      }
+                    });
+                    const topTA = Object.entries(taCounts).sort(
+                      (a, b) => b[1] - a[1],
+                    )[0];
+                    const defaultOldTA = topTA ? Number(topTA[0]) : null;
+                    setBulkOldTAId(defaultOldTA);
+                    setReassignModal({
+                      mode: "bulk",
+                      currentTAId: defaultOldTA,
+                    });
+                  }}
+                >
+                  <ArrowRightLeft size={14} />
+                  Bulk Change TA
+                </button>
+              )}
           </div>
 
           <div
@@ -1579,13 +1646,9 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
               const secondarySkills = parseSecondarySkills(item.requirements);
               const primarySkill =
                 parsePrimarySkill(item.requirements) ?? item.skill;
-              const matchedEmployees = ticket.availableEmployees
-                .filter(
-                  (emp) =>
-                    emp.skill.includes(item.skill.split(" ")[0] ?? "") &&
-                    emp.level === item.level,
-                )
-                .sort((a, b) => b.matchScore - a.matchScore);
+              const itemCandidates = candidates.filter(
+                (c) => c.requisition_item_id === item.numericItemId,
+              );
 
               return (
                 <div
@@ -1885,95 +1948,110 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                         >
                           <div
                             style={{
-                              fontSize: "13px",
-                              fontWeight: 600,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
                               marginBottom: "12px",
                             }}
                           >
-                            Available Matches ({matchedEmployees.length})
+                            <span style={{ fontSize: "13px", fontWeight: 600 }}>
+                              Candidates ({itemCandidates.length})
+                            </span>
+                            <button
+                              className="action-button primary"
+                              style={{
+                                fontSize: "11px",
+                                padding: "4px 10px",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "4px",
+                              }}
+                              onClick={() => {
+                                setAddCandidateItemId(item.numericItemId);
+                                setShowAddCandidate(true);
+                              }}
+                            >
+                              <UserPlus size={12} /> Add Candidate
+                            </button>
                           </div>
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: "8px",
-                            }}
-                          >
-                            {matchedEmployees.map((emp) => (
-                              <div
-                                key={emp.id}
-                                style={{
-                                  padding: "12px",
-                                  backgroundColor: "var(--bg-primary)",
-                                  borderRadius: "8px",
-                                  border: "1px solid var(--border-subtle)",
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  alignItems: "center",
-                                }}
-                              >
-                                <div>
-                                  <div style={{ fontWeight: 500 }}>
-                                    {emp.name}
-                                  </div>
-                                  <div
-                                    style={{
-                                      fontSize: "11px",
-                                      color: "var(--text-tertiary)",
-                                    }}
-                                  >
-                                    {emp.department} • {emp.location} •{" "}
-                                    {emp.experience}y exp
-                                  </div>
-                                </div>
+                          {itemCandidates.length === 0 ? (
+                            <div
+                              style={{
+                                fontSize: "12px",
+                                color: "var(--text-tertiary)",
+                                textAlign: "center",
+                                padding: "12px",
+                              }}
+                            >
+                              No candidates yet. Add one to start the pipeline.
+                            </div>
+                          ) : (
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "8px",
+                              }}
+                            >
+                              {itemCandidates.map((c) => (
                                 <div
+                                  key={c.candidate_id}
                                   style={{
+                                    padding: "10px 12px",
+                                    backgroundColor: "var(--bg-primary)",
+                                    borderRadius: "8px",
+                                    border: "1px solid var(--border-subtle)",
                                     display: "flex",
+                                    justifyContent: "space-between",
                                     alignItems: "center",
-                                    gap: "12px",
+                                    cursor: "pointer",
                                   }}
+                                  onClick={() => setSelectedCandidate(c)}
                                 >
+                                  <div>
+                                    <div
+                                      style={{
+                                        fontWeight: 500,
+                                        fontSize: "13px",
+                                      }}
+                                    >
+                                      {c.full_name}
+                                    </div>
+                                    <div
+                                      style={{
+                                        fontSize: "11px",
+                                        color: "var(--text-tertiary)",
+                                      }}
+                                    >
+                                      {c.email} • {c.interviews.length} round(s)
+                                    </div>
+                                  </div>
                                   <span
                                     style={{
-                                      padding: "4px 8px",
+                                      padding: "2px 8px",
                                       borderRadius: "12px",
                                       fontSize: "11px",
-                                      background:
-                                        emp.availability === "Available"
-                                          ? "rgba(16, 185, 129, 0.1)"
-                                          : "rgba(245, 158, 11, 0.1)",
-                                      color:
-                                        emp.availability === "Available"
-                                          ? "var(--success)"
-                                          : "var(--warning)",
-                                    }}
-                                  >
-                                    {emp.availability}
-                                  </span>
-                                  <span
-                                    style={{
                                       fontWeight: 600,
-                                      color: "var(--primary-accent)",
+                                      backgroundColor:
+                                        c.current_stage === "Hired"
+                                          ? "rgba(16,185,129,0.1)"
+                                          : c.current_stage === "Rejected"
+                                            ? "rgba(239,68,68,0.1)"
+                                            : "rgba(59,130,246,0.1)",
+                                      color:
+                                        c.current_stage === "Hired"
+                                          ? "#10b981"
+                                          : c.current_stage === "Rejected"
+                                            ? "#ef4444"
+                                            : "#3b82f6",
                                     }}
                                   >
-                                    {emp.matchScore}% match
+                                    {c.current_stage}
                                   </span>
-                                  <button
-                                    className="action-button primary"
-                                    style={{
-                                      fontSize: "11px",
-                                      padding: "6px 12px",
-                                    }}
-                                    onClick={() =>
-                                      handleAssignEmployee(item.id, emp.id)
-                                    }
-                                  >
-                                    Assign
-                                  </button>
                                 </div>
-                              </div>
-                            ))}
-                          </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2023,249 +2101,475 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
         </div>
       )}
 
-      {activeTab === "employees" && (
+      {activeTab === "candidates" && (
         <div className="master-data-manager">
-          <div className="data-manager-header">
-            <h2>Available Employees</h2>
-            <p className="subtitle">
-              Match resources to open positions based on skills and availability
-            </p>
-          </div>
-
-          {/* Search and Filter */}
-          <div className="filter-grid" style={{ marginBottom: "24px" }}>
-            <div className="filter-item">
-              <label>Skill Match</label>
-              <select style={{ width: "100%" }}>
-                <option>All Skills</option>
-                <option>Python Developer</option>
-                <option>React Developer</option>
-                <option>DevOps Engineer</option>
-              </select>
-            </div>
-            <div className="filter-item">
-              <label>Availability</label>
-              <select style={{ width: "100%" }}>
-                <option>All Status</option>
-                <option>Available</option>
-                <option>On Project</option>
-                <option>On Notice</option>
-              </select>
-            </div>
-            <div className="filter-item">
-              <label>Location</label>
-              <select style={{ width: "100%" }}>
-                <option>All Locations</option>
-                <option>Bengaluru</option>
-                <option>Mumbai</option>
-                <option>Delhi</option>
-                <option>Pune</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Employees List */}
           <div
-            style={{ display: "flex", flexDirection: "column", gap: "12px" }}
+            className="data-manager-header"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
           >
-            {ticket.availableEmployees.map((emp) => {
-              const openItems = ticket.items.filter(
-                (item) =>
-                  item.itemStatus === "Pending" &&
-                  item.skill.includes(emp.skill.split(" ")[0] ?? "") &&
-                  item.level === emp.level,
-              );
+            <div>
+              <h2>Candidate Pipeline</h2>
+              <p className="subtitle">
+                Track and manage candidates across all positions
+              </p>
+            </div>
+            <button
+              className="action-button primary"
+              style={{ display: "flex", alignItems: "center", gap: "6px" }}
+              onClick={() => {
+                setAddCandidateItemId(ticket.items[0]?.numericItemId ?? null);
+                setShowAddCandidate(true);
+              }}
+              disabled={!ticket.items.length}
+            >
+              <UserPlus size={14} /> Add Candidate
+            </button>
+          </div>
 
+          {/* Stage filter tabs */}
+          <div
+            style={{
+              display: "flex",
+              gap: "8px",
+              marginBottom: "20px",
+              flexWrap: "wrap",
+            }}
+          >
+            {[
+              "all",
+              "Sourced",
+              "Shortlisted",
+              "Interviewing",
+              "Offered",
+              "Hired",
+              "Rejected",
+            ].map((stage) => {
+              const count =
+                stage === "all"
+                  ? candidates.length
+                  : candidates.filter((c) => c.current_stage === stage).length;
+              const isActive = candidateStageFilter === stage;
               return (
-                <div
-                  key={emp.id}
+                <button
+                  key={stage}
+                  onClick={() => setCandidateStageFilter(stage)}
                   style={{
-                    padding: "20px",
-                    backgroundColor: "var(--bg-primary)",
-                    borderRadius: "12px",
-                    border: "1px solid var(--border-subtle)",
-                    transition: "all 0.2s ease",
+                    padding: "6px 14px",
+                    borderRadius: "20px",
+                    fontSize: "12px",
+                    fontWeight: isActive ? 600 : 400,
+                    border: isActive
+                      ? "2px solid var(--primary-accent)"
+                      : "1px solid var(--border-subtle)",
+                    backgroundColor: isActive
+                      ? "rgba(59,130,246,0.08)"
+                      : "transparent",
+                    color: isActive
+                      ? "var(--primary-accent)"
+                      : "var(--text-secondary)",
+                    cursor: "pointer",
                   }}
                 >
-                  <div
+                  {stage === "all" ? "All" : stage} ({count})
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Add Candidate Form */}
+          {showAddCandidate && (
+            <form
+              onSubmit={handleAddCandidate}
+              style={{
+                marginBottom: "20px",
+                padding: "20px",
+                borderRadius: "12px",
+                backgroundColor: "rgba(59,130,246,0.04)",
+                border: "1px solid rgba(59,130,246,0.15)",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  marginBottom: "16px",
+                }}
+              >
+                Add New Candidate
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "12px",
+                  marginBottom: "12px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: "180px" }}>
+                  <label
                     style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      justifyContent: "space-between",
-                      marginBottom: "16px",
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      display: "block",
+                      marginBottom: "4px",
                     }}
                   >
-                    <div>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "12px",
-                          marginBottom: "8px",
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: "40px",
-                            height: "40px",
-                            borderRadius: "8px",
-                            background:
-                              "linear-gradient(135deg, var(--slate-600), var(--slate-700))",
-                            color: "white",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontWeight: 600,
-                            fontSize: "14px",
-                          }}
-                        >
-                          {emp.name
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")}
-                        </div>
-                        <div>
-                          <div style={{ fontSize: "15px", fontWeight: 600 }}>
-                            {emp.name}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "13px",
-                              color: "var(--text-secondary)",
-                            }}
-                          >
-                            {emp.skill} • {emp.level} • {emp.department}
-                          </div>
-                        </div>
-                      </div>
+                    Position *
+                  </label>
+                  <select
+                    value={addCandidateItemId ?? ""}
+                    onChange={(e) =>
+                      setAddCandidateItemId(Number(e.target.value))
+                    }
+                    required
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-subtle)",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {ticket.items.map((it) => (
+                      <option key={it.numericItemId} value={it.numericItemId}>
+                        {it.skill} — {it.level}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ flex: 1, minWidth: "180px" }}>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      display: "block",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={newCandidateName}
+                    onChange={(e) => setNewCandidateName(e.target.value)}
+                    required
+                    placeholder="e.g., Tejas Sharma"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-subtle)",
+                      fontSize: "13px",
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1, minWidth: "180px" }}>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      display: "block",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Email *
+                  </label>
+                  <input
+                    type="email"
+                    value={newCandidateEmail}
+                    onChange={(e) => setNewCandidateEmail(e.target.value)}
+                    required
+                    placeholder="tejas@example.com"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-subtle)",
+                      fontSize: "13px",
+                    }}
+                  />
+                </div>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "12px",
+                  marginBottom: "16px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: "180px" }}>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      display: "block",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Phone
+                  </label>
+                  <input
+                    type="tel"
+                    value={newCandidatePhone}
+                    onChange={(e) => setNewCandidatePhone(e.target.value)}
+                    placeholder="+91-XXXXXXXXXX"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-subtle)",
+                      fontSize: "13px",
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1, minWidth: "180px" }}>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      display: "block",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Resume (PDF/DOC)
+                  </label>
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx"
+                    onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)}
+                    style={{ width: "100%", padding: "6px", fontSize: "12px" }}
+                  />
+                </div>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  justifyContent: "flex-end",
+                }}
+              >
+                <button
+                  type="button"
+                  className="action-button"
+                  style={{ fontSize: "12px", padding: "8px 16px" }}
+                  onClick={() => {
+                    setShowAddCandidate(false);
+                    setAddCandidateItemId(null);
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="action-button primary"
+                  style={{ fontSize: "12px", padding: "8px 16px" }}
+                  disabled={
+                    addingCandidate ||
+                    !newCandidateName.trim() ||
+                    !newCandidateEmail.trim()
+                  }
+                >
+                  {addingCandidate ? "Adding..." : "Add Candidate"}
+                </button>
+              </div>
+            </form>
+          )}
 
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "16px",
-                          fontSize: "12px",
-                          color: "var(--text-tertiary)",
-                        }}
-                      >
-                        <span>📍 {emp.location}</span>
-                        <span>📊 {emp.experience} years exp</span>
-                        <span
-                          style={{
-                            padding: "2px 8px",
-                            borderRadius: "12px",
-                            background:
-                              emp.availability === "Available"
-                                ? "rgba(16, 185, 129, 0.1)"
-                                : emp.availability === "On Notice"
-                                  ? "rgba(245, 158, 11, 0.1)"
-                                  : "rgba(100, 116, 139, 0.1)",
-                            color:
-                              emp.availability === "Available"
-                                ? "var(--success)"
-                                : emp.availability === "On Notice"
-                                  ? "var(--warning)"
-                                  : "var(--slate-500)",
-                          }}
-                        >
-                          {emp.availability}
-                        </span>
-                      </div>
-                    </div>
+          {/* Candidate cards (Kanban-style by stage) */}
+          {candidatesLoading ? (
+            <div
+              style={{
+                padding: "40px",
+                textAlign: "center",
+                color: "var(--text-tertiary)",
+              }}
+            >
+              Loading candidates...
+            </div>
+          ) : candidates.length === 0 ? (
+            <div
+              style={{
+                padding: "40px",
+                textAlign: "center",
+                color: "var(--text-tertiary)",
+                fontSize: "14px",
+              }}
+            >
+              <UserPlus
+                size={32}
+                style={{ marginBottom: "8px", opacity: 0.4 }}
+              />
+              <p>
+                No candidates yet. Add your first candidate to start the
+                pipeline.
+              </p>
+            </div>
+          ) : (
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "12px" }}
+            >
+              {candidates
+                .filter(
+                  (c) =>
+                    candidateStageFilter === "all" ||
+                    c.current_stage === candidateStageFilter,
+                )
+                .map((c) => {
+                  const linkedItem = ticket.items.find(
+                    (it) => it.numericItemId === c.requisition_item_id,
+                  );
+                  const stageColors: Record<
+                    string,
+                    { bg: string; text: string }
+                  > = {
+                    Sourced: { bg: "rgba(100,116,139,0.1)", text: "#64748b" },
+                    Shortlisted: {
+                      bg: "rgba(59,130,246,0.1)",
+                      text: "#3b82f6",
+                    },
+                    Interviewing: {
+                      bg: "rgba(168,85,247,0.1)",
+                      text: "#a855f7",
+                    },
+                    Offered: { bg: "rgba(245,158,11,0.1)", text: "#f59e0b" },
+                    Hired: { bg: "rgba(16,185,129,0.1)", text: "#10b981" },
+                    Rejected: { bg: "rgba(239,68,68,0.1)", text: "#ef4444" },
+                  };
+                  const sc =
+                    stageColors[c.current_stage] ?? stageColors.Sourced;
 
-                    <div style={{ textAlign: "right" }}>
-                      <div
-                        style={{
-                          fontSize: "20px",
-                          fontWeight: 700,
-                          color: "var(--primary-accent)",
-                        }}
-                      >
-                        {emp.matchScore}%
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "11px",
-                          color: "var(--text-tertiary)",
-                        }}
-                      >
-                        Match Score
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Matching Positions */}
-                  {openItems.length > 0 && (
+                  return (
                     <div
+                      key={c.candidate_id}
+                      onClick={() => setSelectedCandidate(c)}
                       style={{
-                        marginTop: "16px",
-                        paddingTop: "16px",
-                        borderTop: "1px solid var(--border-subtle)",
+                        padding: "16px 20px",
+                        backgroundColor: "var(--bg-primary)",
+                        borderRadius: "12px",
+                        border: "1px solid var(--border-subtle)",
+                        cursor: "pointer",
+                        transition: "all 0.2s ease",
                       }}
                     >
                       <div
                         style={{
-                          fontSize: "13px",
-                          fontWeight: 600,
-                          marginBottom: "8px",
-                        }}
-                      >
-                        Matching Open Positions ({openItems.length})
-                      </div>
-                      <div
-                        style={{
                           display: "flex",
-                          flexDirection: "column",
-                          gap: "8px",
+                          justifyContent: "space-between",
+                          alignItems: "flex-start",
                         }}
                       >
-                        {openItems.map((item) => (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "12px",
+                          }}
+                        >
                           <div
-                            key={item.id}
                             style={{
-                              padding: "10px 12px",
-                              backgroundColor: "var(--bg-secondary)",
+                              width: "40px",
+                              height: "40px",
                               borderRadius: "8px",
+                              background:
+                                "linear-gradient(135deg, var(--slate-600), var(--slate-700))",
+                              color: "white",
                               display: "flex",
-                              justifyContent: "space-between",
                               alignItems: "center",
+                              justifyContent: "center",
+                              fontWeight: 600,
+                              fontSize: "14px",
                             }}
                           >
-                            <div>
-                              <div
-                                style={{ fontWeight: 500, fontSize: "13px" }}
-                              >
-                                {item.skill}
-                              </div>
+                            {c.full_name
+                              .split(" ")
+                              .map((n) => n[0])
+                              .join("")}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: "14px" }}>
+                              {c.full_name}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "12px",
+                                color: "var(--text-secondary)",
+                              }}
+                            >
+                              {c.email}
+                              {c.phone ? ` • ${c.phone}` : ""}
+                            </div>
+                            {linkedItem && (
                               <div
                                 style={{
                                   fontSize: "11px",
                                   color: "var(--text-tertiary)",
+                                  marginTop: "2px",
                                 }}
                               >
-                                {item.level} • {item.experience}y exp •{" "}
-                                {item.education}
+                                Position: {linkedItem.skill} —{" "}
+                                {linkedItem.level}
                               </div>
-                            </div>
-                            <button
-                              className="action-button primary"
-                              style={{ fontSize: "11px", padding: "6px 12px" }}
-                              onClick={() =>
-                                handleAssignEmployee(item.id, emp.id)
-                              }
-                            >
-                              Assign to Position
-                            </button>
+                            )}
                           </div>
-                        ))}
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "12px",
+                              color: "var(--text-tertiary)",
+                            }}
+                          >
+                            {c.interviews.length} round
+                            {c.interviews.length !== 1 ? "s" : ""}
+                          </span>
+                          <span
+                            style={{
+                              padding: "4px 10px",
+                              borderRadius: "20px",
+                              fontSize: "11px",
+                              fontWeight: 600,
+                              backgroundColor: sc.bg,
+                              color: sc.text,
+                            }}
+                          >
+                            {c.current_stage}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                  );
+                })}
+            </div>
+          )}
         </div>
+      )}
+
+      {/* Candidate Detail Modal */}
+      {selectedCandidate && (
+        <CandidateDetailModal
+          candidate={selectedCandidate}
+          onClose={() => setSelectedCandidate(null)}
+          onUpdate={(updated) => {
+            setCandidates((prev) =>
+              prev.map((c) =>
+                c.candidate_id === updated.candidate_id ? updated : c,
+              ),
+            );
+            setSelectedCandidate(null);
+          }}
+          userRoles={user?.roles || []}
+        />
       )}
 
       {activeTab === "timeline" && (
@@ -2739,7 +3043,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                   lineHeight: 1.4,
                 }}
               >
-                Use the "Available Employees" tab to find and assign matches
+                Use the "Candidates" tab to manage pipeline and track interviews
               </p>
             </div>
 

@@ -1,4 +1,10 @@
-import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+  useCallback,
+} from "react";
 import {
   ArrowLeft,
   Calendar,
@@ -48,6 +54,14 @@ import {
   fulfillItem,
   cancelItem as cancelItemApi,
 } from "../../api/workflowApi";
+import {
+  fetchCandidates,
+  createCandidate,
+  uploadResume,
+  type Candidate,
+  type CandidateCreate,
+} from "../../api/candidateApi";
+import CandidateDetailModal from "../shared/CandidateDetailModal";
 import "../../styles/hr/hr-dashboard.css";
 
 interface RequisitionDetailsProps {
@@ -56,21 +70,9 @@ interface RequisitionDetailsProps {
   onUpdate?: (ticket: TicketData) => void;
 }
 
-interface Employee {
-  id: string;
-  name: string;
-  skill: string;
-  level: string;
-  experience: number;
-  location: string;
-  availability: "Available" | "On Project" | "On Notice";
-  matchScore: number;
-  department: string;
-}
-
 interface RequisitionItem {
   id: string;
-  numericItemId: number;  // Phase 7: Numeric item ID for API calls
+  numericItemId: number; // Phase 7: Numeric item ID for API calls
   skill: string;
   level: string;
   experience: number;
@@ -82,7 +84,7 @@ interface RequisitionItem {
   description: string;
   cvFileUrl?: string;
   cvFileName?: string;
-  assignedTAId?: number | null;  // Phase 7: Item-level TA assignment
+  assignedTAId?: number | null; // Phase 7: Item-level TA assignment
 }
 
 // Phase 4: Item status milestone order for visual tracking
@@ -149,7 +151,6 @@ interface TicketData {
   budget: string;
   projectDuration: string;
   items: RequisitionItem[];
-  availableEmployees: Employee[];
   timeline: TimelineEvent[];
   notes: NoteEntry[];
 }
@@ -164,7 +165,7 @@ interface BackendRequisitionItem {
   job_description: string;
   requirements?: string | null;
   item_status: string;
-  assigned_ta?: number | null;  // Phase 7: Item-level TA assignment
+  assigned_ta?: number | null; // Phase 7: Item-level TA assignment
 }
 
 interface BackendRequisition {
@@ -231,7 +232,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "overview" | "items" | "employees" | "timeline"
+    "overview" | "items" | "candidates" | "timeline"
   >("overview");
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
   const [selectedItemForAssignment, setSelectedItemForAssignment] = useState<
@@ -247,8 +248,10 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [error, setError] = useState<string | null>(null);
   const currentUserId = user?.user_id ?? null;
   const userRoles = user?.roles ?? [];
-  const isHRUser = userRoles.some((r) => ["hr", "admin"].includes(r.toLowerCase()));
-  
+  const isHRUser = userRoles.some((r) =>
+    ["hr", "admin"].includes(r.toLowerCase()),
+  );
+
   // Phase 7: Per-item edit permission check
   // TA can only edit items assigned to them
   const canEditItem = (item: RequisitionItem): boolean => {
@@ -258,7 +261,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     // TA can only edit items assigned to them
     return item.assignedTAId === currentUserId;
   };
-  
+
   // Legacy: Header-level check (kept for backward compatibility)
   const canAssignResources = Boolean(
     ticket?.assignedTAId &&
@@ -271,15 +274,37 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const cvInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   // Phase 4: Item workflow transition state
-  const [transitioningItem, setTransitioningItem] = useState<string | null>(null);
+  const [transitioningItem, setTransitioningItem] = useState<string | null>(
+    null,
+  );
   const [transitionError, setTransitionError] = useState<string | null>(null);
-  const [transitionSuccess, setTransitionSuccess] = useState<string | null>(null);
+  const [transitionSuccess, setTransitionSuccess] = useState<string | null>(
+    null,
+  );
 
   // Phase 4: HR Kill Switch - Cancel Item Modal
   const [cancelModalItem, setCancelModalItem] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+
+  // ---- Candidate Pipeline state ----
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(
+    null,
+  );
+  const [showAddCandidate, setShowAddCandidate] = useState(false);
+  const [addCandidateItemId, setAddCandidateItemId] = useState<number | null>(
+    null,
+  );
+  const [newCandidateName, setNewCandidateName] = useState("");
+  const [newCandidateEmail, setNewCandidateEmail] = useState("");
+  const [newCandidatePhone, setNewCandidatePhone] = useState("");
+  const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [addingCandidate, setAddingCandidate] = useState(false);
+  const [candidateStageFilter, setCandidateStageFilter] =
+    useState<string>("all");
 
   const parseReqId = (value?: string | null) => {
     if (!value) return null;
@@ -391,16 +416,15 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       items:
         req.items?.map((item) => ({
           id: `ITEM-${item.item_id}`,
-          numericItemId: item.item_id,  // Phase 7: Numeric ID for API
+          numericItemId: item.item_id, // Phase 7: Numeric ID for API
           skill: item.role_position,
           level: item.skill_level ?? "—",
           experience: item.experience_years ?? 0,
           education: item.education_requirement ?? "—",
           itemStatus: item.item_status,
           description: item.job_description,
-          assignedTAId: item.assigned_ta ?? null,  // Phase 7: Item-level TA
+          assignedTAId: item.assigned_ta ?? null, // Phase 7: Item-level TA
         })) ?? [],
-      availableEmployees: [],
       timeline: [],
       notes: [],
     };
@@ -498,6 +522,64 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     };
   }, [effectiveTicketId]);
 
+  // ---- Load candidates when requisition is available ----
+  const loadCandidates = useCallback(async () => {
+    const reqId = parseReqId(effectiveTicketId);
+    if (!reqId) return;
+    setCandidatesLoading(true);
+    try {
+      const data = await fetchCandidates(reqId);
+      setCandidates(data);
+    } catch {
+      setCandidates([]);
+    } finally {
+      setCandidatesLoading(false);
+    }
+  }, [effectiveTicketId]);
+
+  useEffect(() => {
+    loadCandidates();
+  }, [loadCandidates]);
+
+  // ---- Add candidate handler ----
+  const handleAddCandidate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ticket || !addCandidateItemId) return;
+    setAddingCandidate(true);
+    setTransitionError(null);
+    try {
+      let resumePath: string | undefined;
+      if (resumeFile) {
+        const uploaded = await uploadResume(resumeFile);
+        resumePath = uploaded.filename;
+      }
+      const reqId = parseReqId(effectiveTicketId);
+      if (!reqId) return;
+      await createCandidate({
+        requisition_item_id: addCandidateItemId,
+        requisition_id: reqId,
+        full_name: newCandidateName.trim(),
+        email: newCandidateEmail.trim(),
+        phone: newCandidatePhone.trim() || undefined,
+        resume_path: resumePath,
+      });
+      // Reset form
+      setNewCandidateName("");
+      setNewCandidateEmail("");
+      setNewCandidatePhone("");
+      setResumeFile(null);
+      setShowAddCandidate(false);
+      setAddCandidateItemId(null);
+      await loadCandidates();
+    } catch (err: any) {
+      setTransitionError(
+        err?.response?.data?.detail ?? "Failed to add candidate",
+      );
+    } finally {
+      setAddingCandidate(false);
+    }
+  };
+
   // ============================================================================
   // HOOKS THAT MUST BE CALLED BEFORE EARLY RETURNS (React Rules of Hooks)
   // ============================================================================
@@ -524,7 +606,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
             items: prev.items.map((item) =>
               item.id === itemId
                 ? { ...item, cvFileUrl: fileUrl, cvFileName: file.name }
-                : item
+                : item,
             ),
           };
         });
@@ -533,13 +615,13 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         setTimeout(() => setTransitionSuccess(null), 3000);
       } catch (err) {
         setTransitionError(
-          err instanceof Error ? err.message : "Failed to upload CV"
+          err instanceof Error ? err.message : "Failed to upload CV",
         );
       } finally {
         setCvUploading(null);
       }
     },
-    []
+    [],
   );
 
   // Phase 4: Refresh requisition data
@@ -549,7 +631,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
 
     try {
       const response = await apiClient.get<BackendRequisition>(
-        `/requisitions/${reqId}`
+        `/requisitions/${reqId}`,
       );
       const built = buildTicket(response.data);
       setTicket(built);
@@ -568,7 +650,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     async (
       itemId: string,
       action: "shortlist" | "interview" | "offer" | "fulfill",
-      employeeId?: string
+      employeeId?: string,
     ) => {
       const numericId = Number(itemId.replace("ITEM-", ""));
       if (isNaN(numericId)) {
@@ -582,17 +664,19 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         setTransitionError("Item not found");
         return;
       }
-      
+
       // Phase 7: Check item-level TA permission
       if (!currentUserId) {
         setTransitionError("You must be logged in to update items.");
         return;
       }
-      const isUserHRorAdmin = userRoles.some((r) => 
-        ["hr", "admin"].includes(r.toLowerCase())
+      const isUserHRorAdmin = userRoles.some((r) =>
+        ["hr", "admin"].includes(r.toLowerCase()),
       );
       if (!isUserHRorAdmin && item.assignedTAId !== currentUserId) {
-        setTransitionError("You are not authorized to update this item. It is assigned to another TA.");
+        setTransitionError(
+          "You are not authorized to update this item. It is assigned to another TA.",
+        );
         return;
       }
 
@@ -630,11 +714,11 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
             action === "shortlist"
               ? "Shortlisted"
               : action === "interview"
-              ? "Interviewing"
-              : action === "offer"
-              ? "Offered"
-              : "Fulfilled"
-          }`
+                ? "Interviewing"
+                : action === "offer"
+                  ? "Offered"
+                  : "Fulfilled"
+          }`,
         );
 
         // Refresh requisition data from backend
@@ -654,7 +738,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         setTransitioningItem(null);
       }
     },
-    [ticket, refreshRequisition, currentUserId, userRoles]
+    [ticket, refreshRequisition, currentUserId, userRoles],
   );
 
   // Phase 4: HR Kill Switch - Cancel Item
@@ -887,56 +971,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
 
   // Handle employee assignment
   const handleAssignEmployee = (itemId: string, employeeId: string) => {
-    if (!ticket) return;
-    
-    // Phase 7: Per-item authorization check
-    const item = ticket.items.find((i) => i.id === itemId);
-    if (!item) return;
-    const isUserHRorAdmin = userRoles.some((r) => 
-      ["hr", "admin"].includes(r.toLowerCase())
-    );
-    if (!isUserHRorAdmin && item.assignedTAId !== currentUserId) return;
-    
-    const employee = ticket.availableEmployees.find(
-      (emp) => emp.id === employeeId,
-    );
-    if (!employee) return;
-
-    // NOTE: itemStatus transitions are driven by the backend workflow engine.
-    // We only update the assignment fields locally; status change happens on save.
-    const updatedItems = ticket.items.map((item) =>
-      item.id === itemId
-        ? {
-            ...item,
-            assignedEmployeeId: employeeId,
-            assignedEmployeeName: employee.name,
-            assignedDate: getTodayDate(),
-          }
-        : item,
-    );
-
-    setTicket({ ...ticket, items: updatedItems });
-    setSelectedItemForAssignment(null);
-
-    // Add to timeline
-    setTicket((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        timeline: [
-          ...prev.timeline,
-          {
-            date: getTodayDate(),
-            event: `Assigned ${employee.name} to ${prev.items.find((i) => i.id === itemId)?.skill ?? "resource"}`,
-            user: "Current User",
-          },
-        ],
-      };
-    });
-
-    if (onUpdate) {
-      onUpdate({ ...ticket, items: updatedItems });
-    }
+    // Legacy stub — assignments now go through the Candidate Pipeline
   };
 
   // Toggle item expansion
@@ -1030,9 +1065,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       icon: <Briefcase size={16} />,
     },
     {
-      id: "employees" as const,
-      label: "Employees",
-      icon: <Users size={16} />,
+      id: "candidates" as const,
+      label: "Candidates",
+      icon: <UserPlus size={16} />,
     },
     { id: "timeline" as const, label: "Timeline", icon: <History size={16} /> },
   ];
@@ -1175,10 +1210,14 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 style={{
                   fontSize: "13px",
                   fontWeight: 600,
-                  color: completionStats.progress === 100 ? "var(--success)" : "var(--primary-accent)",
+                  color:
+                    completionStats.progress === 100
+                      ? "var(--success)"
+                      : "var(--primary-accent)",
                 }}
               >
-                {completionStats.fulfilled + completionStats.cancelled} / {completionStats.totalItems} completed
+                {completionStats.fulfilled + completionStats.cancelled} /{" "}
+                {completionStats.totalItems} completed
               </span>
               <span style={{ fontSize: "14px", fontWeight: 600 }}>
                 {completionStats.progress}%
@@ -1214,33 +1253,39 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
               color: "var(--text-tertiary)",
             }}
           >
-            <span style={{ color: "var(--success)" }}>✓ {completionStats.fulfilled} Fulfilled</span>
-            <span style={{ color: "var(--warning)" }}>○ {completionStats.pending} Pending</span>
+            <span style={{ color: "var(--success)" }}>
+              ✓ {completionStats.fulfilled} Fulfilled
+            </span>
+            <span style={{ color: "var(--warning)" }}>
+              ○ {completionStats.pending} Pending
+            </span>
             <span>✕ {completionStats.cancelled} Cancelled</span>
             <span>📊 {completionStats.totalItems} Total</span>
           </div>
           {/* Phase 5: Auto-closure indicator */}
-          {completionStats.progress === 100 && completionStats.pending === 0 && (
-            <div
-              style={{
-                marginTop: "12px",
-                padding: "10px 12px",
-                borderRadius: "8px",
-                backgroundColor: "rgba(16, 185, 129, 0.08)",
-                border: "1px solid rgba(16, 185, 129, 0.2)",
-                fontSize: "12px",
-                color: "var(--success)",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              <CheckCircle size={14} />
-              <span>
-                <strong>Auto-Closure:</strong> All items are resolved. Requisition will close automatically.
-              </span>
-            </div>
-          )}
+          {completionStats.progress === 100 &&
+            completionStats.pending === 0 && (
+              <div
+                style={{
+                  marginTop: "12px",
+                  padding: "10px 12px",
+                  borderRadius: "8px",
+                  backgroundColor: "rgba(16, 185, 129, 0.08)",
+                  border: "1px solid rgba(16, 185, 129, 0.2)",
+                  fontSize: "12px",
+                  color: "var(--success)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <CheckCircle size={14} />
+                <span>
+                  <strong>Auto-Closure:</strong> All items are resolved.
+                  Requisition will close automatically.
+                </span>
+              </div>
+            )}
           {completionStats.pending > 0 && (
             <div
               style={{
@@ -1249,7 +1294,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 color: "var(--text-tertiary)",
               }}
             >
-              Phase 5: Requisition will auto-close when all {completionStats.pending} pending items are fulfilled or cancelled.
+              Phase 5: Requisition will auto-close when all{" "}
+              {completionStats.pending} pending items are fulfilled or
+              cancelled.
             </div>
           )}
         </div>
@@ -1676,7 +1723,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
           <div className="data-manager-header">
             <h2>Requisition Items Management</h2>
             <p className="subtitle">
-              Phase 4: TA Execution - Track milestones, upload CVs, and manage positions
+              Phase 4: TA Execution - Track milestones, upload CVs, and manage
+              positions
             </p>
           </div>
 
@@ -1756,13 +1804,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
           >
             {ticket.items.map((item) => {
               const isExpanded = expandedItems.includes(item.id);
-              const matchedEmployees = ticket.availableEmployees
-                .filter(
-                  (emp) =>
-                    emp.skill.includes(item.skill.split(" ")[0] ?? "") &&
-                    emp.level === item.level,
-                )
-                .sort((a, b) => b.matchScore - a.matchScore);
+              const itemCandidates = candidates.filter(
+                (c) => c.requisition_item_id === item.numericItemId,
+              );
 
               return (
                 <div
@@ -1806,10 +1850,16 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                                   ? "ticket-status closed"
                                   : "ticket-status in-progress"
                           }
-                          style={{ display: "flex", alignItems: "center", gap: "4px" }}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
                         >
                           {ITEM_STATUS_ICONS[item.itemStatus]}
-                          {ITEM_STATUS_LABELS[item.itemStatus as RequisitionItemStatus] ?? item.itemStatus}
+                          {ITEM_STATUS_LABELS[
+                            item.itemStatus as RequisitionItemStatus
+                          ] ?? item.itemStatus}
                         </span>
                         <strong style={{ fontSize: "15px" }}>
                           {item.skill} ({item.level})
@@ -1841,12 +1891,26 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                       {/* Phase 4: Milestone Tracker */}
                       {item.itemStatus !== "Cancelled" && (
                         <div style={{ marginTop: "12px" }}>
-                          <div style={{ fontSize: "11px", color: "var(--text-tertiary)", marginBottom: "6px" }}>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              color: "var(--text-tertiary)",
+                              marginBottom: "6px",
+                            }}
+                          >
                             Milestone Progress
                           </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                          >
                             {ITEM_MILESTONE_ORDER.map((milestone, idx) => {
-                              const currentIdx = getItemMilestoneIndex(item.itemStatus);
+                              const currentIdx = getItemMilestoneIndex(
+                                item.itemStatus,
+                              );
                               const isComplete = idx < currentIdx;
                               const isCurrent = idx === currentIdx;
                               return (
@@ -1864,21 +1928,30 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                                       backgroundColor: isComplete
                                         ? "var(--success)"
                                         : isCurrent
-                                        ? "var(--primary-accent)"
-                                        : "var(--border-subtle)",
-                                      color: isComplete || isCurrent ? "white" : "var(--text-tertiary)",
+                                          ? "var(--primary-accent)"
+                                          : "var(--border-subtle)",
+                                      color:
+                                        isComplete || isCurrent
+                                          ? "white"
+                                          : "var(--text-tertiary)",
                                       transition: "all 0.2s ease",
                                     }}
                                     title={ITEM_STATUS_LABELS[milestone]}
                                   >
-                                    {isComplete ? <CheckCircle size={12} /> : idx + 1}
+                                    {isComplete ? (
+                                      <CheckCircle size={12} />
+                                    ) : (
+                                      idx + 1
+                                    )}
                                   </div>
                                   {idx < ITEM_MILESTONE_ORDER.length - 1 && (
                                     <div
                                       style={{
                                         flex: 1,
                                         height: "2px",
-                                        backgroundColor: isComplete ? "var(--success)" : "var(--border-subtle)",
+                                        backgroundColor: isComplete
+                                          ? "var(--success)"
+                                          : "var(--border-subtle)",
                                         maxWidth: "20px",
                                       }}
                                     />
@@ -1905,7 +1978,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                       {item.itemStatus === "Sourcing" && canEditItem(item) && (
                         <>
                           <input
-                            ref={(el) => { cvInputRefs.current[item.id] = el; }}
+                            ref={(el) => {
+                              cvInputRefs.current[item.id] = el;
+                            }}
                             type="file"
                             accept=".pdf,.doc,.docx"
                             onChange={(e) => handleCvUpload(item.id, e)}
@@ -1921,14 +1996,16 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                               gap: "6px",
                             }}
                             disabled={cvUploading === item.id}
-                            onClick={() => cvInputRefs.current[item.id]?.click()}
+                            onClick={() =>
+                              cvInputRefs.current[item.id]?.click()
+                            }
                           >
                             <Upload size={12} />
                             {cvUploading === item.id
                               ? "Uploading..."
                               : item.cvFileName
-                              ? "Replace CV"
-                              : "Upload CV"}
+                                ? "Replace CV"
+                                : "Upload CV"}
                           </button>
                         </>
                       )}
@@ -1945,50 +2022,70 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                             gap: "6px",
                             opacity: item.cvFileUrl ? 1 : 0.6,
                           }}
-                          disabled={transitioningItem === item.id || !item.cvFileUrl}
-                          onClick={() => handleItemTransition(item.id, "shortlist")}
-                          title={item.cvFileUrl ? "Move to Shortlisted" : "CV upload required first"}
+                          disabled={
+                            transitioningItem === item.id || !item.cvFileUrl
+                          }
+                          onClick={() =>
+                            handleItemTransition(item.id, "shortlist")
+                          }
+                          title={
+                            item.cvFileUrl
+                              ? "Move to Shortlisted"
+                              : "CV upload required first"
+                          }
                         >
                           <FileText size={12} />
-                          {transitioningItem === item.id ? "Processing..." : "Shortlist"}
+                          {transitioningItem === item.id
+                            ? "Processing..."
+                            : "Shortlist"}
                         </button>
                       )}
 
-                      {item.itemStatus === "Shortlisted" && canEditItem(item) && (
-                        <button
-                          className="action-button primary"
-                          style={{
-                            fontSize: "12px",
-                            padding: "8px 12px",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "6px",
-                          }}
-                          disabled={transitioningItem === item.id}
-                          onClick={() => handleItemTransition(item.id, "interview")}
-                        >
-                          <Phone size={12} />
-                          {transitioningItem === item.id ? "Processing..." : "Schedule Interview"}
-                        </button>
-                      )}
+                      {item.itemStatus === "Shortlisted" &&
+                        canEditItem(item) && (
+                          <button
+                            className="action-button primary"
+                            style={{
+                              fontSize: "12px",
+                              padding: "8px 12px",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                            }}
+                            disabled={transitioningItem === item.id}
+                            onClick={() =>
+                              handleItemTransition(item.id, "interview")
+                            }
+                          >
+                            <Phone size={12} />
+                            {transitioningItem === item.id
+                              ? "Processing..."
+                              : "Schedule Interview"}
+                          </button>
+                        )}
 
-                      {item.itemStatus === "Interviewing" && canEditItem(item) && (
-                        <button
-                          className="action-button primary"
-                          style={{
-                            fontSize: "12px",
-                            padding: "8px 12px",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "6px",
-                          }}
-                          disabled={transitioningItem === item.id}
-                          onClick={() => handleItemTransition(item.id, "offer")}
-                        >
-                          <Gift size={12} />
-                          {transitioningItem === item.id ? "Processing..." : "Extend Offer"}
-                        </button>
-                      )}
+                      {item.itemStatus === "Interviewing" &&
+                        canEditItem(item) && (
+                          <button
+                            className="action-button primary"
+                            style={{
+                              fontSize: "12px",
+                              padding: "8px 12px",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                            }}
+                            disabled={transitioningItem === item.id}
+                            onClick={() =>
+                              handleItemTransition(item.id, "offer")
+                            }
+                          >
+                            <Gift size={12} />
+                            {transitioningItem === item.id
+                              ? "Processing..."
+                              : "Extend Offer"}
+                          </button>
+                        )}
 
                       {item.itemStatus === "Pending" && canEditItem(item) && (
                         <button
@@ -2002,12 +2099,16 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                           }}
                           onClick={() =>
                             setSelectedItemForAssignment(
-                              selectedItemForAssignment === item.id ? null : item.id
+                              selectedItemForAssignment === item.id
+                                ? null
+                                : item.id,
                             )
                           }
                         >
                           <UserPlus size={12} />
-                          {selectedItemForAssignment === item.id ? "Cancel" : "Start Sourcing"}
+                          {selectedItemForAssignment === item.id
+                            ? "Cancel"
+                            : "Start Sourcing"}
                         </button>
                       )}
 
@@ -2086,96 +2187,114 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                           >
                             <div
                               style={{
-                                fontSize: "13px",
-                                fontWeight: 600,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
                                 marginBottom: "12px",
                               }}
                             >
-                              Available Matches ({matchedEmployees.length})
+                              <span
+                                style={{ fontSize: "13px", fontWeight: 600 }}
+                              >
+                                Candidates ({itemCandidates.length})
+                              </span>
+                              <button
+                                className="action-button primary"
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "4px 10px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                }}
+                                onClick={() => {
+                                  setAddCandidateItemId(item.numericItemId);
+                                  setShowAddCandidate(true);
+                                }}
+                              >
+                                <UserPlus size={12} /> Add Candidate
+                              </button>
                             </div>
-                            <div
-                              style={{
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: "8px",
-                              }}
-                            >
-                              {matchedEmployees.map((emp) => (
-                                <div
-                                  key={emp.id}
-                                  style={{
-                                    padding: "12px",
-                                    backgroundColor: "var(--bg-primary)",
-                                    borderRadius: "8px",
-                                    border: "1px solid var(--border-subtle)",
-                                    display: "flex",
-                                    justifyContent: "space-between",
-                                    alignItems: "center",
-                                  }}
-                                >
-                                  <div>
-                                    <div style={{ fontWeight: 500 }}>
-                                      {emp.name}
-                                    </div>
-                                    <div
-                                      style={{
-                                        fontSize: "11px",
-                                        color: "var(--text-tertiary)",
-                                      }}
-                                    >
-                                      {emp.department} • {emp.location} •{" "}
-                                      {emp.experience}y exp
-                                    </div>
-                                  </div>
+                            {itemCandidates.length === 0 ? (
+                              <div
+                                style={{
+                                  fontSize: "12px",
+                                  color: "var(--text-tertiary)",
+                                  textAlign: "center",
+                                  padding: "12px",
+                                }}
+                              >
+                                No candidates yet. Add one to start the
+                                pipeline.
+                              </div>
+                            ) : (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: "8px",
+                                }}
+                              >
+                                {itemCandidates.map((c) => (
                                   <div
+                                    key={c.candidate_id}
                                     style={{
+                                      padding: "10px 12px",
+                                      backgroundColor: "var(--bg-primary)",
+                                      borderRadius: "8px",
+                                      border: "1px solid var(--border-subtle)",
                                       display: "flex",
+                                      justifyContent: "space-between",
                                       alignItems: "center",
-                                      gap: "12px",
+                                      cursor: "pointer",
                                     }}
+                                    onClick={() => setSelectedCandidate(c)}
                                   >
+                                    <div>
+                                      <div
+                                        style={{
+                                          fontWeight: 500,
+                                          fontSize: "13px",
+                                        }}
+                                      >
+                                        {c.full_name}
+                                      </div>
+                                      <div
+                                        style={{
+                                          fontSize: "11px",
+                                          color: "var(--text-tertiary)",
+                                        }}
+                                      >
+                                        {c.email} • {c.interviews.length}{" "}
+                                        round(s)
+                                      </div>
+                                    </div>
                                     <span
                                       style={{
-                                        padding: "4px 8px",
+                                        padding: "2px 8px",
                                         borderRadius: "12px",
                                         fontSize: "11px",
-                                        background:
-                                          emp.availability === "Available"
-                                            ? "rgba(16, 185, 129, 0.1)"
-                                            : "rgba(245, 158, 11, 0.1)",
-                                        color:
-                                          emp.availability === "Available"
-                                            ? "var(--success)"
-                                            : "var(--warning)",
-                                      }}
-                                    >
-                                      {emp.availability}
-                                    </span>
-                                    <span
-                                      style={{
                                         fontWeight: 600,
-                                        color: "var(--primary-accent)",
+                                        backgroundColor:
+                                          c.current_stage === "Hired"
+                                            ? "rgba(16,185,129,0.1)"
+                                            : c.current_stage === "Rejected"
+                                              ? "rgba(239,68,68,0.1)"
+                                              : "rgba(59,130,246,0.1)",
+                                        color:
+                                          c.current_stage === "Hired"
+                                            ? "#10b981"
+                                            : c.current_stage === "Rejected"
+                                              ? "#ef4444"
+                                              : "#3b82f6",
                                       }}
                                     >
-                                      {emp.matchScore}% match
+                                      {c.current_stage}
                                     </span>
-                                    <button
-                                      className="action-button primary"
-                                      style={{
-                                        fontSize: "11px",
-                                        padding: "6px 12px",
-                                      }}
-                                      disabled={!canEditItem(item)}
-                                      onClick={() =>
-                                        handleAssignEmployee(item.id, emp.id)
-                                      }
-                                    >
-                                      Assign
-                                    </button>
                                   </div>
-                                </div>
-                              ))}
-                            </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -2249,8 +2368,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 color: "var(--text-tertiary)",
               }}
             >
-              Note: HR can cancel any item using the Kill Switch (requires reason).
-              Auto-closure happens when all items are Fulfilled or Cancelled.
+              Note: HR can cancel any item using the Kill Switch (requires
+              reason). Auto-closure happens when all items are Fulfilled or
+              Cancelled.
             </p>
           </div>
 
@@ -2308,7 +2428,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                     <Ban size={20} color="var(--error)" />
                   </div>
                   <div>
-                    <h3 style={{ fontSize: "16px", fontWeight: 600, margin: 0 }}>
+                    <h3
+                      style={{ fontSize: "16px", fontWeight: 600, margin: 0 }}
+                    >
                       Cancel Item - HR Kill Switch
                     </h3>
                     <p
@@ -2348,7 +2470,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                       marginBottom: "8px",
                     }}
                   >
-                    Cancellation Reason <span style={{ color: "var(--error)" }}>*</span>
+                    Cancellation Reason{" "}
+                    <span style={{ color: "var(--error)" }}>*</span>
                   </label>
                   <textarea
                     value={cancelReason}
@@ -2419,290 +2542,475 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         </div>
       )}
 
-      {activeTab === "employees" && (
+      {activeTab === "candidates" && (
         <div className="master-data-manager">
-          <div className="data-manager-header">
-            <h2>Available Employees</h2>
-            <p className="subtitle">
-              Match resources to open positions based on skills and availability
-            </p>
+          <div
+            className="data-manager-header"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <div>
+              <h2>Candidate Pipeline</h2>
+              <p className="subtitle">
+                Track and manage candidates across all positions
+              </p>
+            </div>
+            <button
+              className="action-button primary"
+              style={{ display: "flex", alignItems: "center", gap: "6px" }}
+              onClick={() => {
+                setAddCandidateItemId(ticket.items[0]?.numericItemId ?? null);
+                setShowAddCandidate(true);
+              }}
+              disabled={!ticket.items.length}
+            >
+              <UserPlus size={14} /> Add Candidate
+            </button>
           </div>
-          {!canAssignResources ? (
-            <div
+
+          {/* Stage filter tabs */}
+          <div
+            style={{
+              display: "flex",
+              gap: "8px",
+              marginBottom: "20px",
+              flexWrap: "wrap",
+            }}
+          >
+            {[
+              "all",
+              "Sourced",
+              "Shortlisted",
+              "Interviewing",
+              "Offered",
+              "Hired",
+              "Rejected",
+            ].map((stage) => {
+              const count =
+                stage === "all"
+                  ? candidates.length
+                  : candidates.filter((c) => c.current_stage === stage).length;
+              const isActive = candidateStageFilter === stage;
+              return (
+                <button
+                  key={stage}
+                  onClick={() => setCandidateStageFilter(stage)}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "20px",
+                    fontSize: "12px",
+                    fontWeight: isActive ? 600 : 400,
+                    border: isActive
+                      ? "2px solid var(--primary-accent)"
+                      : "1px solid var(--border-subtle)",
+                    backgroundColor: isActive
+                      ? "rgba(59,130,246,0.08)"
+                      : "transparent",
+                    color: isActive
+                      ? "var(--primary-accent)"
+                      : "var(--text-secondary)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {stage === "all" ? "All" : stage} ({count})
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Add Candidate Form */}
+          {showAddCandidate && (
+            <form
+              onSubmit={handleAddCandidate}
               style={{
-                marginTop: "16px",
-                padding: "16px",
+                marginBottom: "20px",
+                padding: "20px",
                 borderRadius: "12px",
-                backgroundColor: "rgba(245, 158, 11, 0.08)",
-                border: "1px solid rgba(245, 158, 11, 0.2)",
-                color: "var(--warning)",
-                fontSize: "13px",
+                backgroundColor: "rgba(59,130,246,0.04)",
+                border: "1px solid rgba(59,130,246,0.15)",
               }}
             >
-              {ticket?.assignedTAId
-                ? "Resource mapping is locked because this requisition is assigned to another TA."
-                : "Resource mapping is locked until HR assigns a TA."}
-            </div>
-          ) : (
-            <>
-              {/* Search and Filter */}
-              <div className="filter-grid" style={{ marginBottom: "24px" }}>
-                <div className="filter-item">
-                  <label>Skill Match</label>
-                  <select style={{ width: "100%" }}>
-                    <option>All Skills</option>
-                    <option>Python Developer</option>
-                    <option>React Developer</option>
-                    <option>DevOps Engineer</option>
-                  </select>
-                </div>
-                <div className="filter-item">
-                  <label>Availability</label>
-                  <select style={{ width: "100%" }}>
-                    <option>All Status</option>
-                    <option>Available</option>
-                    <option>On Project</option>
-                    <option>On Notice</option>
-                  </select>
-                </div>
-                <div className="filter-item">
-                  <label>Location</label>
-                  <select style={{ width: "100%" }}>
-                    <option>All Locations</option>
-                    <option>Bengaluru</option>
-                    <option>Mumbai</option>
-                    <option>Delhi</option>
-                    <option>Pune</option>
-                  </select>
-                </div>
-                <div className="filter-item">
-                  <label>Experience Level</label>
-                  <select style={{ width: "100%" }}>
-                    <option>All Levels</option>
-                    <option>Junior (0-2y)</option>
-                    <option>Mid (2-5y)</option>
-                    <option>Senior (5-8y)</option>
-                    <option>Lead (8+y)</option>
-                  </select>
-                </div>
+              <div
+                style={{
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  marginBottom: "16px",
+                }}
+              >
+                Add New Candidate
               </div>
-
-              {/* Employees List */}
               <div
                 style={{
                   display: "flex",
-                  flexDirection: "column",
                   gap: "12px",
+                  marginBottom: "12px",
+                  flexWrap: "wrap",
                 }}
               >
-                {ticket.availableEmployees.map((emp) => {
-                  const openItems = ticket.items.filter(
-                    (item) =>
-                      item.itemStatus === "Pending" &&
-                      item.skill.includes(emp.skill.split(" ")[0] ?? "") &&
-                      item.level === emp.level,
+                <div style={{ flex: 1, minWidth: "180px" }}>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      display: "block",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Position *
+                  </label>
+                  <select
+                    value={addCandidateItemId ?? ""}
+                    onChange={(e) =>
+                      setAddCandidateItemId(Number(e.target.value))
+                    }
+                    required
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-subtle)",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {ticket.items.map((it) => (
+                      <option key={it.numericItemId} value={it.numericItemId}>
+                        {it.skill} — {it.level}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ flex: 1, minWidth: "180px" }}>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      display: "block",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={newCandidateName}
+                    onChange={(e) => setNewCandidateName(e.target.value)}
+                    required
+                    placeholder="e.g., Tejas Sharma"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-subtle)",
+                      fontSize: "13px",
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1, minWidth: "180px" }}>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      display: "block",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Email *
+                  </label>
+                  <input
+                    type="email"
+                    value={newCandidateEmail}
+                    onChange={(e) => setNewCandidateEmail(e.target.value)}
+                    required
+                    placeholder="tejas@example.com"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-subtle)",
+                      fontSize: "13px",
+                    }}
+                  />
+                </div>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "12px",
+                  marginBottom: "16px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: "180px" }}>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      display: "block",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Phone
+                  </label>
+                  <input
+                    type="tel"
+                    value={newCandidatePhone}
+                    onChange={(e) => setNewCandidatePhone(e.target.value)}
+                    placeholder="+91-XXXXXXXXXX"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-subtle)",
+                      fontSize: "13px",
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1, minWidth: "180px" }}>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      display: "block",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Resume (PDF/DOC)
+                  </label>
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx"
+                    onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)}
+                    style={{ width: "100%", padding: "6px", fontSize: "12px" }}
+                  />
+                </div>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  justifyContent: "flex-end",
+                }}
+              >
+                <button
+                  type="button"
+                  className="action-button"
+                  style={{ fontSize: "12px", padding: "8px 16px" }}
+                  onClick={() => {
+                    setShowAddCandidate(false);
+                    setAddCandidateItemId(null);
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="action-button primary"
+                  style={{ fontSize: "12px", padding: "8px 16px" }}
+                  disabled={
+                    addingCandidate ||
+                    !newCandidateName.trim() ||
+                    !newCandidateEmail.trim()
+                  }
+                >
+                  {addingCandidate ? "Adding..." : "Add Candidate"}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Candidate cards (Kanban-style by stage) */}
+          {candidatesLoading ? (
+            <div
+              style={{
+                padding: "40px",
+                textAlign: "center",
+                color: "var(--text-tertiary)",
+              }}
+            >
+              Loading candidates...
+            </div>
+          ) : candidates.length === 0 ? (
+            <div
+              style={{
+                padding: "40px",
+                textAlign: "center",
+                color: "var(--text-tertiary)",
+                fontSize: "14px",
+              }}
+            >
+              <UserPlus
+                size={32}
+                style={{ marginBottom: "8px", opacity: 0.4 }}
+              />
+              <p>
+                No candidates yet. Add your first candidate to start the
+                pipeline.
+              </p>
+            </div>
+          ) : (
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "12px" }}
+            >
+              {candidates
+                .filter(
+                  (c) =>
+                    candidateStageFilter === "all" ||
+                    c.current_stage === candidateStageFilter,
+                )
+                .map((c) => {
+                  const linkedItem = ticket.items.find(
+                    (it) => it.numericItemId === c.requisition_item_id,
                   );
+                  const stageColors: Record<
+                    string,
+                    { bg: string; text: string }
+                  > = {
+                    Sourced: { bg: "rgba(100,116,139,0.1)", text: "#64748b" },
+                    Shortlisted: {
+                      bg: "rgba(59,130,246,0.1)",
+                      text: "#3b82f6",
+                    },
+                    Interviewing: {
+                      bg: "rgba(168,85,247,0.1)",
+                      text: "#a855f7",
+                    },
+                    Offered: { bg: "rgba(245,158,11,0.1)", text: "#f59e0b" },
+                    Hired: { bg: "rgba(16,185,129,0.1)", text: "#10b981" },
+                    Rejected: { bg: "rgba(239,68,68,0.1)", text: "#ef4444" },
+                  };
+                  const sc =
+                    stageColors[c.current_stage] ?? stageColors["Sourced"]!;
 
                   return (
                     <div
-                      key={emp.id}
+                      key={c.candidate_id}
+                      onClick={() => setSelectedCandidate(c)}
                       style={{
-                        padding: "20px",
+                        padding: "16px 20px",
                         backgroundColor: "var(--bg-primary)",
                         borderRadius: "12px",
                         border: "1px solid var(--border-subtle)",
+                        cursor: "pointer",
                         transition: "all 0.2s ease",
                       }}
                     >
                       <div
                         style={{
                           display: "flex",
-                          alignItems: "flex-start",
                           justifyContent: "space-between",
-                          marginBottom: "16px",
+                          alignItems: "flex-start",
                         }}
                       >
-                        <div>
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "12px",
-                              marginBottom: "8px",
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: "40px",
-                                height: "40px",
-                                borderRadius: "8px",
-                                background:
-                                  "linear-gradient(135deg, var(--slate-600), var(--slate-700))",
-                                color: "white",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                fontWeight: 600,
-                                fontSize: "14px",
-                              }}
-                            >
-                              {emp.name
-                                .split(" ")
-                                .map((n) => n[0])
-                                .join("")}
-                            </div>
-                            <div>
-                              <div
-                                style={{ fontSize: "15px", fontWeight: 600 }}
-                              >
-                                {emp.name}
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: "13px",
-                                  color: "var(--text-secondary)",
-                                }}
-                              >
-                                {emp.skill} • {emp.level} • {emp.department}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "16px",
-                              fontSize: "12px",
-                              color: "var(--text-tertiary)",
-                            }}
-                          >
-                            <span>📍 {emp.location}</span>
-                            <span>📊 {emp.experience} years exp</span>
-                            <span
-                              style={{
-                                padding: "2px 8px",
-                                borderRadius: "12px",
-                                background:
-                                  emp.availability === "Available"
-                                    ? "rgba(16, 185, 129, 0.1)"
-                                    : emp.availability === "On Notice"
-                                      ? "rgba(245, 158, 11, 0.1)"
-                                      : "rgba(100, 116, 139, 0.1)",
-                                color:
-                                  emp.availability === "Available"
-                                    ? "var(--success)"
-                                    : emp.availability === "On Notice"
-                                      ? "var(--warning)"
-                                      : "var(--slate-500)",
-                              }}
-                            >
-                              {emp.availability}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div style={{ textAlign: "right" }}>
-                          <div
-                            style={{
-                              fontSize: "20px",
-                              fontWeight: 700,
-                              color: "var(--primary-accent)",
-                            }}
-                          >
-                            {emp.matchScore}%
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "11px",
-                              color: "var(--text-tertiary)",
-                            }}
-                          >
-                            Match Score
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Matching Positions */}
-                      {openItems.length > 0 && (
                         <div
                           style={{
-                            marginTop: "16px",
-                            paddingTop: "16px",
-                            borderTop: "1px solid var(--border-subtle)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "12px",
                           }}
                         >
                           <div
                             style={{
-                              fontSize: "13px",
-                              fontWeight: 600,
-                              marginBottom: "8px",
-                            }}
-                          >
-                            Matching Open Positions ({openItems.length})
-                          </div>
-                          <div
-                            style={{
+                              width: "40px",
+                              height: "40px",
+                              borderRadius: "8px",
+                              background:
+                                "linear-gradient(135deg, var(--slate-600), var(--slate-700))",
+                              color: "white",
                               display: "flex",
-                              flexDirection: "column",
-                              gap: "8px",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontWeight: 600,
+                              fontSize: "14px",
                             }}
                           >
-                            {openItems.map((item) => (
+                            {c.full_name
+                              .split(" ")
+                              .map((n) => n[0])
+                              .join("")}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: "14px" }}>
+                              {c.full_name}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "12px",
+                                color: "var(--text-secondary)",
+                              }}
+                            >
+                              {c.email}
+                              {c.phone ? ` • ${c.phone}` : ""}
+                            </div>
+                            {linkedItem && (
                               <div
-                                key={item.id}
                                 style={{
-                                  padding: "10px 12px",
-                                  backgroundColor: "var(--bg-secondary)",
-                                  borderRadius: "8px",
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  alignItems: "center",
+                                  fontSize: "11px",
+                                  color: "var(--text-tertiary)",
+                                  marginTop: "2px",
                                 }}
                               >
-                                <div>
-                                  <div
-                                    style={{
-                                      fontWeight: 500,
-                                      fontSize: "13px",
-                                    }}
-                                  >
-                                    {item.skill}
-                                  </div>
-                                  <div
-                                    style={{
-                                      fontSize: "11px",
-                                      color: "var(--text-tertiary)",
-                                    }}
-                                  >
-                                    {item.level} • {item.experience}y exp •{" "}
-                                    {item.education}
-                                  </div>
-                                </div>
-                                <button
-                                  className="action-button primary"
-                                  style={{
-                                    fontSize: "11px",
-                                    padding: "6px 12px",
-                                  }}
-                                  onClick={() =>
-                                    handleAssignEmployee(item.id, emp.id)
-                                  }
-                                >
-                                  Assign to Position
-                                </button>
+                                Position: {linkedItem.skill} —{" "}
+                                {linkedItem.level}
                               </div>
-                            ))}
+                            )}
                           </div>
                         </div>
-                      )}
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "12px",
+                              color: "var(--text-tertiary)",
+                            }}
+                          >
+                            {c.interviews.length} round
+                            {c.interviews.length !== 1 ? "s" : ""}
+                          </span>
+                          <span
+                            style={{
+                              padding: "4px 10px",
+                              borderRadius: "20px",
+                              fontSize: "11px",
+                              fontWeight: 600,
+                              backgroundColor: sc.bg,
+                              color: sc.text,
+                            }}
+                          >
+                            {c.current_stage}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
-              </div>
-            </>
+            </div>
           )}
         </div>
+      )}
+
+      {/* Candidate Detail Modal */}
+      {selectedCandidate && (
+        <CandidateDetailModal
+          candidate={selectedCandidate}
+          onClose={() => setSelectedCandidate(null)}
+          onUpdate={(updated) => {
+            setCandidates((prev) =>
+              prev.map((c) =>
+                c.candidate_id === updated.candidate_id ? updated : c,
+              ),
+            );
+            setSelectedCandidate(null);
+          }}
+          userRoles={userRoles}
+        />
       )}
 
       {activeTab === "timeline" && (
@@ -3192,7 +3500,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   lineHeight: 1.4,
                 }}
               >
-                Use the "Available Employees" tab to find and assign matches
+                Use the "Candidates" tab to add and track candidates through the
+                pipeline
               </p>
             </div>
 

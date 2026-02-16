@@ -70,6 +70,10 @@ from api.auth import router as auth_router
 # ---- Uploads ----
 from api.uploads import router as uploads_router
 
+# ---- Candidates & Interviews ----
+from api.candidates import router as candidates_router
+from api.interviews import router as interviews_router
+
 
 # ---- Include routers (EACH EXACTLY ONCE) ----
 app.include_router(users_router, prefix="/api")
@@ -103,4 +107,6 @@ app.include_router(dashboard_router, prefix="/api")
 app.include_router(admin_overview_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(uploads_router, prefix="/api")
+app.include_router(candidates_router, prefix="/api")
+app.include_router(interviews_router, prefix="/api")
 

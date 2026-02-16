@@ -15,5 +15,7 @@ from db.models.requisition_item import RequisitionItem
 from db.models.requisition_status_history import RequisitionStatusHistory
 from db.models.audit_log import AuditLog
 from db.models.workflow_audit import WorkflowTransitionAudit
+from db.models.candidate import Candidate
+from db.models.interview import Interview
 from .user_employee_map import UserEmployeeMap
 
