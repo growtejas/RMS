@@ -93,7 +93,7 @@ def create_employee(
 @router.get("/employees")
 def list_employees(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee"))
+    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee", "TA"))
 ):
     latest_assignment = (
         db.query(

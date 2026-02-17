@@ -96,7 +96,7 @@ def add_availability(
 def get_availability_history(
     emp_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee"))
+    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee", "TA"))
 ):
     return (
         db.query(EmployeeAvailability)

@@ -82,7 +82,7 @@ def instant_add_skill(
 @router.get("/", response_model=list[SkillResponse])
 def list_skills(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee"))
+    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee", "TA"))
 ):
     skills = db.query(Skill).order_by(Skill.skill_name).all()
 

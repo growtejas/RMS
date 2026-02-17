@@ -318,7 +318,7 @@ ITEM_TRANSITION_AUTHORITY: Dict[
     # OFFERED transitions
     (RequisitionItemStatus.OFFERED, RequisitionItemStatus.FULFILLED): frozenset({
         SystemRole.HR,
-        SystemRole.ADMIN,
+        SystemRole.TA,
     }),
     (RequisitionItemStatus.OFFERED, RequisitionItemStatus.INTERVIEWING): frozenset({
         SystemRole.TA,

@@ -20,10 +20,12 @@ export function getCandidateActionErrorMessage(
   const ax = err as {
     response?: { status?: number; data?: { detail?: string } };
   };
-  if (ax?.response?.status === 403) {
-    return TA_OWNERSHIP_DENIED_MESSAGE;
-  }
   const detail = ax?.response?.data?.detail;
+  if (ax?.response?.status === 403) {
+    return typeof detail === "string" && detail.trim().length > 0
+      ? detail
+      : TA_OWNERSHIP_DENIED_MESSAGE;
+  }
   return typeof detail === "string" ? detail : fallback;
 }
 

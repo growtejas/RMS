@@ -1124,20 +1124,31 @@ class RequisitionItemWorkflowEngine:
         
         # TA users must be the assigned TA
         if "TA" in user_roles:
-            if item.assigned_ta is None:
+            assigned_ta_id = item.assigned_ta
+
+            # Backward compatibility: if item-level TA is not set, fall back to
+            # requisition header TA assignment.
+            if assigned_ta_id is None:
+                try:
+                    header_ta = getattr(item, "requisition", None)
+                    assigned_ta_id = getattr(header_ta, "assigned_ta", None)
+                except Exception:
+                    assigned_ta_id = None
+
+            if assigned_ta_id is None:
                 raise AuthorizationException(
                     action="modify unassigned item",
                     user_roles=user_roles,
                     required_roles=["HR", "Admin"],
                     reason="Item has no TA assigned. Only HR or Admin can modify.",
                 )
-            if item.assigned_ta != user_id:
+            if assigned_ta_id != user_id:
                 raise AuthorizationException(
                     action="modify item assigned to another TA",
                     user_roles=user_roles,
                     required_roles=["HR", "Admin"],
                     reason=f"You are not the assigned TA for this item. "
-                           f"Assigned TA ID: {item.assigned_ta}",
+                           f"Assigned TA ID: {assigned_ta_id}",
                 )
     
     @staticmethod
@@ -2038,6 +2049,22 @@ class RequisitionItemWorkflowEngine:
                 reason=f"Cannot edit budget when requisition is in '{requisition.overall_status}' status. "
                        f"Budget editing only allowed in: {', '.join(s.value for s in ITEM_BUDGET_EDITABLE_HEADER_STATES)}",
             )
+
+        # Business rule: during Pending_Budget, HR/Admin should set approved_budget,
+        # not modify estimated_budget. They must use approve-budget endpoint.
+        role_set = {r.lower() for r in user_roles}
+        if (
+            requisition.overall_status == "Pending_Budget"
+            and ("hr" in role_set or "admin" in role_set)
+        ):
+            raise EntityLockedException(
+                entity_type="requisition_item",
+                entity_id=item_id,
+                reason=(
+                    "Estimated budget cannot be edited by HR/Admin in Pending_Budget. "
+                    "Set approved_budget via approve-budget endpoint."
+                ),
+            )
         
         # Cannot edit budget if already approved
         if item.approved_budget is not None:
@@ -2050,10 +2077,14 @@ class RequisitionItemWorkflowEngine:
         # Capture old values for audit
         old_estimated_budget = float(item.estimated_budget) if item.estimated_budget else 0
         old_currency = item.currency
+        # Preserve approved_budget - editing estimated_budget should NEVER change approved_budget
+        preserved_approved_budget = item.approved_budget
         
-        # Update budget
+        # Update budget (ONLY estimated_budget and currency; approved_budget stays unchanged)
         item.estimated_budget = estimated_budget
         item.currency = currency
+        # Explicitly ensure approved_budget is not modified
+        item.approved_budget = preserved_approved_budget
         cls._increment_item_version(item)
         
         # Audit
@@ -2083,11 +2114,13 @@ class RequisitionItemWorkflowEngine:
         item_id: int,
         user_id: int,
         user_roles: List[str],
+        approved_budget: Optional[float] = None,
     ) -> RequisitionItem:
         """
         Approve budget for an item.
         
-        Sets approved_budget = estimated_budget.
+        If approved_budget is provided, sets item.approved_budget = approved_budget
+        (estimated_budget is unchanged). Otherwise sets approved_budget = estimated_budget.
         Can only be done when header is in PENDING_BUDGET.
         
         After approval:
@@ -2099,12 +2132,13 @@ class RequisitionItemWorkflowEngine:
             item_id: Item ID
             user_id: ID of user performing action
             user_roles: List of user's role names
+            approved_budget: Optional amount to approve at (can differ from estimated). If None, use estimated_budget.
             
         Returns:
             Updated item
             
         Raises:
-            ValidationException: If estimated_budget <= 0
+            ValidationException: If estimated_budget <= 0 or approved_budget <= 0 when provided
             AuthorizationException: If user not authorized
             EntityLockedException: If header state doesn't allow approval
         """
@@ -2167,11 +2201,23 @@ class RequisitionItemWorkflowEngine:
                 value=float(item.approved_budget),
             )
         
-        # Capture values for audit
+        # Determine approved amount: use provided value or copy from estimated (do not change estimated_budget)
+        if approved_budget is not None:
+            if approved_budget <= 0:
+                raise ValidationException(
+                    field="approved_budget",
+                    message="Approved budget must be greater than 0",
+                    value=approved_budget,
+                )
+            approved_value = float(approved_budget)
+        else:
+            approved_value = float(item.estimated_budget)
+        
         estimated_budget_value = float(item.estimated_budget)
         
-        # Approve budget: approved_budget = estimated_budget
-        item.approved_budget = item.estimated_budget
+        # Set approved_budget only; estimated_budget stays unchanged
+        from decimal import Decimal
+        item.approved_budget = Decimal(str(approved_value))
         cls._increment_item_version(item)
         
         # Audit
@@ -2186,7 +2232,7 @@ class RequisitionItemWorkflowEngine:
             user_roles=user_roles,
             metadata={
                 "estimated_budget": estimated_budget_value,
-                "approved_budget": estimated_budget_value,
+                "approved_budget": approved_value,
                 "currency": item.currency,
             },
         )

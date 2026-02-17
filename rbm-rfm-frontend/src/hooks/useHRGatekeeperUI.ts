@@ -88,7 +88,10 @@ const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AUD", "SGD"] as const;
 // VALIDATION HELPERS
 // ============================================================================
 
-function validateBudget(value: string): { isValid: boolean; error: string | null } {
+function validateBudget(value: string): {
+  isValid: boolean;
+  error: string | null;
+} {
   if (!value || value.trim() === "") {
     return { isValid: false, error: "Budget is required" };
   }
@@ -118,13 +121,15 @@ function validateRequired(value: string, fieldName: string): string | null {
 
 export function useHRGatekeeperUI(
   requisition: Requisition | null,
-  userRole: string
+  userRole: string,
 ): UseHRGatekeeperUIReturn {
   // ---------------------------------------------------------------------------
   // STATE
   // ---------------------------------------------------------------------------
 
-  const [itemEdits, setItemEdits] = useState<Record<number, ItemBudgetEdit>>({});
+  const [itemEdits, setItemEdits] = useState<Record<number, ItemBudgetEdit>>(
+    {},
+  );
   const [validation, setValidation] = useState<GatekeeperValidation>({
     budgetApprovedBy: "",
     budgetApprovedByError: null,
@@ -140,7 +145,8 @@ export function useHRGatekeeperUI(
   // ---------------------------------------------------------------------------
 
   const isPendingBudget = requisition?.overall_status === "Pending_Budget";
-  const isHRRole = userRole.toLowerCase() === "hr" || userRole.toLowerCase() === "admin";
+  const isHRRole =
+    userRole.toLowerCase() === "hr" || userRole.toLowerCase() === "admin";
 
   // ---------------------------------------------------------------------------
   // ACTIONS
@@ -148,11 +154,12 @@ export function useHRGatekeeperUI(
 
   const initializeFromRequisition = useCallback((req: Requisition) => {
     const edits: Record<number, ItemBudgetEdit> = {};
-    
+
     req.items.forEach((item) => {
-      const budgetStr = item.estimated_budget?.toString() || "";
+      const budgetStr =
+        (item.approved_budget ?? item.estimated_budget)?.toString() || "";
       const validation = validateBudget(budgetStr);
-      
+
       edits[item.item_id] = {
         item_id: item.item_id,
         estimated_budget: budgetStr,
@@ -164,7 +171,7 @@ export function useHRGatekeeperUI(
     });
 
     setItemEdits(edits);
-    
+
     // Reset validation fields
     setValidation({
       budgetApprovedBy: "",
@@ -172,51 +179,64 @@ export function useHRGatekeeperUI(
       approvedBy: "",
       approvedByError: null,
     });
-    
+
     setGlobalError(null);
     setGlobalMessage(null);
   }, []);
 
-  const setItemBudget = useCallback((itemId: number, budget: string) => {
-    setItemEdits((prev) => {
-      const currentEdit = prev[itemId];
-      if (!currentEdit) return prev;
+  const setItemBudget = useCallback(
+    (itemId: number, budget: string) => {
+      setItemEdits((prev) => {
+        const currentEdit = prev[itemId];
+        if (!currentEdit) return prev;
 
-      const originalItem = requisition?.items.find((i) => i.item_id === itemId);
-      const originalBudget = originalItem?.estimated_budget?.toString() || "";
-      const validation = validateBudget(budget);
+        const originalItem = requisition?.items.find(
+          (i) => i.item_id === itemId,
+        );
+        const originalBudget =
+          (
+            originalItem?.approved_budget ?? originalItem?.estimated_budget
+          )?.toString() || "";
+        const validation = validateBudget(budget);
 
-      return {
-        ...prev,
-        [itemId]: {
-          ...currentEdit,
-          estimated_budget: budget,
-          isDirty: budget !== originalBudget,
-          isValid: validation.isValid,
-          error: validation.error,
-        },
-      };
-    });
-  }, [requisition]);
+        return {
+          ...prev,
+          [itemId]: {
+            ...currentEdit,
+            estimated_budget: budget,
+            isDirty: budget !== originalBudget,
+            isValid: validation.isValid,
+            error: validation.error,
+          },
+        };
+      });
+    },
+    [requisition],
+  );
 
-  const setItemCurrency = useCallback((itemId: number, currency: string) => {
-    setItemEdits((prev) => {
-      const currentEdit = prev[itemId];
-      if (!currentEdit) return prev;
+  const setItemCurrency = useCallback(
+    (itemId: number, currency: string) => {
+      setItemEdits((prev) => {
+        const currentEdit = prev[itemId];
+        if (!currentEdit) return prev;
 
-      const originalItem = requisition?.items.find((i) => i.item_id === itemId);
-      const originalCurrency = originalItem?.currency || "INR";
+        const originalItem = requisition?.items.find(
+          (i) => i.item_id === itemId,
+        );
+        const originalCurrency = originalItem?.currency || "INR";
 
-      return {
-        ...prev,
-        [itemId]: {
-          ...currentEdit,
-          currency,
-          isDirty: currentEdit.isDirty || currency !== originalCurrency,
-        },
-      };
-    });
-  }, [requisition]);
+        return {
+          ...prev,
+          [itemId]: {
+            ...currentEdit,
+            currency,
+            isDirty: currentEdit.isDirty || currency !== originalCurrency,
+          },
+        };
+      });
+    },
+    [requisition],
+  );
 
   const setBudgetApprovedBy = useCallback((value: string) => {
     const error = validateRequired(value, "Budget approver");
@@ -238,7 +258,7 @@ export function useHRGatekeeperUI(
 
   const validateItem = useCallback((itemId: number): boolean => {
     let isValid = false;
-    
+
     setItemEdits((prev) => {
       const edit = prev[itemId];
       if (!edit) {
@@ -248,7 +268,7 @@ export function useHRGatekeeperUI(
 
       const validation = validateBudget(edit.estimated_budget);
       isValid = validation.isValid;
-      
+
       return {
         ...prev,
         [itemId]: {
@@ -271,7 +291,7 @@ export function useHRGatekeeperUI(
       const itemId = parseInt(key, 10);
       const edit = updatedEdits[itemId];
       const validation = validateBudget(edit.estimated_budget);
-      
+
       updatedEdits[itemId] = {
         ...edit,
         isValid: validation.isValid,
@@ -285,8 +305,14 @@ export function useHRGatekeeperUI(
     setItemEdits(updatedEdits);
 
     // Validate approver fields
-    const budgetApproverError = validateRequired(validation.budgetApprovedBy, "Budget approver");
-    const hrApproverError = validateRequired(validation.approvedBy, "HR approver");
+    const budgetApproverError = validateRequired(
+      validation.budgetApprovedBy,
+      "Budget approver",
+    );
+    const hrApproverError = validateRequired(
+      validation.approvedBy,
+      "HR approver",
+    );
 
     setValidation((prev) => ({
       ...prev,
@@ -301,25 +327,31 @@ export function useHRGatekeeperUI(
     return allValid;
   }, [itemEdits, validation]);
 
-  const resetItemEdit = useCallback((itemId: number) => {
-    const originalItem = requisition?.items.find((i) => i.item_id === itemId);
-    if (!originalItem) return;
+  const resetItemEdit = useCallback(
+    (itemId: number) => {
+      const originalItem = requisition?.items.find((i) => i.item_id === itemId);
+      if (!originalItem) return;
 
-    const budgetStr = originalItem.estimated_budget?.toString() || "";
-    const validationResult = validateBudget(budgetStr);
+      const budgetStr =
+        (
+          originalItem.approved_budget ?? originalItem.estimated_budget
+        )?.toString() || "";
+      const validationResult = validateBudget(budgetStr);
 
-    setItemEdits((prev) => ({
-      ...prev,
-      [itemId]: {
-        item_id: itemId,
-        estimated_budget: budgetStr,
-        currency: originalItem.currency || "INR",
-        isDirty: false,
-        isValid: validationResult.isValid,
-        error: validationResult.error,
-      },
-    }));
-  }, [requisition]);
+      setItemEdits((prev) => ({
+        ...prev,
+        [itemId]: {
+          item_id: itemId,
+          estimated_budget: budgetStr,
+          currency: originalItem.currency || "INR",
+          isDirty: false,
+          isValid: validationResult.isValid,
+          error: validationResult.error,
+        },
+      }));
+    },
+    [requisition],
+  );
 
   const resetAllEdits = useCallback(() => {
     if (requisition) {
@@ -333,7 +365,7 @@ export function useHRGatekeeperUI(
 
   const computed = useMemo((): GatekeeperComputed => {
     const editValues = Object.values(itemEdits);
-    
+
     const dirtyItemIds = editValues
       .filter((e) => e.isDirty)
       .map((e) => e.item_id);
@@ -345,26 +377,26 @@ export function useHRGatekeeperUI(
     const hasUnsavedChanges = dirtyItemIds.length > 0;
     const hasInvalidBudgets = invalidItemIds.length > 0;
 
-    // Calculate totals from current edits
-    let totalEstimatedBudget = 0;
-    editValues.forEach((edit) => {
-      const val = parseFloat(edit.estimated_budget.replace(/,/g, "") || "0");
-      if (!isNaN(val)) {
-        totalEstimatedBudget += val;
-      }
-    });
+    // Estimated budget should remain immutable (manager-provided baseline)
+    const totalEstimatedBudget =
+      requisition?.items.reduce(
+        (sum, item) => sum + (item.estimated_budget || 0),
+        0,
+      ) || 0;
 
     // Get approved budget from original requisition
     const totalApprovedBudget = requisition?.total_approved_budget || 0;
 
     // Check if all items have approved budgets (from original data)
-    const allItemsApproved = requisition?.items.every(
-      (item) => item.approved_budget !== null && item.approved_budget > 0
-    ) ?? false;
+    const allItemsApproved =
+      requisition?.items.every(
+        (item) => item.approved_budget !== null && item.approved_budget > 0,
+      ) ?? false;
 
-    const pendingItemsCount = requisition?.items.filter(
-      (item) => item.approved_budget === null || item.approved_budget <= 0
-    ).length ?? 0;
+    const pendingItemsCount =
+      requisition?.items.filter(
+        (item) => item.approved_budget === null || item.approved_budget <= 0,
+      ).length ?? 0;
 
     // Can approve only if:
     // - Status is PENDING_BUDGET

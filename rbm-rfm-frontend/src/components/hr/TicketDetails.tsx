@@ -31,6 +31,7 @@ import {
   UserCog,
   ArrowRightLeft,
   RefreshCw,
+  Eye,
 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
 import { apiClient } from "../../api/client";
@@ -75,6 +76,7 @@ interface RequisitionItem {
   estimatedBudget?: number | null;
   approvedBudget?: number | null;
   currency?: string;
+  jdFileKey?: string | null;
 }
 
 interface TimelineEvent {
@@ -128,6 +130,7 @@ interface BackendRequisitionItem {
   experience_years?: number | null;
   education_requirement?: string | null;
   job_description: string;
+  jd_file_key?: string | null;
   requirements?: string | null;
   item_status: string;
   assigned_ta?: number | null;
@@ -157,6 +160,7 @@ interface BackendRequisition {
   approved_by?: number | null;
   approval_history?: string | null;
   assigned_at?: string | null;
+  jd_file_key?: string | null;
   items: BackendRequisitionItem[];
 }
 
@@ -274,6 +278,12 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
   } | null>(null);
   const [bulkOldTAId, setBulkOldTAId] = useState<number | null>(null);
 
+  // JD PDF viewer (item-level only)
+  const [showJdViewer, setShowJdViewer] = useState(false);
+  const [jdItemId, setJdItemId] = useState<number | null>(null);
+  const [jdBlobUrl, setJdBlobUrl] = useState<string | null>(null);
+  const [loadingJd, setLoadingJd] = useState(false);
+
   /** TA users extracted from usersById (populated after fetch) */
   const taUsersList = Object.entries(usersById).map(([id, username]) => ({
     user_id: Number(id),
@@ -343,6 +353,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
           estimatedBudget: item.estimated_budget ?? null,
           approvedBudget: item.approved_budget ?? null,
           currency: item.currency ?? "INR",
+          jdFileKey: (item as BackendRequisitionItem).jd_file_key ?? null,
         })) ?? [],
       timeline: [],
       notes: [],
@@ -524,6 +535,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                 experience_years: item.experience_years ?? null,
                 education_requirement: item.education_requirement ?? null,
                 job_description: item.job_description,
+                jd_file_key: (item as BackendRequisitionItem).jd_file_key ?? null,
                 requirements: item.requirements ?? null,
                 item_status:
                   item.item_status as WorkflowRequisitionItem["item_status"],
@@ -704,7 +716,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
         is_replacement: null,
         manager_notes: null,
         rejection_reason: null,
-        jd_file_key: null,
+        jd_file_key: data.jd_file_key ?? null,
         raised_by: data.raised_by ?? 0,
         assigned_ta: data.assigned_ta ?? null,
         budget_approved_by: data.budget_approved_by ?? null,
@@ -744,6 +756,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
             experience_years: item.experience_years ?? null,
             education_requirement: item.education_requirement ?? null,
             job_description: item.job_description,
+            jd_file_key: (item as BackendRequisitionItem).jd_file_key ?? null,
             requirements: item.requirements ?? null,
             item_status:
               item.item_status as WorkflowRequisitionItem["item_status"],
@@ -781,6 +794,52 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       console.error("Failed to refresh requisition:", err);
     }
   }, [effectiveTicketId, activeTab]);
+
+  // Load JD PDF for viewer when modal opens (item-level endpoint)
+  useEffect(() => {
+    if (!showJdViewer || !jdItemId) {
+      if (jdBlobUrl) {
+        URL.revokeObjectURL(jdBlobUrl);
+        setJdBlobUrl(null);
+      }
+      return;
+    }
+    let objectUrl: string | null = null;
+    const loadJd = async () => {
+      setLoadingJd(true);
+      try {
+        const response = await apiClient.get<Blob>(
+          `/requisitions/items/${jdItemId}/jd`,
+          { responseType: "blob" },
+        );
+        objectUrl = URL.createObjectURL(response.data as Blob);
+        setJdBlobUrl(objectUrl);
+      } catch {
+        setJdBlobUrl(null);
+      } finally {
+        setLoadingJd(false);
+      }
+    };
+    void loadJd();
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setJdBlobUrl(null);
+    };
+  }, [showJdViewer, jdItemId]);
+
+  const closeJdViewer = () => {
+    setShowJdViewer(false);
+    setJdItemId(null);
+    if (jdBlobUrl) {
+      URL.revokeObjectURL(jdBlobUrl);
+      setJdBlobUrl(null);
+    }
+  };
+
+  const openJdViewerForItem = (itemId: number) => {
+    setJdItemId(itemId);
+    setShowJdViewer(true);
+  };
 
   if (isLoading) {
     return (
@@ -1790,6 +1849,41 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                           >
                             <RefreshCw size={10} />
                             Replacement
+                          </span>
+                        )}
+                        {item.jdFileKey && (
+                          <span style={{ display: "flex", alignItems: "center", gap: "6px", marginLeft: "auto" }}>
+                            <button
+                              type="button"
+                              className="action-button"
+                              style={{ fontSize: "11px", padding: "4px 8px", display: "flex", alignItems: "center", gap: "4px" }}
+                              onClick={() => openJdViewerForItem(item.numericItemId)}
+                            >
+                              <Eye size={12} />
+                              View JD
+                            </button>
+                            <a
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                apiClient
+                                  .get(`/requisitions/items/${item.numericItemId}/jd`, { responseType: "blob" })
+                                  .then((res) => {
+                                    const url = URL.createObjectURL(res.data as Blob);
+                                    const a = document.createElement("a");
+                                    a.href = url;
+                                    a.download = `JD_${item.skill}_${item.numericItemId}.pdf`;
+                                    a.click();
+                                    URL.revokeObjectURL(url);
+                                  })
+                                  .catch(() => {});
+                              }}
+                              className="action-button"
+                              style={{ fontSize: "11px", padding: "4px 8px", display: "flex", alignItems: "center", gap: "4px", textDecoration: "none", color: "inherit" }}
+                            >
+                              <Download size={12} />
+                              Download
+                            </a>
                           </span>
                         )}
                       </div>
@@ -3719,6 +3813,153 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
           onSuccess={handleRefreshData}
           onClose={() => setReassignModal(null)}
         />
+      )}
+
+      {/* JD PDF Viewer Modal */}
+      {showJdViewer && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: "rgba(0,0,0,0.5)",
+          }}
+          onClick={(e) => e.target === e.currentTarget && closeJdViewer()}
+        >
+          <div
+            style={{
+              width: "90%",
+              maxWidth: "900px",
+              maxHeight: "90vh",
+              backgroundColor: "var(--bg-primary)",
+              borderRadius: "12px",
+              boxShadow: "0 25px 50px rgba(0,0,0,0.25)",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "16px 20px",
+                borderBottom: "1px solid var(--border-subtle)",
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: "18px",
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <FileText size={20} color="var(--primary-accent)" />
+                Job Description
+              </h3>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                {jdBlobUrl && (
+                  <a
+                    href={jdBlobUrl}
+                    download={`JD_${ticket?.ticketId ?? "requisition"}.pdf`}
+                    className="action-button"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      fontSize: "12px",
+                      textDecoration: "none",
+                    }}
+                  >
+                    <Download size={14} />
+                    Download
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={closeJdViewer}
+                  style={{
+                    padding: "8px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: "var(--bg-secondary)",
+                    cursor: "pointer",
+                  }}
+                  aria-label="Close"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                padding: "16px",
+                overflow: "auto",
+              }}
+            >
+              {loadingJd ? (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "48px",
+                    color: "var(--text-tertiary)",
+                    fontSize: "13px",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: "40px",
+                      height: "40px",
+                      border: "2px solid var(--border-subtle)",
+                      borderTopColor: "var(--primary-accent)",
+                      borderRadius: "50%",
+                      animation: "spin 0.8s linear infinite",
+                    }}
+                  />
+                  <p style={{ marginTop: "16px" }}>Loading PDF...</p>
+                </div>
+              ) : jdBlobUrl ? (
+                <iframe
+                  src={jdBlobUrl}
+                  title="Job Description PDF"
+                  style={{
+                    width: "100%",
+                    height: "75vh",
+                    border: "1px solid var(--border-subtle)",
+                    borderRadius: "8px",
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "48px",
+                    color: "var(--text-tertiary)",
+                  }}
+                >
+                  <FileText size={48} style={{ marginBottom: "16px" }} />
+                  <p style={{ fontSize: "14px" }}>Could not load PDF.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

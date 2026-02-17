@@ -59,6 +59,8 @@ class RequisitionItem(Base):
     # --------------------
     role_position = Column(String(50), nullable=False)
     job_description = Column(Text, nullable=False)
+    # Item-level JD PDF (optional; per-position file)
+    jd_file_key = Column(Text, nullable=True)
 
     skill_level = Column(String(30), nullable=True)
     experience_years = Column(Integer, nullable=True)

@@ -209,7 +209,8 @@ export async function reopenRequisition(
 
 /**
  * Assign a TA to a requisition header (self-assign or HR-assign).
- * Does NOT change requisition status, just sets assigned_ta field.
+ * Also propagates assignment to unassigned non-terminal items.
+ * Pending items auto-transition to Sourcing via item workflow rules.
  * Requisition must be in Active status.
  */
 export async function assignRequisitionTA(
@@ -339,7 +340,11 @@ import type {
   ItemBudgetResponse,
 } from "../types/workflow";
 
-export type { ItemBudgetEditRequest, ItemBudgetRejectRequest, ItemBudgetResponse };
+export type {
+  ItemBudgetEditRequest,
+  ItemBudgetRejectRequest,
+  ItemBudgetResponse,
+};
 
 /**
  * Edit the estimated budget for an item.
@@ -358,19 +363,28 @@ export async function editItemBudget(
 }
 
 /**
+ * Request body for approving item budget.
+ * If approved_budget is provided, that amount is set as approved (estimated stays unchanged).
+ * If omitted, approved_budget = estimated_budget.
+ */
+export interface ItemBudgetApproveRequest {
+  approved_budget?: number;
+}
+
+/**
  * Approve budget for an item.
- * Sets approved_budget = estimated_budget.
+ * Optional body: { approved_budget?: number }. If provided, that amount is approved (estimated unchanged).
+ * If omitted, approved_budget = estimated_budget.
  * Can only be done when header is in PENDING_BUDGET.
- * Cannot approve if estimated_budget <= 0.
- * 
  * After all items are approved, header automatically transitions to PENDING_HR.
  */
 export async function approveItemBudget(
   itemId: number,
+  body: ItemBudgetApproveRequest = {},
 ): Promise<ItemBudgetResponse> {
   const response = await apiClient.post<ItemBudgetResponse>(
     `/requisition-items/${itemId}/workflow/approve-budget`,
-    {},
+    body,
   );
   return response.data;
 }

@@ -16,6 +16,7 @@ import {
   Lock,
   History,
   Users,
+  Eye,
 } from "lucide-react";
 import { apiClient } from "../../api/client";
 import type { Candidate } from "../../api/candidateApi";
@@ -31,6 +32,7 @@ interface RequisitionItem {
   experience_years?: number | null;
   education_requirement?: string | null;
   job_description: string;
+  jd_file_key?: string | null;
   requirements?: string | null;
   item_status: string;
   estimated_budget?: number | null;
@@ -422,6 +424,11 @@ const ManagerRequisitionDetails: React.FC = () => {
   const [isUploadingJd, setIsUploadingJd] = useState(false);
   const [isRemovingJd, setIsRemovingJd] = useState(false);
   const [jdInputKey, setJdInputKey] = useState(0);
+  const [showJdViewer, setShowJdViewer] = useState(false);
+  const [jdItemId, setJdItemId] = useState<number | null>(null);
+  const [jdBlobUrl, setJdBlobUrl] = useState<string | null>(null);
+  const [loadingJd, setLoadingJd] = useState(false);
+  const [jdUploadTargetItemId, setJdUploadTargetItemId] = useState<number | null>(null);
 
   // Candidate pipeline (read-only for Manager)
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -875,7 +882,17 @@ const ManagerRequisitionDetails: React.FC = () => {
           (response) => response.data ?? [],
         );
 
-        setRequisition(reqData);
+        // Normalize items: preserve jd_file_key and budget fields from API (estimated vs approved are distinct)
+        const requisitionWithItems = {
+          ...reqData,
+          items: (reqData.items || []).map((it: RequisitionItem) => ({
+            ...it,
+            jd_file_key: it.jd_file_key ?? null,
+            estimated_budget: it.estimated_budget != null ? Number(it.estimated_budget) : null,
+            approved_budget: it.approved_budget != null ? Number(it.approved_budget) : null,
+          })),
+        };
+        setRequisition(requisitionWithItems);
         setStatusHistory(historyRes.data || []);
         setMasterTimeline(
           buildMasterTimeline(
@@ -1185,11 +1202,20 @@ const ManagerRequisitionDetails: React.FC = () => {
         (response) => response.data ?? [],
       );
 
-      setRequisition(reqData);
+      const requisitionWithItemsAfterSave = {
+        ...reqData,
+        items: (reqData.items || []).map((it: RequisitionItem) => ({
+          ...it,
+          jd_file_key: it.jd_file_key ?? null,
+          estimated_budget: it.estimated_budget != null ? Number(it.estimated_budget) : null,
+          approved_budget: it.approved_budget != null ? Number(it.approved_budget) : null,
+        })),
+      };
+      setRequisition(requisitionWithItemsAfterSave);
       setStatusHistory(historyRes.data || []);
       setMasterTimeline(
         buildMasterTimeline(
-          reqData,
+          requisitionWithItemsAfterSave,
           historyRes.data || [],
           reqWorkflowAudit,
           itemWorkflowAudit,
@@ -1217,25 +1243,24 @@ const ManagerRequisitionDetails: React.FC = () => {
     }
   };
 
-  // Download JD
-  const handleDownloadJD = async () => {
-    if (!requisition?.jd_file_key) return;
-
+  // Item-level JD: download
+  const handleDownloadItemJD = async (itemId: number) => {
     try {
       const response = await apiClient.get<any>(
-        `/requisitions/${requisition.req_id}/jd`,
-        {
-          responseType: "blob",
-        },
+        `/requisitions/items/${itemId}/jd`,
+        { responseType: "blob" },
       );
-
       const blob = new Blob([response.data as BlobPart], {
         type: "application/pdf",
       });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", `JD_REQ-${requisition.req_id}.pdf`);
+      const item = requisition?.items?.find((i) => i.item_id === itemId);
+      link.setAttribute(
+        "download",
+        `JD_${item?.role_position ?? itemId}.pdf`,
+      );
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -1248,34 +1273,35 @@ const ManagerRequisitionDetails: React.FC = () => {
     }
   };
 
-  const handleJdFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleJdFileChange = (e: React.ChangeEvent<HTMLInputElement>, itemId: number) => {
     const file = e.target.files?.[0] || null;
     if (!file) {
       setJdFile(null);
       setJdError(null);
+      setJdUploadTargetItemId(null);
       return;
     }
-
     if (file.type !== "application/pdf") {
       setJdFile(null);
       setJdError("Only PDF files are allowed.");
       e.target.value = "";
+      setJdUploadTargetItemId(null);
       return;
     }
-
     if (file.size > 10 * 1024 * 1024) {
       setJdFile(null);
       setJdError("File exceeds 10MB.");
       e.target.value = "";
+      setJdUploadTargetItemId(null);
       return;
     }
-
     setJdFile(file);
     setJdError(null);
+    setJdUploadTargetItemId(itemId);
   };
 
-  const handleUploadJD = async () => {
-    if (!requisition || !jdFile) return;
+  const handleUploadItemJD = async (itemId: number) => {
+    if (!requisition || !jdFile || jdUploadTargetItemId !== itemId) return;
 
     setIsUploadingJd(true);
     setJdError(null);
@@ -1284,27 +1310,32 @@ const ManagerRequisitionDetails: React.FC = () => {
       const payload = new FormData();
       payload.append("jd_file", jdFile);
 
-      const response = await apiClient.post(
-        `/requisitions/${requisition.req_id}/jd`,
+      const response = await apiClient.post<{ message?: string; jd_file_key?: string }>(
+        `/requisitions/items/${itemId}/jd`,
         payload,
         {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
+          headers: { "Content-Type": "multipart/form-data" },
         },
       );
 
-      const jdKey = response.data?.jd_file_key ?? requisition.jd_file_key;
-      setRequisition((prev) =>
-        prev ? { ...prev, jd_file_key: jdKey || prev.jd_file_key } : prev,
-      );
+      const jdKey =
+        (response.data && "jd_file_key" in response.data && response.data.jd_file_key) ||
+        null;
+      setRequisition((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          items: prev.items.map((it) =>
+            it.item_id === itemId ? { ...it, jd_file_key: jdKey || it.jd_file_key } : it,
+          ),
+        };
+      });
       setJdFile(null);
+      setJdUploadTargetItemId(null);
       setJdInputKey((prev) => prev + 1);
       setSaveMessage({
         type: "success",
-        message: requisition.jd_file_key
-          ? "Job description replaced"
-          : "Job description uploaded",
+        message: "Job description uploaded for position",
       });
       setTimeout(() => setSaveMessage(null), 5000);
     } catch (err: unknown) {
@@ -1317,16 +1348,26 @@ const ManagerRequisitionDetails: React.FC = () => {
     }
   };
 
-  const handleRemoveJD = async () => {
-    if (!requisition?.jd_file_key) return;
+  const handleRemoveItemJD = async (itemId: number) => {
+    if (!requisition) return;
 
     setIsRemovingJd(true);
     setJdError(null);
 
     try {
-      await apiClient.delete(`/requisitions/${requisition.req_id}/jd`);
-      setRequisition((prev) => (prev ? { ...prev, jd_file_key: null } : prev));
+      await apiClient.delete(`/requisitions/items/${itemId}/jd`);
+      setRequisition((prev) =>
+        prev
+          ? {
+              ...prev,
+              items: prev.items.map((it) =>
+                it.item_id === itemId ? { ...it, jd_file_key: null } : it,
+              ),
+            }
+          : prev,
+      );
       setJdFile(null);
+      setJdUploadTargetItemId(null);
       setJdInputKey((prev) => prev + 1);
       setSaveMessage({
         type: "success",
@@ -1341,6 +1382,52 @@ const ManagerRequisitionDetails: React.FC = () => {
     } finally {
       setIsRemovingJd(false);
     }
+  };
+
+  // Load JD PDF for viewer when modal opens (item-level)
+  useEffect(() => {
+    if (!showJdViewer || !jdItemId) {
+      if (jdBlobUrl) {
+        URL.revokeObjectURL(jdBlobUrl);
+        setJdBlobUrl(null);
+      }
+      return;
+    }
+    let objectUrl: string | null = null;
+    const loadJd = async () => {
+      setLoadingJd(true);
+      try {
+        const response = await apiClient.get<Blob>(
+          `/requisitions/items/${jdItemId}/jd`,
+          { responseType: "blob" },
+        );
+        objectUrl = URL.createObjectURL(response.data as Blob);
+        setJdBlobUrl(objectUrl);
+      } catch {
+        setJdBlobUrl(null);
+      } finally {
+        setLoadingJd(false);
+      }
+    };
+    void loadJd();
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setJdBlobUrl(null);
+    };
+  }, [showJdViewer, jdItemId]);
+
+  const closeJdViewer = () => {
+    setShowJdViewer(false);
+    setJdItemId(null);
+    if (jdBlobUrl) {
+      URL.revokeObjectURL(jdBlobUrl);
+      setJdBlobUrl(null);
+    }
+  };
+
+  const openJdViewerForItem = (itemId: number) => {
+    setJdItemId(itemId);
+    setShowJdViewer(true);
   };
 
   // Loading state
@@ -1826,39 +1913,17 @@ const ManagerRequisitionDetails: React.FC = () => {
                   </p>
                 </div>
                 <div className="p-6">
-                  {requisition.jd_file_key ? (
-                    <div className="flex items-center gap-3">
-                      <FileText className="h-5 w-5 text-gray-600" />
-                      <div className="flex-1">
-                        <div className="text-sm font-medium text-gray-900">
-                          Job Description.pdf
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          Uploaded with requisition
-                        </div>
-                      </div>
-                      <button
-                        onClick={handleDownloadJD}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
-                      >
-                        <Download className="h-4 w-4" />
-                        Download
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="text-center py-6">
-                      <FileText className="h-10 w-10 text-gray-400 mx-auto mb-3" />
-                      <p className="text-gray-500 text-sm">No JD uploaded</p>
-                    </div>
-                  )}
-                  <div className="mt-4 pt-4 border-t border-gray-100">
+                  <p className="text-sm text-gray-600">
+                    Job descriptions are attached per position. View or upload in the{" "}
                     <button
-                      onClick={() => setActiveTab("timeline")}
-                      className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                      type="button"
+                      onClick={() => setActiveTab("positions")}
+                      className="text-indigo-600 hover:text-indigo-700 font-medium"
                     >
-                      View full JD &amp; manage uploads →
-                    </button>
-                  </div>
+                      Positions
+                    </button>{" "}
+                    tab.
+                  </p>
                 </div>
               </div>
             </div>
@@ -2068,16 +2133,16 @@ const ManagerRequisitionDetails: React.FC = () => {
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                               <div>
                                 <span className="text-gray-500">
-                                  Estimated:
+                                  Estimated (manager):
                                 </span>{" "}
                                 <span className="font-medium text-gray-900">
                                   {item.estimated_budget != null
-                                    ? `${item.currency || "INR"} ${item.estimated_budget.toLocaleString()}`
+                                    ? `${item.currency || "INR"} ${Number(item.estimated_budget).toLocaleString()}`
                                     : "—"}
                                 </span>
                               </div>
                               <div>
-                                <span className="text-gray-500">Approved:</span>{" "}
+                                <span className="text-gray-500">Approved (budget):</span>{" "}
                                 <span
                                   className={`font-medium ${
                                     item.approved_budget != null
@@ -2086,7 +2151,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                                   }`}
                                 >
                                   {item.approved_budget != null
-                                    ? `${item.currency || "INR"} ${item.approved_budget.toLocaleString()}`
+                                    ? `${item.currency || "INR"} ${Number(item.approved_budget).toLocaleString()}`
                                     : "Pending"}
                                 </span>
                               </div>
@@ -2125,6 +2190,63 @@ const ManagerRequisitionDetails: React.FC = () => {
                               </p>
                             </div>
                           )}
+
+                          {/* Item-level JD: always show row; View/Read when JD exists */}
+                          <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Job description (PDF)
+                            </span>
+                            {Boolean(item.jd_file_key) ? (
+                                <>
+                                  <button
+                                    onClick={() => openJdViewerForItem(item.item_id)}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200"
+                                  >
+                                    <Eye className="h-3.5 w-3.5" />
+                                    View / Read JD
+                                  </button>
+                                  <button
+                                    onClick={() => handleDownloadItemJD(item.item_id)}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700"
+                                  >
+                                    <Download className="h-3.5 w-3.5" />
+                                    Download
+                                  </button>
+                                  {canEdit && (
+                                    <button
+                                      onClick={() => handleRemoveItemJD(item.item_id)}
+                                      disabled={isRemovingJd}
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 disabled:opacity-50"
+                                    >
+                                      {isRemovingJd ? "Removing..." : "Remove"}
+                                    </button>
+                                  )}
+                                </>
+                              ) : canEdit ? (
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <input
+                                    key={`jd-${item.item_id}-${jdInputKey}`}
+                                    type="file"
+                                    accept="application/pdf"
+                                    onChange={(e) => handleJdFileChange(e, item.item_id)}
+                                    disabled={isUploadingJd || isRemovingJd}
+                                    className="text-sm text-gray-500 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700"
+                                  />
+                                  <button
+                                    onClick={() => handleUploadItemJD(item.item_id)}
+                                    disabled={!jdFile || jdUploadTargetItemId !== item.item_id || isUploadingJd || isRemovingJd}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                                  >
+                                    {isUploadingJd ? "Uploading..." : "Upload JD"}
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-gray-400 text-sm">No JD attached</span>
+                              )}
+                              {jdError && jdUploadTargetItemId === item.item_id && (
+                                <span className="text-sm text-red-600">{jdError}</span>
+                              )}
+                            </div>
                         </div>
                       ))}
                     </div>
@@ -2269,6 +2391,74 @@ const ManagerRequisitionDetails: React.FC = () => {
                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                             />
                           </div>
+
+                          {/* JD PDF: use requisition item when existing (id !== "new") */}
+                          {item.id !== "new" && requisition && (() => {
+                            const reqItem = requisition.items.find((i) => i.item_id === item.id);
+                            const itemId = typeof item.id === "number" ? item.id : null;
+                            if (itemId == null) return null;
+                            return (
+                              <div className="mt-4 pt-4 border-t border-gray-200 flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                  Job description (PDF)
+                                </span>
+                                {Boolean(reqItem?.jd_file_key) ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => openJdViewerForItem(itemId)}
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200"
+                                    >
+                                      <Eye className="h-3.5 w-3.5" />
+                                      View / Read JD
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDownloadItemJD(itemId)}
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700"
+                                    >
+                                      <Download className="h-3.5 w-3.5" />
+                                      Download
+                                    </button>
+                                    {canEdit && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveItemJD(itemId)}
+                                        disabled={isRemovingJd}
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 disabled:opacity-50"
+                                      >
+                                        {isRemovingJd ? "Removing..." : "Remove"}
+                                      </button>
+                                    )}
+                                  </>
+                                ) : canEdit ? (
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <input
+                                      key={`jd-edit-${itemId}-${jdInputKey}`}
+                                      type="file"
+                                      accept="application/pdf"
+                                      onChange={(e) => handleJdFileChange(e, itemId)}
+                                      disabled={isUploadingJd || isRemovingJd}
+                                      className="text-sm text-gray-500 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUploadItemJD(itemId)}
+                                      disabled={!jdFile || jdUploadTargetItemId !== itemId || isUploadingJd || isRemovingJd}
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                                    >
+                                      {isUploadingJd ? "Uploading..." : "Upload JD"}
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-400 text-sm">No JD attached</span>
+                                )}
+                                {jdError && jdUploadTargetItemId === itemId && (
+                                  <span className="text-sm text-red-600">{jdError}</span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       ))}
 
@@ -2698,80 +2888,17 @@ const ManagerRequisitionDetails: React.FC = () => {
                   </p>
                 </div>
                 <div className="p-6">
-                  {requisition.jd_file_key ? (
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <FileText className="h-5 w-5 text-gray-600" />
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">
-                              Job Description.pdf
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              Uploaded with requisition
-                            </div>
-                          </div>
-                        </div>
-                        <button
-                          onClick={handleDownloadJD}
-                          className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
-                        >
-                          <Download className="h-4 w-4" />
-                          Download
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-center py-8">
-                      <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                      <p className="text-gray-500">
-                        No job description uploaded
-                      </p>
-                    </div>
-                  )}
-
-                  {canEdit && (
-                    <div className="mt-6 pt-6 border-t border-gray-200">
-                      <input
-                        key={jdInputKey}
-                        type="file"
-                        accept="application/pdf"
-                        onChange={handleJdFileChange}
-                        disabled={isUploadingJd || isRemovingJd}
-                        className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                      />
-                      {jdError && (
-                        <div className="mt-2 text-sm text-red-600">
-                          {jdError}
-                        </div>
-                      )}
-                      <div className="flex gap-2 mt-4">
-                        <button
-                          onClick={handleUploadJD}
-                          disabled={!jdFile || isUploadingJd || isRemovingJd}
-                          className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                        >
-                          {isUploadingJd
-                            ? "Uploading..."
-                            : requisition.jd_file_key
-                              ? "Replace JD"
-                              : "Upload JD"}
-                        </button>
-                        {requisition.jd_file_key && (
-                          <button
-                            onClick={handleRemoveJD}
-                            disabled={isRemovingJd || isUploadingJd}
-                            className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 disabled:opacity-50 transition-colors"
-                          >
-                            {isRemovingJd ? "Removing..." : "Remove"}
-                          </button>
-                        )}
-                      </div>
-                      <p className="mt-2 text-xs text-gray-500">
-                        PDF only. Max 10MB.
-                      </p>
-                    </div>
-                  )}
+                  <p className="text-sm text-gray-600">
+                    Job descriptions are managed per position. View or upload in the{" "}
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("positions")}
+                      className="text-indigo-600 hover:text-indigo-700 font-medium"
+                    >
+                      Positions
+                    </button>{" "}
+                    tab.
+                  </p>
                 </div>
               </div>
 
@@ -2840,6 +2967,68 @@ const ManagerRequisitionDetails: React.FC = () => {
           }}
           userRoles={user?.roles || []}
         />
+      )}
+
+      {/* JD PDF Viewer Modal (view on spot, same pattern as candidate resume) */}
+      {showJdViewer && (
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50"
+          onClick={(e) => e.target === e.currentTarget && closeJdViewer()}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl flex flex-col"
+            style={{ width: "90%", maxWidth: "900px", maxHeight: "90vh" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <FileText className="h-5 w-5 text-indigo-600" />
+                Job Description
+              </h3>
+              <div className="flex items-center gap-2">
+                {jdBlobUrl && (
+                  <a
+                    href={jdBlobUrl}
+                    download={jdItemId
+                      ? `JD_${requisition?.items?.find((i) => i.item_id === jdItemId)?.role_position ?? jdItemId}.pdf`
+                      : `JD_REQ-${requisition?.req_id ?? "requisition"}.pdf`}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download
+                  </a>
+                )}
+                <button
+                  onClick={closeJdViewer}
+                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-600"
+                  aria-label="Close"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 p-4 overflow-auto">
+              {loadingJd ? (
+                <div className="flex flex-col items-center justify-center py-16 text-gray-500">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mb-4" />
+                  <p className="text-sm">Loading PDF...</p>
+                </div>
+              ) : jdBlobUrl ? (
+                <iframe
+                  src={jdBlobUrl}
+                  title="Job Description PDF"
+                  className="w-full rounded-lg border border-gray-200"
+                  style={{ height: "75vh" }}
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center py-16 text-gray-500">
+                  <FileText className="h-12 w-12 mb-4 text-gray-400" />
+                  <p className="text-sm">Could not load PDF.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -23,7 +23,7 @@ router = APIRouter(
 def list_employee_skills(
     emp_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee"))
+    current_user: User = Depends(require_any_role("HR", "Admin", "Manager", "Employee", "TA"))
 ):
     return (
         db.query(EmployeeSkill)

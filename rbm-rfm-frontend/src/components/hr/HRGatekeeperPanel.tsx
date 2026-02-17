@@ -36,7 +36,6 @@ import {
 } from "lucide-react";
 import { useHRGatekeeperUI } from "../../hooks/useHRGatekeeperUI";
 import {
-  editItemBudget,
   approveItemBudget,
   getWorkflowErrorMessage,
 } from "../../api/workflowApi";
@@ -151,6 +150,14 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
   const [savingItems, setSavingItems] = useState<Set<number>>(new Set());
   const [approvingItems, setApprovingItems] = useState<Set<number>>(new Set());
 
+  // Approve modal: set approved amount (can differ from estimated)
+  const [approveModal, setApproveModal] = useState<{
+    open: boolean;
+    item: RequisitionItem | null;
+  }>({ open: false, item: null });
+  const [approveAmount, setApproveAmount] = useState("");
+  const [approveSubmitting, setApproveSubmitting] = useState(false);
+
   // Access control
   const hasAccess = useMemo(() => {
     const roles = (user?.roles || []).map((r) => r.toLowerCase());
@@ -175,6 +182,13 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
     const edit = state.itemEdits[item.item_id];
     if (!edit || !edit.isDirty) return;
 
+    if (!state.validation.budgetApprovedBy.trim()) {
+      actions.setGlobalError(
+        "Please enter Budget Approved By name before saving approved budget.",
+      );
+      return;
+    }
+
     // Validate before saving
     if (!actions.validateItem(item.item_id)) {
       return;
@@ -186,12 +200,11 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
     actions.setGlobalError(null);
 
     try {
-      await editItemBudget(item.item_id, {
-        estimated_budget: budgetValue,
-        currency: edit.currency,
+      await approveItemBudget(item.item_id, {
+        approved_budget: budgetValue,
       });
 
-      actions.setGlobalMessage(`Budget saved for ${item.role_position}`);
+      actions.setGlobalMessage(`Approved budget set for ${item.role_position}`);
       onRefresh();
     } catch (err) {
       actions.setGlobalError(getWorkflowErrorMessage(err));
@@ -204,37 +217,64 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
     }
   };
 
-  const handleApproveItemBudget = async (item: RequisitionItem) => {
+  const openApproveModal = (item: RequisitionItem) => {
     const edit = state.itemEdits[item.item_id];
     if (!edit) return;
 
-    const budgetValue = parseFloat(edit.estimated_budget.replace(/,/g, "") || "0");
+    const budgetValue = parseFloat(
+      edit.estimated_budget.replace(/,/g, "") || "0",
+    );
     if (budgetValue <= 0) {
-      actions.setGlobalError("Cannot approve item with zero or negative budget");
+      actions.setGlobalError(
+        "Cannot approve item with zero or negative budget",
+      );
       return;
     }
 
-    // Check for unsaved changes
     if (edit.isDirty) {
       actions.setGlobalError("Please save changes before approving");
       return;
     }
 
-    setApprovingItems((prev) => new Set(prev).add(item.item_id));
+    actions.setGlobalError(null);
+    setApproveModal({ open: true, item });
+    setApproveAmount(
+      String(item.approved_budget ?? item.estimated_budget ?? ""),
+    );
+  };
+
+  const closeApproveModal = () => {
+    setApproveModal({ open: false, item: null });
+    setApproveAmount("");
+  };
+
+  const handleApproveSubmit = async () => {
+    if (!approveModal.item) return;
+
+    const value = parseFloat(approveAmount.replace(/,/g, ""));
+    if (Number.isNaN(value) || value <= 0) {
+      actions.setGlobalError(
+        "Approved amount must be a number greater than 0.",
+      );
+      return;
+    }
+
+    setApproveSubmitting(true);
     actions.setGlobalError(null);
 
     try {
-      await approveItemBudget(item.item_id);
-      actions.setGlobalMessage(`Budget approved for ${item.role_position}`);
+      await approveItemBudget(approveModal.item.item_id, {
+        approved_budget: value,
+      });
+      actions.setGlobalMessage(
+        `Budget approved for ${approveModal.item.role_position}`,
+      );
+      closeApproveModal();
       onRefresh();
     } catch (err) {
       actions.setGlobalError(getWorkflowErrorMessage(err));
     } finally {
-      setApprovingItems((prev) => {
-        const next = new Set(prev);
-        next.delete(item.item_id);
-        return next;
-      });
+      setApproveSubmitting(false);
     }
   };
 
@@ -247,7 +287,9 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
 
     // Check for unsaved changes
     if (computed.hasUnsavedChanges) {
-      actions.setGlobalError("Please save all item budget changes before approving");
+      actions.setGlobalError(
+        "Please save all item budget changes before approving",
+      );
       return;
     }
 
@@ -263,7 +305,7 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
     try {
       // Approve all pending item budgets
       const pendingItems = requisition.items.filter(
-        (item) => item.approved_budget === null || item.approved_budget <= 0
+        (item) => item.approved_budget === null || item.approved_budget <= 0,
       );
 
       for (const item of pendingItems) {
@@ -325,8 +367,16 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
     const edit = state.itemEdits[item.item_id];
     const isSaving = savingItems.has(item.item_id);
     const isApproving = approvingItems.has(item.item_id);
-    const isApproved = item.approved_budget !== null && item.approved_budget > 0;
-    const canSave = edit?.isDirty && edit?.isValid && !isSaving && !isApproving;
+    const isApproved =
+      item.approved_budget !== null && item.approved_budget > 0;
+    const hasBudgetApproverName =
+      state.validation.budgetApprovedBy.trim() !== "";
+    const canSave =
+      edit?.isDirty &&
+      edit?.isValid &&
+      hasBudgetApproverName &&
+      !isSaving &&
+      !isApproving;
     const canApprove =
       !isApproved &&
       edit?.isValid &&
@@ -379,7 +429,28 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">
-              Estimated Budget <span className="text-red-500">*</span>
+              Estimated Budget (Read-only)
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-2.5 text-slate-500 text-sm">
+                {getCurrencySymbol(item.currency || edit?.currency || "INR")}
+              </span>
+              <input
+                type="text"
+                value={
+                  item.estimated_budget != null
+                    ? Number(item.estimated_budget).toLocaleString("en-IN")
+                    : "—"
+                }
+                disabled
+                className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-100 text-slate-700 cursor-not-allowed"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Approved Budget <span className="text-red-500">*</span>
             </label>
             <div className="relative">
               <span className="absolute left-3 top-2.5 text-slate-500 text-sm">
@@ -392,7 +463,9 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
                   const value = e.target.value.replace(/[^0-9.]/g, "");
                   actions.setItemBudget(item.item_id, value);
                 }}
-                disabled={!isPendingBudget || isApproved || isSaving || isApproving}
+                disabled={
+                  !isPendingBudget || isApproved || isSaving || isApproving
+                }
                 className={`w-full pl-8 pr-3 py-2 border rounded-lg text-sm transition-colors ${
                   edit?.error
                     ? "border-red-400 focus:ring-red-500 focus:border-red-500 bg-red-50"
@@ -403,6 +476,10 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
                 placeholder="Enter budget amount"
               />
             </div>
+            <p className="mt-1 text-xs text-slate-500">
+              Estimated budget remains unchanged. This amount will be stored as
+              approved budget.
+            </p>
             {/* Real-time validation error */}
             {edit?.error && (
               <p className="mt-1 text-sm text-red-600 flex items-center gap-1">
@@ -418,8 +495,12 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
             </label>
             <select
               value={edit?.currency || "INR"}
-              onChange={(e) => actions.setItemCurrency(item.item_id, e.target.value)}
-              disabled={!isPendingBudget || isApproved || isSaving || isApproving}
+              onChange={(e) =>
+                actions.setItemCurrency(item.item_id, e.target.value)
+              }
+              disabled={
+                !isPendingBudget || isApproved || isSaving || isApproving
+              }
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 disabled:bg-slate-100 disabled:cursor-not-allowed"
             >
               {CURRENCIES.map((curr) => (
@@ -441,6 +522,11 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
               <button
                 onClick={() => handleSaveItemBudget(item)}
                 disabled={!canSave}
+                title={
+                  !hasBudgetApproverName
+                    ? "Enter Budget Approved By name first"
+                    : "Save approved budget"
+                }
                 className={`px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 transition-colors ${
                   canSave
                     ? "bg-blue-600 text-white hover:bg-blue-700"
@@ -452,11 +538,11 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
                 ) : (
                   <Save size={14} />
                 )}
-                Save Changes
+                Save Approved
               </button>
 
               <button
-                onClick={() => handleApproveItemBudget(item)}
+                onClick={() => openApproveModal(item)}
                 disabled={!canApprove}
                 className={`px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-2 transition-colors ${
                   canApprove
@@ -623,6 +709,35 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
         </div>
 
         <div className="p-6">
+          <div className="mb-6 max-w-md">
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Budget Approved By <span className="text-red-500">*</span>
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-2.5 text-slate-400">
+                <User size={16} />
+              </span>
+              <input
+                type="text"
+                value={state.validation.budgetApprovedBy}
+                onChange={(e) => actions.setBudgetApprovedBy(e.target.value)}
+                placeholder="Enter name of budget approver"
+                disabled={!isPendingBudget}
+                className={`w-full pl-10 pr-3 py-2 border rounded-lg text-sm transition-colors ${
+                  state.validation.budgetApprovedByError
+                    ? "border-red-400 focus:ring-red-500 focus:border-red-500 bg-red-50"
+                    : "border-slate-300 focus:ring-blue-500 focus:border-blue-500"
+                } disabled:bg-slate-100 disabled:cursor-not-allowed`}
+              />
+            </div>
+            {state.validation.budgetApprovedByError && (
+              <p className="mt-1 text-sm text-red-600 flex items-center gap-1">
+                <AlertTriangle size={12} />
+                {state.validation.budgetApprovedByError}
+              </p>
+            )}
+          </div>
+
           {/* Progress Indicator */}
           <div className="mb-6 p-4 bg-slate-50 rounded-lg">
             <div className="flex items-center justify-between mb-2">
@@ -630,9 +745,11 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
                 Budget Approval Progress
               </span>
               <span className="text-sm font-semibold text-slate-800">
-                {requisition.items.filter(
-                  (i) => i.approved_budget !== null && i.approved_budget > 0
-                ).length}{" "}
+                {
+                  requisition.items.filter(
+                    (i) => i.approved_budget !== null && i.approved_budget > 0,
+                  ).length
+                }{" "}
                 / {requisition.items.length} items approved
               </span>
             </div>
@@ -643,7 +760,8 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
                   width: `${
                     requisition.items.length > 0
                       ? (requisition.items.filter(
-                          (i) => i.approved_budget !== null && i.approved_budget > 0
+                          (i) =>
+                            i.approved_budget !== null && i.approved_budget > 0,
                         ).length /
                           requisition.items.length) *
                         100
@@ -767,11 +885,15 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
           <div className="flex items-center justify-between">
             {/* Status Summary */}
             <div className="space-y-2">
-              <h3 className="font-semibold text-slate-800">Ready to Approve?</h3>
+              <h3 className="font-semibold text-slate-800">
+                Ready to Approve?
+              </h3>
               <ul className="text-sm space-y-1">
                 <li
                   className={`flex items-center gap-2 ${
-                    !computed.hasInvalidBudgets ? "text-green-600" : "text-red-600"
+                    !computed.hasInvalidBudgets
+                      ? "text-green-600"
+                      : "text-red-600"
                   }`}
                 >
                   {!computed.hasInvalidBudgets ? (
@@ -783,7 +905,9 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
                 </li>
                 <li
                   className={`flex items-center gap-2 ${
-                    !computed.hasUnsavedChanges ? "text-green-600" : "text-amber-600"
+                    !computed.hasUnsavedChanges
+                      ? "text-green-600"
+                      : "text-amber-600"
                   }`}
                 >
                   {!computed.hasUnsavedChanges ? (
@@ -797,7 +921,9 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
                 </li>
                 <li
                   className={`flex items-center gap-2 ${
-                    state.validation.budgetApprovedBy ? "text-green-600" : "text-red-600"
+                    state.validation.budgetApprovedBy
+                      ? "text-green-600"
+                      : "text-red-600"
                   }`}
                 >
                   {state.validation.budgetApprovedBy ? (
@@ -809,7 +935,9 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
                 </li>
                 <li
                   className={`flex items-center gap-2 ${
-                    state.validation.approvedBy ? "text-green-600" : "text-red-600"
+                    state.validation.approvedBy
+                      ? "text-green-600"
+                      : "text-red-600"
                   }`}
                 >
                   {state.validation.approvedBy ? (
@@ -855,6 +983,81 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
           </div>
         </div>
       </section>
+
+      {/* Approve Budget Modal - approved amount can differ from estimated */}
+      {approveModal.open && approveModal.item && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+            <div className="px-6 py-4 border-b border-slate-200">
+              <h3 className="text-lg font-semibold text-green-700">
+                Approve Item Budget
+              </h3>
+              <p className="text-sm text-slate-500 mt-1">
+                {approveModal.item.role_position}
+              </p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Estimated (manager)
+                </label>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-700">
+                  {formatCurrency(
+                    Number(approveModal.item.estimated_budget) || 0,
+                    approveModal.item.currency || "INR",
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Approved amount
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-slate-500 text-sm">
+                    {getCurrencySymbol(approveModal.item.currency || "INR")}
+                  </span>
+                  <input
+                    type="text"
+                    value={approveAmount}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/[^0-9.]/g, "");
+                      setApproveAmount(value);
+                    }}
+                    className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    placeholder="Same as estimated or enter different amount"
+                  />
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  You can approve at the estimated amount or enter a different
+                  approved amount. Estimated will remain unchanged.
+                </p>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-3">
+              <button
+                onClick={closeApproveModal}
+                disabled={approveSubmitting}
+                className="px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleApproveSubmit}
+                disabled={approveSubmitting}
+                className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {approveSubmitting ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : null}
+                Approve
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Optional, List, Any
 from pydantic import BaseModel, Field, validator
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 
 from db.session import get_db
@@ -1311,6 +1311,11 @@ async def edit_item_budget(
         raise handle_workflow_exception(e)
 
 
+class ItemBudgetApproveRequest(BaseModel):
+    """Optional approved amount; if omitted, approved_budget = estimated_budget."""
+    approved_budget: Optional[float] = None
+
+
 @item_workflow_router.post(
     "/approve-budget",
     response_model=ItemBudgetResponse,
@@ -1322,6 +1327,7 @@ async def edit_item_budget(
 )
 async def approve_item_budget(
     item_id: int,
+    request: ItemBudgetApproveRequest = Body(default=ItemBudgetApproveRequest()),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("Manager", "HR", "Admin")),
     user_roles: List[str] = Depends(get_current_user_roles),
@@ -1329,9 +1335,10 @@ async def approve_item_budget(
     """
     Approve budget for an item.
     
-    Sets approved_budget = estimated_budget.
+    Optional body: { "approved_budget": number }. If provided, approved_budget is set to that
+    value (estimated_budget unchanged). If omitted, approved_budget = estimated_budget.
     Can only be done when header is in PENDING_BUDGET.
-    Cannot approve if estimated_budget <= 0.
+    Cannot approve if estimated_budget <= 0 (or approved_budget <= 0 when provided).
     
     After all items are approved, header automatically transitions to PENDING_HR.
     
@@ -1345,6 +1352,7 @@ async def approve_item_budget(
             item_id=item_id,
             user_id=current_user.user_id,
             user_roles=user_roles,
+            approved_budget=request.approved_budget if request else None,
         )
         
         # Get updated header status

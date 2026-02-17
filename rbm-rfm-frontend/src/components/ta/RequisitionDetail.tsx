@@ -36,6 +36,7 @@ import {
   Gift,
   DollarSign,
   RefreshCw,
+  Eye,
 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
 import { apiClient } from "../../api/client";
@@ -94,6 +95,7 @@ interface RequisitionItem {
   estimatedBudget?: number | null;
   approvedBudget?: number | null;
   currency?: string;
+  jdFileKey?: string | null;
 }
 
 // Phase 4: Item status milestone order for visual tracking
@@ -172,6 +174,7 @@ interface BackendRequisitionItem {
   experience_years?: number | null;
   education_requirement?: string | null;
   job_description: string;
+  jd_file_key?: string | null;
   requirements?: string | null;
   item_status: string;
   assigned_ta?: number | null; // Phase 7: Item-level TA assignment
@@ -201,6 +204,7 @@ interface BackendRequisition {
   approved_by?: number | null;
   approval_history?: string | null;
   assigned_at?: string | null;
+  jd_file_key?: string | null;
   items: BackendRequisitionItem[];
 }
 
@@ -248,7 +252,6 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [activeTab, setActiveTab] = useState<
     "overview" | "items" | "candidates" | "timeline"
   >("overview");
-  const [expandedItems, setExpandedItems] = useState<string[]>([]);
   const [selectedItemForAssignment, setSelectedItemForAssignment] = useState<
     string | null
   >(null);
@@ -311,6 +314,12 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [cancelReason, setCancelReason] = useState("");
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+
+  // JD PDF viewer (item-level only)
+  const [showJdViewer, setShowJdViewer] = useState(false);
+  const [jdItemId, setJdItemId] = useState<number | null>(null);
+  const [jdBlobUrl, setJdBlobUrl] = useState<string | null>(null);
+  const [loadingJd, setLoadingJd] = useState(false);
 
   // ---- Candidate Pipeline state ----
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -457,6 +466,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
           estimatedBudget: item.estimated_budget ?? null,
           approvedBudget: item.approved_budget ?? null,
           currency: item.currency ?? "INR",
+          jdFileKey: (item as BackendRequisitionItem).jd_file_key ?? null,
         })) ?? [],
       timeline: [],
       notes: [],
@@ -607,6 +617,52 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     loadCandidates();
   }, [loadCandidates]);
 
+  // Load JD PDF for viewer when modal opens (item-level endpoint)
+  useEffect(() => {
+    if (!showJdViewer || !jdItemId) {
+      if (jdBlobUrl) {
+        URL.revokeObjectURL(jdBlobUrl);
+        setJdBlobUrl(null);
+      }
+      return;
+    }
+    let objectUrl: string | null = null;
+    const loadJd = async () => {
+      setLoadingJd(true);
+      try {
+        const response = await apiClient.get<Blob>(
+          `/requisitions/items/${jdItemId}/jd`,
+          { responseType: "blob" },
+        );
+        objectUrl = URL.createObjectURL(response.data as Blob);
+        setJdBlobUrl(objectUrl);
+      } catch {
+        setJdBlobUrl(null);
+      } finally {
+        setLoadingJd(false);
+      }
+    };
+    void loadJd();
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setJdBlobUrl(null);
+    };
+  }, [showJdViewer, jdItemId]);
+
+  const closeJdViewer = () => {
+    setShowJdViewer(false);
+    setJdItemId(null);
+    if (jdBlobUrl) {
+      URL.revokeObjectURL(jdBlobUrl);
+      setJdBlobUrl(null);
+    }
+  };
+
+  const openJdViewerForItem = (itemId: number) => {
+    setJdItemId(itemId);
+    setShowJdViewer(true);
+  };
+
   // ---- Add candidate handler ----
   const handleAddCandidate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -739,7 +795,16 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       const isUserHRorAdmin = userRoles.some((r) =>
         ["hr", "admin"].includes(r.toLowerCase()),
       );
-      if (!isUserHRorAdmin && item.assignedTAId !== currentUserId) {
+
+      const headerAssignedToMe =
+        ticket?.assignedTAId != null && ticket.assignedTAId === currentUserId;
+      const canUserEditItem = isUserHRorAdmin
+        ? true
+        : item.assignedTAId != null
+          ? item.assignedTAId === currentUserId
+          : headerAssignedToMe;
+
+      if (!canUserEditItem) {
         setTransitionError(
           "You are not authorized to update this item. It is assigned to another TA.",
         );
@@ -1038,15 +1103,6 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   // Handle employee assignment
   const handleAssignEmployee = (itemId: string, employeeId: string) => {
     // Legacy stub — assignments now go through the Candidate Pipeline
-  };
-
-  // Toggle item expansion
-  const toggleItemExpansion = (itemId: string) => {
-    setExpandedItems((prev) =>
-      prev.includes(itemId)
-        ? prev.filter((id) => id !== itemId)
-        : [...prev, itemId],
-    );
   };
 
   // Save changes
@@ -1869,10 +1925,14 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
             style={{ display: "flex", flexDirection: "column", gap: "16px" }}
           >
             {ticket.items.map((item) => {
-              const isExpanded = expandedItems.includes(item.id);
               const primarySkill =
                 parsePrimarySkill(item.requirements) ?? item.skill;
               const secondarySkills = parseSecondarySkills(item.requirements);
+              const effectiveAssignedTAId =
+                item.assignedTAId ?? ticket.assignedTAId ?? null;
+              const assignedTALabel = effectiveAssignedTAId
+                ? resolveUserName(effectiveAssignedTAId)
+                : "Unassigned";
               const itemCandidates = candidates.filter(
                 (c) => c.requisition_item_id === item.numericItemId,
               );
@@ -1950,6 +2010,69 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                           >
                             <RefreshCw size={10} />
                             Replacement
+                          </span>
+                        )}
+                        {item.jdFileKey && (
+                          <span
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              marginLeft: "auto",
+                            }}
+                          >
+                            <button
+                              type="button"
+                              className="action-button"
+                              style={{
+                                fontSize: "11px",
+                                padding: "4px 8px",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "4px",
+                              }}
+                              onClick={() =>
+                                openJdViewerForItem(item.numericItemId)
+                              }
+                            >
+                              <Eye size={12} />
+                              View JD
+                            </button>
+                            <a
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                apiClient
+                                  .get(
+                                    `/requisitions/items/${item.numericItemId}/jd`,
+                                    { responseType: "blob" },
+                                  )
+                                  .then((res) => {
+                                    const url = URL.createObjectURL(
+                                      res.data as Blob,
+                                    );
+                                    const a = document.createElement("a");
+                                    a.href = url;
+                                    a.download = `JD_${item.skill}_${item.numericItemId}.pdf`;
+                                    a.click();
+                                    URL.revokeObjectURL(url);
+                                  })
+                                  .catch(() => {});
+                              }}
+                              className="action-button"
+                              style={{
+                                fontSize: "11px",
+                                padding: "4px 8px",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                textDecoration: "none",
+                                color: "inherit",
+                              }}
+                            >
+                              <Download size={12} />
+                              Download
+                            </a>
                           </span>
                         )}
                       </div>
@@ -2101,18 +2224,18 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                               letterSpacing: "0.03em",
                             }}
                           >
-                            Assigned To
+                            Assigned TA
                           </div>
                           <div
                             style={{
                               fontSize: "13px",
-                              color: item.assignedEmployeeName
+                              color: effectiveAssignedTAId
                                 ? "var(--text-primary)"
                                 : "var(--text-tertiary)",
                               fontWeight: 500,
                             }}
                           >
-                            {item.assignedEmployeeName || "Unassigned"}
+                            {assignedTALabel}
                           </div>
                         </div>
                         {item.cvFileName && (
@@ -2262,72 +2385,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                         justifyContent: "flex-end",
                       }}
                     >
-                      {/* CV Upload for Sourcing status */}
-                      {item.itemStatus === "Sourcing" && canEditItem(item) && (
-                        <>
-                          <input
-                            ref={(el) => {
-                              cvInputRefs.current[item.id] = el;
-                            }}
-                            type="file"
-                            accept=".pdf,.doc,.docx"
-                            onChange={(e) => handleCvUpload(item.id, e)}
-                            style={{ display: "none" }}
-                          />
-                          <button
-                            className="action-button"
-                            style={{
-                              fontSize: "12px",
-                              padding: "8px 12px",
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "6px",
-                            }}
-                            disabled={cvUploading === item.id}
-                            onClick={() =>
-                              cvInputRefs.current[item.id]?.click()
-                            }
-                          >
-                            <Upload size={12} />
-                            {cvUploading === item.id
-                              ? "Uploading..."
-                              : item.cvFileName
-                                ? "Replace CV"
-                                : "Upload CV"}
-                          </button>
-                        </>
-                      )}
-
-                      {/* Workflow Transition Buttons based on current status */}
-                      {item.itemStatus === "Sourcing" && canEditItem(item) && (
-                        <button
-                          className="action-button primary"
-                          style={{
-                            fontSize: "12px",
-                            padding: "8px 12px",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "6px",
-                            opacity: item.cvFileUrl ? 1 : 0.6,
-                          }}
-                          disabled={
-                            transitioningItem === item.id || !item.cvFileUrl
-                          }
-                          onClick={() =>
-                            handleItemTransition(item.id, "shortlist")
-                          }
-                          title={
-                            item.cvFileUrl
-                              ? "Move to Shortlisted"
-                              : "CV upload required first"
-                          }
-                        >
-                          <FileText size={12} />
-                          {transitioningItem === item.id
-                            ? "Processing..."
-                            : "Shortlist"}
-                        </button>
-                      )}
+                      {/* Workflow Transition Buttons based on current status (post-sourcing stages only) */}
 
                       {item.itemStatus === "Shortlisted" &&
                         canEditItem(item) && (
@@ -2423,79 +2481,19 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                             Cancel Item
                           </button>
                         )}
-
-                      <button
-                        className="action-button"
-                        style={{
-                          fontSize: "12px",
-                          padding: "8px 12px",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "6px",
-                        }}
-                        onClick={() => toggleItemExpansion(item.id)}
-                        title="View Job Description"
-                      >
-                        <FileText size={12} />
-                        {isExpanded ? "Hide JD" : "View JD"}
-                      </button>
                     </div>
                   </div>
 
-                  {isExpanded && (
-                    <div
-                      style={{
-                        marginTop: "16px",
-                        paddingTop: "16px",
-                        borderTop: "1px solid var(--border-subtle)",
-                      }}
-                    >
-                      {/* Job Description Card */}
-                      {item.description && (
-                        <div
-                          style={{
-                            backgroundColor: "var(--bg-secondary)",
-                            borderRadius: "8px",
-                            padding: "14px 16px",
-                            marginBottom: "12px",
-                            border: "1px solid var(--border-subtle)",
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontSize: "10px",
-                              fontWeight: 600,
-                              textTransform: "uppercase",
-                              letterSpacing: "0.05em",
-                              color: "var(--text-tertiary)",
-                              marginBottom: "8px",
-                            }}
-                          >
-                            Job Description
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "13px",
-                              color: "var(--text-secondary)",
-                              lineHeight: "1.6",
-                              whiteSpace: "pre-wrap",
-                            }}
-                          >
-                            {item.description}
-                          </div>
-                        </div>
-                      )}
-
-                      {selectedItemForAssignment === item.id &&
-                        canEditItem(item) && (
-                          <div
-                            style={{
-                              marginTop: "16px",
-                              padding: "16px",
-                              backgroundColor: "var(--bg-secondary)",
-                              borderRadius: "8px",
-                            }}
-                          >
+                  {selectedItemForAssignment === item.id &&
+                    canEditItem(item) && (
+                      <div
+                        style={{
+                          marginTop: "16px",
+                          padding: "16px",
+                          backgroundColor: "var(--bg-secondary)",
+                          borderRadius: "8px",
+                        }}
+                      >
                             <div
                               style={{
                                 display: "flex",
@@ -2606,10 +2604,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                                     </span>
                                   </div>
                                 ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
+                      </div>
+                    )}
 
                       {/* Item Audit History - Compact timeline */}
                       <div style={{ marginTop: "16px" }}>
@@ -3088,7 +3084,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                     value={newCandidateName}
                     onChange={(e) => setNewCandidateName(e.target.value)}
                     required
-                    placeholder="e.g., Tejas Sharma"
+                    placeholder="e.g., Tejas Patil"
                     style={{
                       width: "100%",
                       padding: "8px 12px",
@@ -4114,6 +4110,155 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       >
         <strong></strong>
       </div>
+
+      {/* JD PDF Viewer Modal */}
+      {showJdViewer && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: "rgba(0,0,0,0.5)",
+          }}
+          onClick={(e) => e.target === e.currentTarget && closeJdViewer()}
+        >
+          <div
+            style={{
+              width: "90%",
+              maxWidth: "900px",
+              maxHeight: "90vh",
+              backgroundColor: "var(--bg-primary)",
+              borderRadius: "12px",
+              boxShadow: "0 25px 50px rgba(0,0,0,0.25)",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "16px 20px",
+                borderBottom: "1px solid var(--border-subtle)",
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: "18px",
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <FileText size={20} color="var(--primary-accent)" />
+                Job Description
+              </h3>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "8px" }}
+              >
+                {jdBlobUrl && (
+                  <a
+                    href={jdBlobUrl}
+                    download={`JD_${ticket?.ticketId ?? "requisition"}.pdf`}
+                    className="action-button"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      fontSize: "12px",
+                      textDecoration: "none",
+                    }}
+                  >
+                    <Download size={14} />
+                    Download
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={closeJdViewer}
+                  style={{
+                    padding: "8px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: "var(--bg-secondary)",
+                    cursor: "pointer",
+                  }}
+                  aria-label="Close"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                padding: "16px",
+                overflow: "auto",
+              }}
+            >
+              {loadingJd ? (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "48px",
+                    color: "var(--text-tertiary)",
+                    fontSize: "13px",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: "40px",
+                      height: "40px",
+                      border: "2px solid var(--border-subtle)",
+                      borderTopColor: "var(--primary-accent)",
+                      borderRadius: "50%",
+                      animation: "spin 0.8s linear infinite",
+                    }}
+                  />
+                  <p style={{ marginTop: "16px" }}>Loading PDF...</p>
+                </div>
+              ) : jdBlobUrl ? (
+                <iframe
+                  src={jdBlobUrl}
+                  title="Job Description PDF"
+                  style={{
+                    width: "100%",
+                    height: "75vh",
+                    border: "1px solid var(--border-subtle)",
+                    borderRadius: "8px",
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "48px",
+                    color: "var(--text-tertiary)",
+                  }}
+                >
+                  <FileText size={48} style={{ marginBottom: "16px" }} />
+                  <p style={{ fontSize: "14px" }}>Could not load PDF.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

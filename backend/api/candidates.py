@@ -209,6 +209,89 @@ def update_candidate_stage(
                 detail="At least one interview must be scheduled before moving to Interviewing",
             )
 
+    # Keep requisition item workflow in sync with candidate stage
+    if new_stage in {"Offered", "Hired"}:
+        item = (
+            db.query(RequisitionItem)
+            .filter(RequisitionItem.item_id == candidate.requisition_item_id)
+            .first()
+        )
+        if not item:
+            raise HTTPException(status_code=404, detail="Requisition item not found")
+
+        if item.item_status in {"Fulfilled", "Cancelled"}:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Cannot update candidate stage; requisition item is in terminal "
+                    f"status '{item.item_status}'."
+                ),
+            )
+
+        def sync_item_to_offered() -> None:
+            nonlocal item
+
+            # If item is still pending and TA not assigned, TA can self-assign first.
+            if item.item_status == "Pending" and item.assigned_ta is None:
+                role_set = {r.lower() for r in roles}
+                if "ta" in role_set:
+                    RequisitionItemWorkflowEngine.assign_ta(
+                        db=db,
+                        item_id=item.item_id,
+                        ta_user_id=current_user.user_id,
+                        performed_by=current_user.user_id,
+                        user_roles=roles,
+                    )
+                    db.flush()
+                    db.refresh(item)
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Cannot auto-progress item from Pending because no TA is assigned. "
+                            "Assign TA first, then continue stage transition."
+                        ),
+                    )
+
+            # Progressively sync item workflow to Offered.
+            if item.item_status == "Sourcing":
+                RequisitionItemWorkflowEngine.shortlist(
+                    db=db,
+                    item_id=item.item_id,
+                    user_id=current_user.user_id,
+                    user_roles=roles,
+                    candidate_count=1,
+                )
+                db.flush()
+                db.refresh(item)
+
+            if item.item_status == "Shortlisted":
+                RequisitionItemWorkflowEngine.start_interview(
+                    db=db,
+                    item_id=item.item_id,
+                    user_id=current_user.user_id,
+                    user_roles=roles,
+                )
+                db.flush()
+                db.refresh(item)
+
+            if item.item_status == "Interviewing":
+                RequisitionItemWorkflowEngine.make_offer(
+                    db=db,
+                    item_id=item.item_id,
+                    user_id=current_user.user_id,
+                    user_roles=roles,
+                    candidate_id=str(candidate.candidate_id),
+                )
+                db.flush()
+                db.refresh(item)
+
+        if item.item_status != "Offered":
+            try:
+                sync_item_to_offered()
+            except WorkflowException as e:
+                raise HTTPException(status_code=e.http_status, detail=e.message)
+
     # Hired: auto-fulfill item, create employee, reject other candidates
     if new_stage == "Hired":
         item = (
@@ -223,10 +306,14 @@ def update_candidate_stage(
                 status_code=400,
                 detail="Cannot hire; Requisition already fulfilled.",
             )
+
         if item.item_status != "Offered":
             raise HTTPException(
                 status_code=400,
-                detail="Cannot hire; Requisition item must be in Offered status before marking candidate as Hired.",
+                detail=(
+                    "Cannot hire; Requisition item must be in Offered status before "
+                    f"marking candidate as Hired. Current item status: {item.item_status}."
+                ),
             )
         employee = create_employee_from_candidate(db, candidate)
         try:

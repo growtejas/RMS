@@ -50,7 +50,7 @@ def hr_list_employee_profiles(
 def hr_get_employee_profile(
     emp_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_any_role("HR", "Admin"))
+    current_user: User = Depends(require_any_role("HR", "Admin", "Manager")),
 ):
     emp = db.query(Employee).filter(Employee.emp_id == emp_id).first()
     if not emp:

@@ -16,7 +16,6 @@ import React, { useState, useCallback, useEffect, useMemo } from "react";
 import {
   CheckCircle,
   XCircle,
-  Edit3,
   Loader2,
   ChevronDown,
   ChevronUp,
@@ -27,7 +26,6 @@ import {
 } from "lucide-react";
 import { apiClient } from "../../api/client";
 import {
-  editItemBudget,
   approveItemBudget,
   rejectItemBudget,
   getWorkflowErrorMessage,
@@ -107,9 +105,20 @@ const ItemBudgetApprovalPanel: React.FC = () => {
     item: RequisitionItem | null;
   }>({ open: false, item: null });
   const [editBudget, setEditBudget] = useState("");
-  const [editCurrency, setEditCurrency] = useState("INR");
   const [editError, setEditError] = useState<string | null>(null);
   const [editSubmitting, setEditSubmitting] = useState(false);
+
+  // Approver identity (required before approving/saving approved amount)
+  const [budgetApprovedBy, setBudgetApprovedBy] = useState("");
+
+  // Approve modal state (approved amount can differ from estimated)
+  const [approveModal, setApproveModal] = useState<{
+    open: boolean;
+    item: RequisitionItem | null;
+  }>({ open: false, item: null });
+  const [approveAmount, setApproveAmount] = useState("");
+  const [approveError, setApproveError] = useState<string | null>(null);
+  const [approveSubmitting, setApproveSubmitting] = useState(false);
 
   // Reject modal state
   const [rejectModal, setRejectModal] = useState<{
@@ -191,20 +200,25 @@ const ItemBudgetApprovalPanel: React.FC = () => {
 
   const openEditModal = (item: RequisitionItem) => {
     setEditModal({ open: true, item });
-    setEditBudget(item.estimated_budget?.toString() || "");
-    setEditCurrency(item.currency || "INR");
+    setEditBudget(
+      (item.approved_budget ?? item.estimated_budget)?.toString() || "",
+    );
     setEditError(null);
   };
 
   const closeEditModal = () => {
     setEditModal({ open: false, item: null });
     setEditBudget("");
-    setEditCurrency("INR");
     setEditError(null);
   };
 
   const handleEditSubmit = async () => {
     if (!editModal.item) return;
+
+    if (!budgetApprovedBy.trim()) {
+      setEditError("Please enter Budget Approved By before saving.");
+      return;
+    }
 
     const budgetValue = parseFloat(editBudget.replace(/,/g, ""));
     if (isNaN(budgetValue) || budgetValue <= 0) {
@@ -212,25 +226,19 @@ const ItemBudgetApprovalPanel: React.FC = () => {
       return;
     }
 
-    if (!editCurrency.match(/^[A-Z]{2,10}$/)) {
-      setEditError("Invalid currency code.");
-      return;
-    }
-
     setEditSubmitting(true);
     setEditError(null);
 
     try {
-      const response: ItemBudgetResponse = await editItemBudget(
+      const response: ItemBudgetResponse = await approveItemBudget(
         editModal.item.item_id,
-        {
-          estimated_budget: budgetValue,
-          currency: editCurrency,
-        },
+        { approved_budget: budgetValue },
       );
 
       if (response.success) {
-        setMessage(`Budget updated for item #${editModal.item.item_id}`);
+        setMessage(
+          `Approved budget saved for item #${editModal.item.item_id} (by ${budgetApprovedBy.trim()})`,
+        );
         closeEditModal();
         loadPendingBudgetRequisitions(); // Refresh data
       }
@@ -243,27 +251,56 @@ const ItemBudgetApprovalPanel: React.FC = () => {
 
   // ---------- Approve Budget ----------
 
-  const handleApprove = async (item: RequisitionItem) => {
+  const openApproveModal = (item: RequisitionItem) => {
     if ((item.estimated_budget || 0) <= 0) {
       setError("Cannot approve item with zero or negative budget.");
       return;
     }
+    setApproveModal({ open: true, item });
+    setApproveAmount(String(item.estimated_budget ?? ""));
+    setApproveError(null);
+  };
 
-    setItemActionState(item.item_id, { approving: true });
+  const closeApproveModal = () => {
+    setApproveModal({ open: false, item: null });
+    setApproveAmount("");
+    setApproveError(null);
+  };
+
+  const handleApproveSubmit = async () => {
+    if (!approveModal.item) return;
+
+    if (!budgetApprovedBy.trim()) {
+      setApproveError("Please enter Budget Approved By before approving.");
+      return;
+    }
+
+    const value = parseFloat(approveAmount.replace(/,/g, ""));
+    if (Number.isNaN(value) || value <= 0) {
+      setApproveError("Approved amount must be a number greater than 0.");
+      return;
+    }
+
+    setApproveSubmitting(true);
+    setApproveError(null);
 
     try {
       const response: ItemBudgetResponse = await approveItemBudget(
-        item.item_id,
+        approveModal.item.item_id,
+        { approved_budget: value },
       );
 
       if (response.success) {
-        setMessage(`Budget approved for item #${item.item_id}`);
-        loadPendingBudgetRequisitions(); // Refresh data
+        setMessage(
+          `Budget approved for item #${approveModal.item.item_id} (by ${budgetApprovedBy.trim()})`,
+        );
+        closeApproveModal();
+        loadPendingBudgetRequisitions();
       }
     } catch (err) {
-      setError(getWorkflowErrorMessage(err));
+      setApproveError(getWorkflowErrorMessage(err));
     } finally {
-      setItemActionState(item.item_id, { approving: false });
+      setApproveSubmitting(false);
     }
   };
 
@@ -393,13 +430,13 @@ const ItemBudgetApprovalPanel: React.FC = () => {
                   onClick={() => openEditModal(item)}
                   disabled={actionState.approving || actionState.rejecting}
                   className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors disabled:opacity-50"
-                  title="Edit Budget"
+                  title="Set Approved Budget"
                 >
-                  <Edit3 size={14} />
+                  <DollarSign size={14} />
                 </button>
 
                 <button
-                  onClick={() => handleApprove(item)}
+                  onClick={() => openApproveModal(item)}
                   disabled={
                     !canApprove ||
                     actionState.approving ||
@@ -631,6 +668,22 @@ const ItemBudgetApprovalPanel: React.FC = () => {
       )}
 
       {/* Requisitions List */}
+      <div className="mb-4 bg-white border border-slate-200 rounded-lg p-4">
+        <label className="block text-sm font-medium text-slate-700 mb-2">
+          Budget Approved By <span className="text-red-500">*</span>
+        </label>
+        <input
+          type="text"
+          value={budgetApprovedBy}
+          onChange={(e) => setBudgetApprovedBy(e.target.value)}
+          placeholder="Enter approver name"
+          className="w-full md:w-96 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          Required for approving or saving approved budget from dashboard.
+        </p>
+      </div>
+
       {!loading &&
         requisitions.length > 0 &&
         requisitions.map(renderRequisitionCard)}
@@ -641,7 +694,7 @@ const ItemBudgetApprovalPanel: React.FC = () => {
           <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
             <div className="px-6 py-4 border-b border-slate-200">
               <h3 className="text-lg font-semibold text-slate-800">
-                Edit Item Budget
+                Set Approved Budget
               </h3>
               <p className="text-sm text-slate-500 mt-1">
                 Item #{editModal.item.item_id} - {editModal.item.role_position}
@@ -651,11 +704,22 @@ const ItemBudgetApprovalPanel: React.FC = () => {
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Estimated Budget
+                  Estimated Budget (Read-only)
+                </label>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-700">
+                  {getCurrencySymbol(editModal.item.currency)}
+                  {(editModal.item.estimated_budget || 0).toLocaleString()}{" "}
+                  {editModal.item.currency}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Approved Budget
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-2.5 text-slate-500">
-                    {getCurrencySymbol(editCurrency)}
+                    {getCurrencySymbol(editModal.item.currency)}
                   </span>
                   <input
                     type="text"
@@ -669,23 +733,26 @@ const ItemBudgetApprovalPanel: React.FC = () => {
                     placeholder="50000"
                   />
                 </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  This will update approved budget only. Estimated budget
+                  remains unchanged.
+                </p>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Currency
+                  Budget Approved By <span className="text-red-500">*</span>
                 </label>
-                <select
-                  value={editCurrency}
-                  onChange={(e) => setEditCurrency(e.target.value)}
+                <input
+                  type="text"
+                  value={budgetApprovedBy}
+                  onChange={(e) => {
+                    setBudgetApprovedBy(e.target.value);
+                    setEditError(null);
+                  }}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  {CURRENCIES.map((curr) => (
-                    <option key={curr.code} value={curr.code}>
-                      {curr.code} - {curr.label}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Enter approver name"
+                />
               </div>
 
               {editError && (
@@ -711,7 +778,107 @@ const ItemBudgetApprovalPanel: React.FC = () => {
                 {editSubmitting ? (
                   <Loader2 size={14} className="animate-spin mr-2 inline" />
                 ) : null}
-                Save Changes
+                Save Approved Budget
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Approve Budget Modal - approved amount can differ from estimated */}
+      {approveModal.open && approveModal.item && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+            <div className="px-6 py-4 border-b border-slate-200">
+              <h3 className="text-lg font-semibold text-green-700">
+                Approve Item Budget
+              </h3>
+              <p className="text-sm text-slate-500 mt-1">
+                Item #{approveModal.item.item_id} -{" "}
+                {approveModal.item.role_position}
+              </p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Estimated (manager)
+                </label>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-700">
+                  {getCurrencySymbol(approveModal.item.currency)}
+                  {(
+                    approveModal.item.estimated_budget || 0
+                  ).toLocaleString()}{" "}
+                  {approveModal.item.currency}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Approved amount
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-slate-500">
+                    {getCurrencySymbol(approveModal.item.currency)}
+                  </span>
+                  <input
+                    type="text"
+                    value={approveAmount}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/[^0-9.]/g, "");
+                      setApproveAmount(value);
+                      setApproveError(null);
+                    }}
+                    className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    placeholder="Same as estimated or enter different amount"
+                  />
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  You can approve at the estimated amount or enter a different
+                  approved amount.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Budget Approved By <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={budgetApprovedBy}
+                  onChange={(e) => {
+                    setBudgetApprovedBy(e.target.value);
+                    setApproveError(null);
+                  }}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                  placeholder="Enter approver name"
+                />
+              </div>
+
+              {approveError && (
+                <div className="text-sm text-red-600 flex items-center gap-2">
+                  <AlertTriangle size={14} />
+                  {approveError}
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-3">
+              <button
+                onClick={closeApproveModal}
+                className="px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleApproveSubmit}
+                disabled={approveSubmitting}
+                className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+              >
+                {approveSubmitting ? (
+                  <Loader2 size={14} className="animate-spin mr-2 inline" />
+                ) : null}
+                Approve
               </button>
             </div>
           </div>

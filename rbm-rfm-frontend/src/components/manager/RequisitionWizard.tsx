@@ -16,7 +16,13 @@
  * 3. No client-side status mutations - backend is single source of truth
  */
 
-import React, { useState, useRef, useEffect, ChangeEvent, useMemo } from "react";
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  ChangeEvent,
+  useMemo,
+} from "react";
 import {
   Check,
   Plus,
@@ -56,6 +62,7 @@ interface ResourcePosition {
   yearsOfExperience: number;
   quantity: number;
   isReplacement: boolean;
+  replacedEmpId: string; // Required when isReplacement is true (employee being replaced)
   jobDescriptionUrl?: string;
   jobDescriptionFile?: File | null;
   // Item-level budget fields
@@ -108,6 +115,22 @@ interface LocationResponse {
   country?: string | null;
 }
 
+interface EmployeeOption {
+  emp_id: string;
+  full_name: string;
+}
+
+/** HR employee profile (skills + education) for auto-fill when selecting replaced employee */
+interface HREmployeeProfileResponse {
+  employee: { emp_id: string; full_name: string };
+  skills: Array<{
+    skill_id: number;
+    proficiency_level?: string | null;
+    years_experience?: number | null;
+  }>;
+  education: Array<{ qualification: string; specialization?: string | null }>;
+}
+
 interface RequisitionItemPayload {
   role_position: string;
   job_description: string;
@@ -115,9 +138,17 @@ interface RequisitionItemPayload {
   experience_years: number;
   education_requirement?: string;
   requirements?: string;
+  replacement_hire: boolean;
+  replaced_emp_id: string | null;
   // Item-level budget fields
   estimated_budget: number;
   currency: string;
+}
+
+interface SubmitNotice {
+  type: "success" | "error";
+  title: string;
+  lines: string[];
 }
 
 // ============================================================================
@@ -405,6 +436,7 @@ const App: React.FC = () => {
   const [activeStep, setActiveStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitNotice, setSubmitNotice] = useState<SubmitNotice | null>(null);
 
   // Form state
   const [requisitionData, setRequisitionData] = useState<RequisitionData>({
@@ -421,8 +453,12 @@ const App: React.FC = () => {
     projectDuration: "",
   });
 
-  // Available skills fetched from backend
+  // Available skills fetched from backend (names for dropdown)
   const [availableSkills, setAvailableSkills] = useState<string[]>([]);
+  // skill_id -> skill_name for resolving employee profile skills when auto-filling
+  const [skillIdToName, setSkillIdToName] = useState<Record<number, string>>(
+    {},
+  );
 
   // New skill input for instant addition
   const [newSkillInputs, setNewSkillInputs] = useState<Record<string, string>>(
@@ -435,6 +471,8 @@ const App: React.FC = () => {
   const [officeLocations, setOfficeLocations] = useState<LocationResponse[]>(
     [],
   );
+
+  const [employeeOptions, setEmployeeOptions] = useState<EmployeeOption[]>([]);
 
   // Wizard steps
   const steps: WizardStep[] = [
@@ -460,10 +498,16 @@ const App: React.FC = () => {
     const fetchSkills = async () => {
       try {
         const response = await apiClient.get<SkillResponse[]>("/skills/");
-        const backendSkills = response.data
+        const list = response.data ?? [];
+        const names = list
           .map((s) => s.skill_name)
           .filter((name) => name.trim() !== "");
-        setAvailableSkills(Array.from(new Set(backendSkills)));
+        setAvailableSkills(Array.from(new Set(names)));
+        const idToName: Record<number, string> = {};
+        list.forEach((s) => {
+          idToName[s.skill_id] = s.skill_name;
+        });
+        setSkillIdToName(idToName);
       } catch {
         // Silently fail - use default skills
       }
@@ -478,8 +522,25 @@ const App: React.FC = () => {
       }
     };
 
+    const fetchEmployees = async () => {
+      try {
+        const response = await apiClient.get<EmployeeOption[]>(
+          "/employees/employees",
+        );
+        setEmployeeOptions(
+          (response.data ?? []).map((e) => ({
+            emp_id: e.emp_id,
+            full_name: e.full_name ?? e.emp_id,
+          })),
+        );
+      } catch {
+        // Silently fail - keep dropdown empty
+      }
+    };
+
     fetchSkills();
     fetchLocations();
+    fetchEmployees();
   }, []);
 
   // Validation helpers
@@ -503,7 +564,9 @@ const App: React.FC = () => {
           // Budget validation: estimated_budget must be > 0
           pos.estimatedBudget.trim() !== "" &&
           parseFloat(pos.estimatedBudget.replace(/,/g, "")) > 0 &&
-          pos.currency.trim() !== "",
+          pos.currency.trim() !== "" &&
+          // Replacement: when replacement hire, replaced employee ID is required
+          (!pos.isReplacement || pos.replacedEmpId?.trim() !== ""),
       )
     );
   };
@@ -511,7 +574,8 @@ const App: React.FC = () => {
   // Compute total estimated budget from all positions
   const computedTotalBudget = useMemo(() => {
     return requisitionData.positions.reduce((sum, pos) => {
-      const budgetValue = parseFloat(pos.estimatedBudget.replace(/,/g, "")) || 0;
+      const budgetValue =
+        parseFloat(pos.estimatedBudget.replace(/,/g, "")) || 0;
       return sum + budgetValue * pos.quantity;
     }, 0);
   }, [requisitionData.positions]);
@@ -563,7 +627,8 @@ const App: React.FC = () => {
       const requirementsText = requirementParts.join(" | ") || undefined;
 
       // Parse budget value from string
-      const budgetValue = parseFloat(pos.estimatedBudget.replace(/,/g, "")) || 0;
+      const budgetValue =
+        parseFloat(pos.estimatedBudget.replace(/,/g, "")) || 0;
 
       const payloadItem: RequisitionItemPayload = {
         role_position: pos.roleTitle.trim(),
@@ -575,13 +640,19 @@ const App: React.FC = () => {
               ? "Senior"
               : pos.yearsOfExperience >= 10
                 ? "Mid"
-                 : pos.yearsOfExperience >= 5
-                 ? "Junior"
-                 : "Fresher",
+                : pos.yearsOfExperience >= 5
+                  ? "Junior"
+                  : "Fresher",
         experience_years: pos.yearsOfExperience,
-        education_requirement:
-          pos.education?.trim() ? pos.education.trim() : undefined,
+        education_requirement: pos.education?.trim()
+          ? pos.education.trim()
+          : undefined,
         requirements: requirementsText,
+        replacement_hire: pos.isReplacement,
+        replaced_emp_id:
+          pos.isReplacement && pos.replacedEmpId?.trim()
+            ? pos.replacedEmpId.trim()
+            : null,
         // Item-level budget fields
         estimated_budget: budgetValue,
         currency: pos.currency || DEFAULT_CURRENCY,
@@ -610,12 +681,14 @@ const App: React.FC = () => {
       requisitionData.businessJustification || "",
     );
     payload.append("duration", requisitionData.projectDuration.trim() || "");
-    payload.append("is_replacement", "false");
     payload.append(
-      "manager_notes",
-      requisitionData.managerNotes?.trim() || "",
+      "is_replacement",
+      requisitionData.positions.some((p) => p.isReplacement) ? "true" : "false",
     );
+    payload.append("manager_notes", requisitionData.managerNotes?.trim() || "");
     payload.append("items_json", JSON.stringify(itemsPayload));
+
+    // JD is uploaded per item after create (item-level JD only, no header-level)
 
     // NOTE: Header-level budget_amount is NO LONGER sent.
     // Budget is now at item-level and included in items_json.
@@ -627,18 +700,43 @@ const App: React.FC = () => {
     if (!isStep3Valid()) return;
 
     setIsSubmitting(true);
+    setSubmitNotice(null);
 
     try {
-      // Step 1: Create requisition (DRAFT status)
+      // Step 1: Create requisition (DRAFT status) – no jd_file here; we upload per item after
       const payload = buildPayload();
-      const createResponse = await apiClient.post<{ req_id: number }>(
-        "/requisitions/",
-        payload,
-        { headers: { "Content-Type": "multipart/form-data" } },
-      );
+      const createResponse = await apiClient.post<{
+        req_id: number;
+        items: Array<{ item_id: number }>;
+      }>("/requisitions/", payload, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
       const reqId = createResponse.data.req_id;
+      const createdItems = createResponse.data.items || [];
 
-      // Step 2: Submit via workflow endpoint (DRAFT → Pending_Budget)
+      // Step 2: Upload JD PDF per position to the corresponding item(s) (item-level JD)
+      // Order of createdItems matches buildItemsPayload() (flatMap by position and quantity)
+      let itemIndex = 0;
+      for (let posIndex = 0; posIndex < requisitionData.positions.length; posIndex++) {
+        const position = requisitionData.positions[posIndex];
+        const quantity = Math.max(position?.quantity ?? 1, 1);
+        const file = position?.jobDescriptionFile;
+        if (file instanceof File && createdItems.length >= itemIndex + quantity) {
+          for (let q = 0; q < quantity; q++) {
+            const itemId = createdItems[itemIndex + q]?.item_id;
+            if (itemId != null) {
+              const formData = new FormData();
+              formData.append("jd_file", file);
+              await apiClient.post(`/requisitions/items/${itemId}/jd`, formData, {
+                headers: { "Content-Type": "multipart/form-data" },
+              });
+            }
+          }
+        }
+        itemIndex += quantity;
+      }
+
+      // Step 3: Submit via workflow endpoint (DRAFT → Pending_Budget)
       const transitionResult: WorkflowTransitionResponse =
         await submitRequisition(reqId);
 
@@ -646,9 +744,14 @@ const App: React.FC = () => {
         transitionResult.success &&
         transitionResult.new_status === "Pending_Budget"
       ) {
-        alert(
-          `Requisition #${reqId} submitted successfully!\n\nStatus: ${transitionResult.new_status}\nIt is now pending budget approval.`,
-        );
+        setSubmitNotice({
+          type: "success",
+          title: `Requisition #${reqId} submitted successfully`,
+          lines: [
+            `Status: ${transitionResult.new_status}`,
+            "It is now pending budget approval.",
+          ],
+        });
         // Reset form
         setRequisitionData({
           projectName: "",
@@ -673,7 +776,11 @@ const App: React.FC = () => {
     } catch (error) {
       console.error("Submission error:", error);
       const errorMessage = getWorkflowErrorMessage(error);
-      alert(`Failed to submit requisition: ${errorMessage}`);
+      setSubmitNotice({
+        type: "error",
+        title: "Failed to submit requisition",
+        lines: [errorMessage],
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -695,6 +802,7 @@ const App: React.FC = () => {
       yearsOfExperience: 3,
       quantity: 1,
       isReplacement: false,
+      replacedEmpId: "",
       jobDescriptionFile: null,
       // Item-level budget with defaults
       estimatedBudget: "",
@@ -781,6 +889,53 @@ const App: React.FC = () => {
     }
   };
 
+  /** When user selects a replaced employee, fetch their profile and auto-fill role, skills, experience, education */
+  const fillPositionFromEmployeeProfile = async (
+    positionId: string,
+    empId: string,
+  ) => {
+    if (!empId) return;
+    try {
+      const res = await apiClient.get<HREmployeeProfileResponse>(
+        `/hr/employees/${empId}`,
+      );
+      const profile = res.data;
+      if (!profile) return;
+
+      const skillNames = (profile.skills ?? [])
+        .map((s) => skillIdToName[s.skill_id])
+        .filter(Boolean) as string[];
+      const educationStr = (profile.education ?? [])
+        .map((e) => e.qualification)
+        .filter(Boolean)
+        .join(", ");
+      const yearsList = (profile.skills ?? [])
+        .map((s) => s.years_experience ?? 0)
+        .filter((n) => n > 0);
+      const maxYears =
+        yearsList.length > 0 ? Math.round(Math.max(...yearsList)) : 0;
+      const roleTitle = `Replacement for ${profile.employee.full_name}`;
+
+      setRequisitionData((prev) => ({
+        ...prev,
+        positions: prev.positions.map((p) =>
+          p.id === positionId
+            ? {
+                ...p,
+                roleTitle,
+                primarySkills:
+                  skillNames.length > 0 ? skillNames : p.primarySkills,
+                education: educationStr || p.education,
+                yearsOfExperience: maxYears || p.yearsOfExperience,
+              }
+            : p,
+        ),
+      }));
+    } catch {
+      // Silently fail - user can fill manually
+    }
+  };
+
   const handleInstantSkillAdd = async (
     positionId: string,
     skillType: "primary" | "secondary",
@@ -861,6 +1016,46 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
+      {submitNotice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div
+            className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-gray-200 p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="submit-notice-title"
+          >
+            <h3
+              id="submit-notice-title"
+              className={`text-lg font-semibold mb-3 ${
+                submitNotice.type === "success"
+                  ? "text-gray-900"
+                  : "text-red-700"
+              }`}
+            >
+              {submitNotice.title}
+            </h3>
+            <div className="space-y-1 text-sm text-gray-700 mb-6">
+              {submitNotice.lines.map((line, idx) => (
+                <p key={`${line}-${idx}`}>{line}</p>
+              ))}
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSubmitNotice(null)}
+                className={`px-5 py-2 rounded-lg text-sm font-semibold text-white transition-colors ${
+                  submitNotice.type === "success"
+                    ? "bg-indigo-600 hover:bg-indigo-700"
+                    : "bg-red-600 hover:bg-red-700"
+                }`}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
@@ -1346,32 +1541,50 @@ const App: React.FC = () => {
                           </label>
                           <div className="relative">
                             <span className="absolute left-3 top-2 text-gray-500">
-                              {CURRENCIES.find((c) => c.code === position.currency)?.symbol || "₹"}
+                              {CURRENCIES.find(
+                                (c) => c.code === position.currency,
+                              )?.symbol || "₹"}
                             </span>
                             <input
                               type="text"
                               value={position.estimatedBudget}
                               onChange={(e) => {
                                 // Allow only numbers and commas
-                                const value = e.target.value.replace(/[^0-9,]/g, "");
-                                updatePosition(position.id, "estimatedBudget", value);
+                                const value = e.target.value.replace(
+                                  /[^0-9,]/g,
+                                  "",
+                                );
+                                updatePosition(
+                                  position.id,
+                                  "estimatedBudget",
+                                  value,
+                                );
                               }}
                               className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               placeholder="e.g., 50,000"
                             />
                           </div>
-                          {position.quantity > 1 && position.estimatedBudget && (
-                            <p className="text-xs text-gray-500 mt-1">
-                              Total for {position.quantity} resources:{" "}
-                              <span className="font-medium">
-                                {CURRENCIES.find((c) => c.code === position.currency)?.symbol}
-                                {(
-                                  parseFloat(position.estimatedBudget.replace(/,/g, "")) *
-                                  position.quantity
-                                ).toLocaleString()}
-                              </span>
-                            </p>
-                          )}
+                          {position.quantity > 1 &&
+                            position.estimatedBudget && (
+                              <p className="text-xs text-gray-500 mt-1">
+                                Total for {position.quantity} resources:{" "}
+                                <span className="font-medium">
+                                  {
+                                    CURRENCIES.find(
+                                      (c) => c.code === position.currency,
+                                    )?.symbol
+                                  }
+                                  {(
+                                    parseFloat(
+                                      position.estimatedBudget.replace(
+                                        /,/g,
+                                        "",
+                                      ),
+                                    ) * position.quantity
+                                  ).toLocaleString()}
+                                </span>
+                              </p>
+                            )}
                         </div>
 
                         <div>
@@ -1381,7 +1594,11 @@ const App: React.FC = () => {
                           <select
                             value={position.currency}
                             onChange={(e) =>
-                              updatePosition(position.id, "currency", e.target.value)
+                              updatePosition(
+                                position.id,
+                                "currency",
+                                e.target.value,
+                              )
                             }
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           >
@@ -1415,6 +1632,38 @@ const App: React.FC = () => {
                       </label>
                     </div>
 
+                    {position.isReplacement && (
+                      <div className="mt-3 ml-6">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Replaced Employee{" "}
+                          <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          value={position.replacedEmpId}
+                          onChange={(e) => {
+                            const empId = e.target.value;
+                            updatePosition(position.id, "replacedEmpId", empId);
+                            if (empId) {
+                              fillPositionFromEmployeeProfile(
+                                position.id,
+                                empId,
+                              );
+                            }
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                          <option value="">
+                            Select employee being replaced
+                          </option>
+                          {employeeOptions.map((emp) => (
+                            <option key={emp.emp_id} value={emp.emp_id}>
+                              {emp.full_name} ({emp.emp_id})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     <div className="mt-4">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Job Description Document
@@ -1425,7 +1674,7 @@ const App: React.FC = () => {
                             fileInputRefs.current[position.id] = el;
                           }}
                           type="file"
-                          accept=".pdf,.doc,.docx,.txt"
+                          accept="application/pdf,.pdf"
                           onChange={(e) => handleFileUpload(position.id, e)}
                           className="hidden"
                         />
@@ -1533,24 +1782,36 @@ const App: React.FC = () => {
                       <tbody className="divide-y divide-gray-100">
                         {requisitionData.positions.map((pos, idx) => {
                           const perResource =
-                            parseFloat(pos.estimatedBudget.replace(/,/g, "")) || 0;
+                            parseFloat(pos.estimatedBudget.replace(/,/g, "")) ||
+                            0;
                           const total = perResource * pos.quantity;
                           const currSymbol =
-                            CURRENCIES.find((c) => c.code === pos.currency)?.symbol || "₹";
+                            CURRENCIES.find((c) => c.code === pos.currency)
+                              ?.symbol || "₹";
                           return (
                             <tr key={pos.id} className="hover:bg-gray-50">
                               <td className="px-4 py-2">
-                                <span className="font-medium">{pos.roleTitle || `Position ${idx + 1}`}</span>
+                                <span className="font-medium">
+                                  {pos.roleTitle || `Position ${idx + 1}`}
+                                </span>
                                 <span className="text-gray-500 text-xs ml-2">
-                                  ({pos.primarySkills.length > 0 ? pos.primarySkills.join(", ") : "No skills"})
+                                  (
+                                  {pos.primarySkills.length > 0
+                                    ? pos.primarySkills.join(", ")
+                                    : "No skills"}
+                                  )
                                 </span>
                               </td>
-                              <td className="px-4 py-2 text-center">{pos.quantity}</td>
+                              <td className="px-4 py-2 text-center">
+                                {pos.quantity}
+                              </td>
                               <td className="px-4 py-2 text-right">
-                                {currSymbol}{perResource.toLocaleString()}
+                                {currSymbol}
+                                {perResource.toLocaleString()}
                               </td>
                               <td className="px-4 py-2 text-right font-medium">
-                                {currSymbol}{total.toLocaleString()}
+                                {currSymbol}
+                                {total.toLocaleString()}
                               </td>
                             </tr>
                           );
@@ -1619,7 +1880,9 @@ const App: React.FC = () => {
                       </span>
                     </div>
                     <div className="flex justify-between py-2">
-                      <span className="text-gray-600">Total Estimated Budget:</span>
+                      <span className="text-gray-600">
+                        Total Estimated Budget:
+                      </span>
                       <span className="font-bold text-green-700 text-lg">
                         ₹{computedTotalBudget.toLocaleString()}
                       </span>
@@ -1640,7 +1903,10 @@ const App: React.FC = () => {
                           status "Pending Budget Approval"
                         </li>
                         <li>
-                          <strong>Each item's budget must be approved individually</strong> by HR before proceeding
+                          <strong>
+                            Each item's budget must be approved individually
+                          </strong>{" "}
+                          by HR before proceeding
                         </li>
                         <li>
                           You will receive notifications on the approval status

@@ -18,6 +18,7 @@ from utils.dependencies import (
 )
 from db.models.requisition import Requisition
 from db.models.requisition_item import RequisitionItem
+from db.models.employee import Employee
 from schemas.requisition import (
     RequisitionManagerUpdate,
     RequisitionUpdate,
@@ -36,7 +37,10 @@ from services.requisition import (
     RequisitionPermissions,
     RequisitionStatus,
 )
-from services.requisition.workflow_engine_v2 import RequisitionWorkflowEngine
+from services.requisition.workflow_engine_v2 import (
+    RequisitionWorkflowEngine,
+    RequisitionItemWorkflowEngine,
+)
 from services.requisition.workflow_exceptions import WorkflowException
 from services.notification_service import send as notify
 
@@ -130,6 +134,25 @@ async def create_requisition(
         if items_payload:
             for item in items_payload:
                 validated = RequisitionItemCreate(**item)
+                if validated.replacement_hire and not validated.replaced_emp_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="replaced_emp_id is required when replacement_hire is true",
+                    )
+                if not validated.replacement_hire and validated.replaced_emp_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="replaced_emp_id must be null when replacement_hire is false",
+                    )
+                if validated.replacement_hire and validated.replaced_emp_id:
+                    replaced_employee = db.query(Employee).filter(
+                        Employee.emp_id == validated.replaced_emp_id
+                    ).first()
+                    if not replaced_employee:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Employee '{validated.replaced_emp_id}' not found for replacement",
+                        )
                 db_item = RequisitionItem(
                     req_id=requisition.req_id,
                     role_position=validated.role_position,
@@ -139,6 +162,8 @@ async def create_requisition(
                     education_requirement=validated.education_requirement,
                     requirements=validated.requirements,
                     item_status="Pending",
+                    replacement_hire=validated.replacement_hire,
+                    replaced_emp_id=validated.replaced_emp_id,
                     # Item-level budget fields
                     estimated_budget=validated.estimated_budget or 0,
                     currency=validated.currency or 'INR',
@@ -300,13 +325,15 @@ def get_requisition(
     else:
         budget_approval_status = 'approved'
 
+    # Serialize items so jd_file_key and all fields are included in the response
+    items_data = [RequisitionItemResponse.model_validate(it) for it in items]
     base_response = RequisitionResponse.model_validate(
         requisition,
         from_attributes=True,
     )
     return base_response.model_copy(
         update={
-            "items": items,
+            "items": items_data,
             "total_items": total_items,
             "fulfilled_items": fulfilled_items,
             "cancelled_items": cancelled_items,
@@ -349,12 +376,25 @@ def update_requisition_manager(
         setattr(requisition, field, value)
 
     if items_payload is not None:
+        # Preserve approved_budget (and jd_file_key) by position so HR-approved amounts and item JDs are not lost on manager edit
+        existing_items = (
+            db.query(RequisitionItem)
+            .filter(RequisitionItem.req_id == req_id)
+            .order_by(RequisitionItem.item_id)
+            .all()
+        )
+        preserved_by_index = [
+            {"approved_budget": getattr(it, "approved_budget", None), "jd_file_key": getattr(it, "jd_file_key", None)}
+            for it in existing_items
+        ]
+
         db.query(RequisitionItem).filter(
             RequisitionItem.req_id == req_id
         ).delete(synchronize_session=False)
 
-        for item in items_payload:
+        for idx, item in enumerate(items_payload):
             validated = RequisitionItemCreate(**item)
+            preserved = preserved_by_index[idx] if idx < len(preserved_by_index) else {}
             db_item = RequisitionItem(
                 req_id=req_id,
                 role_position=validated.role_position,
@@ -364,9 +404,11 @@ def update_requisition_manager(
                 education_requirement=validated.education_requirement,
                 requirements=validated.requirements,
                 item_status="Pending",
-                # Item-level budget fields
+                # Item-level budget: estimated from payload; approved preserved from same position
                 estimated_budget=validated.estimated_budget or 0,
+                approved_budget=preserved.get("approved_budget"),
                 currency=validated.currency or 'INR',
+                jd_file_key=preserved.get("jd_file_key"),
             )
             db.add(db_item)
 
@@ -666,6 +708,42 @@ def assign_ta(
 
     # Assign TA at header level
     requisition.assigned_ta = payload.ta_user_id
+
+    # Propagate assignment to item level using workflow engine so item-level
+    # invariants and side effects (e.g., Pending -> Sourcing) remain consistent.
+    active_items = (
+        db.query(RequisitionItem)
+        .filter(
+            RequisitionItem.req_id == req_id,
+            RequisitionItem.item_status.notin_(["Fulfilled", "Cancelled"]),
+        )
+        .all()
+    )
+    for item in active_items:
+        if item.assigned_ta is None:
+            RequisitionItemWorkflowEngine.assign_ta(
+                db=db,
+                item_id=item.item_id,
+                ta_user_id=payload.ta_user_id,
+                performed_by=current_user.user_id,
+                user_roles=roles,
+            )
+            continue
+
+        # Already assigned to same TA, no action needed.
+        if item.assigned_ta == payload.ta_user_id:
+            continue
+
+        # Reassign existing non-terminal items to keep header and item ownership aligned.
+        if "HR" in roles or "Admin" in roles:
+            RequisitionItemWorkflowEngine.swap_ta(
+                db=db,
+                item_id=item.item_id,
+                new_ta_id=payload.ta_user_id,
+                user_id=current_user.user_id,
+                user_roles=roles,
+                reason="Header TA assignment synchronization",
+            )
     
     # Transition to Active if currently legacy Approved & Unassigned
     if requisition.overall_status == "Approved & Unassigned":

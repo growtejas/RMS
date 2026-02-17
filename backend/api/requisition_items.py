@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from db.session import get_db
@@ -13,8 +16,10 @@ from schemas.requisition_item import (
     UpdateItemStatusRequest,
     RequisitionItemResponse,
 )
+from utils.storage import get_storage_service, StorageService
 
 # Workflow engine imports (V2 - migrated from legacy engine per F-001 remediation)
+from services.requisition import RequisitionPermissions
 from services.requisition.workflow_engine_v2 import (
     RequisitionWorkflowEngine,
     RequisitionItemWorkflowEngine,
@@ -152,6 +157,107 @@ def list_requisition_items(
         .filter(RequisitionItem.req_id == req_id)
         .all()
     )
+
+
+# --------------------------------------------------
+# ITEM-LEVEL JD (view / upload / delete)
+# --------------------------------------------------
+@router.get("/items/{item_id}/jd")
+def get_item_jd(
+    item_id: int,
+    db: Session = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    current_user: User = Depends(require_any_role("Manager", "Admin", "HR", "TA")),
+):
+    """View or download JD for a requisition item (position)."""
+    item = (
+        db.query(RequisitionItem)
+        .filter(RequisitionItem.item_id == item_id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Requisition item not found")
+    if not item.jd_file_key:
+        raise HTTPException(status_code=404, detail="JD file not available for this item")
+    url = storage.get_url(item.jd_file_key)
+    if url.startswith("http://") or url.startswith("https://"):
+        return RedirectResponse(url)
+    return FileResponse(
+        url,
+        media_type="application/pdf",
+        filename=f"requisition_item_{item_id}_jd.pdf",
+    )
+
+
+@router.post("/items/{item_id}/jd")
+async def upload_item_jd(
+    item_id: int,
+    jd_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    current_user: User = Depends(require_any_role("Manager")),
+):
+    """Upload JD PDF for a requisition item (position)."""
+    item = (
+        db.query(RequisitionItem)
+        .filter(RequisitionItem.item_id == item_id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Requisition item not found")
+    requisition = db.query(Requisition).filter(Requisition.req_id == item.req_id).first()
+    if not requisition:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+    if not RequisitionPermissions.can_edit_jd(requisition, current_user.user_id):
+        if not RequisitionPermissions.is_owner(requisition, current_user.user_id):
+            raise HTTPException(status_code=403, detail="Not allowed to edit")
+        raise HTTPException(status_code=403, detail="Requisition is locked")
+    if jd_file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="JD must be a PDF")
+    jd_file.file.seek(0, 2)
+    size = jd_file.file.tell()
+    jd_file.file.seek(0)
+    if size > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="JD exceeds 10MB")
+    if item.jd_file_key:
+        storage.delete(item.jd_file_key)
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    safe_name = f"item_{item_id}_{timestamp}.pdf"
+    file_key = storage.save(jd_file, safe_name)
+    item.jd_file_key = file_key
+    db.commit()
+    return {"message": "JD uploaded", "jd_file_key": file_key}
+
+
+@router.delete("/items/{item_id}/jd")
+def delete_item_jd(
+    item_id: int,
+    db: Session = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    current_user: User = Depends(require_any_role("Manager")),
+):
+    """Remove JD file for a requisition item."""
+    item = (
+        db.query(RequisitionItem)
+        .filter(RequisitionItem.item_id == item_id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Requisition item not found")
+    requisition = db.query(Requisition).filter(Requisition.req_id == item.req_id).first()
+    if not requisition:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+    if not RequisitionPermissions.can_edit_jd(requisition, current_user.user_id):
+        if not RequisitionPermissions.is_owner(requisition, current_user.user_id):
+            raise HTTPException(status_code=403, detail="Not allowed to edit")
+        raise HTTPException(status_code=403, detail="Requisition is locked")
+    if not item.jd_file_key:
+        raise HTTPException(status_code=404, detail="JD file not available for this item")
+    storage.delete(item.jd_file_key)
+    item.jd_file_key = None
+    db.commit()
+    return {"message": "JD removed"}
+
 
 # --------------------------------------------------
 # ASSIGN EMPLOYEE TO ITEM

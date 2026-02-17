@@ -34,6 +34,7 @@ class RequisitionItemResponse(BaseModel):
     experience_years: Optional[int] = None
     education_requirement: Optional[str] = None
     job_description: str
+    jd_file_key: Optional[str] = None
     requirements: Optional[str] = None
     item_status: str
     replacement_hire: bool = False
@@ -78,8 +79,9 @@ class ItemBudgetEditRequest(BaseModel):
 
 class ItemBudgetApproveRequest(BaseModel):
     """Request for approving item budget."""
-    # No additional fields needed - approval copies estimated_budget to approved_budget
-    pass
+    # If provided, approved_budget is set to this value (approver can approve at a different amount).
+    # If omitted, approved_budget = estimated_budget (backward compatible).
+    approved_budget: Optional[condecimal(max_digits=12, decimal_places=2, ge=Decimal('0'))] = None
 
 
 class ItemBudgetRejectRequest(BaseModel):

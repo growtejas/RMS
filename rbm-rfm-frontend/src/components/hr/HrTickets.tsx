@@ -60,6 +60,7 @@ interface RequisitionItem {
   experience?: number;
   education: string;
   itemStatus: string;
+  assignedTAId?: number | null;
   assignedEmployeeId?: string;
   assignedEmployeeName?: string;
 }
@@ -86,6 +87,7 @@ interface BackendRequisitionItem {
   job_description: string;
   requirements?: string | null;
   item_status: string;
+  assigned_ta?: number | null;
 }
 
 interface BackendRequisition {
@@ -154,8 +156,23 @@ const mapRequisitions = (data: BackendRequisition[]): Requisition[] =>
         experience: item.experience_years ?? undefined,
         education: item.education_requirement ?? "—",
         itemStatus: item.item_status,
+        assignedTAId: item.assigned_ta ?? null,
       })) ?? [],
   }));
+
+const getActiveItemAssignedTAIds = (req: Requisition): number[] =>
+  Array.from(
+    new Set(
+      req.items
+        .filter(
+          (item) =>
+            item.itemStatus !== "Fulfilled" &&
+            item.itemStatus !== "Cancelled" &&
+            item.assignedTAId != null,
+        )
+        .map((item) => item.assignedTAId as number),
+    ),
+  );
 
 const mapEmployees = (data: BackendEmployee[]): EmployeeMatch[] =>
   data.map((emp) => ({
@@ -969,19 +986,25 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
     fetchAllowedTransitions,
   ]);
 
-  const unassignedPool = requisitions.filter(
-    (req) =>
-      !req.assignedTAId && normalizeStatus(req.overallStatus) === "Active",
-  );
+  const unassignedPool = requisitions.filter((req) => {
+    const itemLevelAssignees = getActiveItemAssignedTAIds(req);
+    return (
+      !req.assignedTAId &&
+      itemLevelAssignees.length === 0 &&
+      normalizeStatus(req.overallStatus) === "Active"
+    );
+  });
 
   // Filter requisitions based on active filter
   const filteredRequisitions = requisitions
     .filter((req) => {
       // Primary Tab Filters
       if (activeFilter === "assigned") {
-        if (!req.assignedTAId) return false;
+        if (!req.assignedTAId && getActiveItemAssignedTAIds(req).length === 0)
+          return false;
       } else if (activeFilter === "unassigned") {
         if (req.assignedTAId) return false;
+        if (getActiveItemAssignedTAIds(req).length > 0) return false;
         if (normalizeStatus(req.overallStatus) !== "Active") return false;
       } else if (activeFilter === "my") {
         if (req.assignedTA !== currentUser) return false;
@@ -1187,6 +1210,18 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
         assignedTA: label,
         overallStatus: "Active",
         assignedAt: new Date().toISOString(),
+        items: req.items.map((item) => {
+          if (
+            item.itemStatus === "Fulfilled" ||
+            item.itemStatus === "Cancelled"
+          ) {
+            return item;
+          }
+          return {
+            ...item,
+            assignedTAId: selectedId,
+          };
+        }),
       });
       setAssignmentToast(`Assigned ${label} to ${req.id}.`);
       setAssignmentDrafts((prev) => ({ ...prev, [req.reqId]: "" }));
@@ -1850,6 +1885,13 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                       const agingDays = getAgingDays(req.dateCreated);
                       const completion = calculateCompletion(req.items);
                       const isAssignedToMe = req.assignedTA === currentUser;
+                      const itemLevelAssigneeIds =
+                        getActiveItemAssignedTAIds(req);
+                      const hasItemLevelAssignments =
+                        itemLevelAssigneeIds.length > 0;
+                      const itemLevelAssigneeLabel = itemLevelAssigneeIds
+                        .map((id) => getTaLabel(id))
+                        .join(", ");
 
                       return (
                         <tr
@@ -2003,6 +2045,28 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                                   </div>
                                 </div>
                               </div>
+                            ) : hasItemLevelAssignments ? (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: "2px",
+                                }}
+                              >
+                                <div
+                                  style={{ fontSize: "13px", fontWeight: 500 }}
+                                >
+                                  Assigned to {itemLevelAssigneeLabel}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: "11px",
+                                    color: "var(--text-tertiary)",
+                                  }}
+                                >
+                                  Item-level assignment
+                                </div>
+                              </div>
                             ) : (
                               <span className="status-badge inactive">
                                 Unassigned
@@ -2012,6 +2076,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
 
                           <td>
                             {!req.assignedTAId &&
+                            !hasItemLevelAssignments &&
                             normalizeStatus(req.overallStatus) === "Active" ? (
                               <div
                                 style={{
@@ -2067,6 +2132,15 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                                     : "Assign"}
                                 </button>
                               </div>
+                            ) : !req.assignedTAId && hasItemLevelAssignments ? (
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  color: "var(--text-secondary)",
+                                }}
+                              >
+                                Assigned to {itemLevelAssigneeLabel}
+                              </span>
                             ) : !req.assignedTAId ? (
                               <span
                                 style={{

@@ -182,7 +182,7 @@ def _check_ta_ownership_for_candidate_impl(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requisition item not found")
     requisition = (
         db.query(Requisition)
-        .filter(Requisition.req_id == candidate.requisition_id)
+        .filter(Requisition.req_id == item.req_id)
         .first()
     )
     assigned_ta_id = _resolve_assigned_ta_id(item, requisition)
