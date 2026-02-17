@@ -52,6 +52,7 @@ interface ResourcePosition {
   roleTitle: string;
   primarySkills: string[];
   secondarySkills: string[];
+  education: string;
   yearsOfExperience: number;
   quantity: number;
   isReplacement: boolean;
@@ -70,6 +71,7 @@ interface RequisitionData {
   workMode: "Remote" | "Hybrid" | "WFO" | "";
   priority: "Low" | "Medium" | "High" | "";
   businessJustification: string;
+  managerNotes: string;
   positions: ResourcePosition[];
   // REMOVED: Header-level budget - now item-level only
   // estimatedBudget: string;
@@ -413,6 +415,7 @@ const App: React.FC = () => {
     workMode: "",
     priority: "",
     businessJustification: "",
+    managerNotes: "",
     positions: [],
     // REMOVED: Header-level budget - now item-level only
     projectDuration: "",
@@ -545,11 +548,13 @@ const App: React.FC = () => {
     }
   };
 
-  // Build payload for API
+  // Build payload for API (requirements is a single text field; we store "Primary Skill: A, B, C | Secondary Skills: ...")
   const buildItemsPayload = (): RequisitionItemPayload[] => {
     return requisitionData.positions.flatMap((pos) => {
       const requirementParts = [
-        pos.primarySkill ? `Primary Skill: ${pos.primarySkill}` : "",
+        pos.primarySkills.length
+          ? `Primary Skill: ${pos.primarySkills.join(", ")}`
+          : "",
         pos.secondarySkills.length
           ? `Secondary Skills: ${pos.secondarySkills.join(", ")}`
           : "",
@@ -564,14 +569,18 @@ const App: React.FC = () => {
         role_position: pos.roleTitle.trim(),
         job_description: `${pos.roleTitle} position requiring ${pos.yearsOfExperience}+ years experience`,
         skill_level:
-          pos.yearsOfExperience >= 8
+          pos.yearsOfExperience >= 20
             ? "Lead"
-            : pos.yearsOfExperience >= 5
+            : pos.yearsOfExperience >= 15
               ? "Senior"
-              : pos.yearsOfExperience >= 3
+              : pos.yearsOfExperience >= 10
                 ? "Mid"
-                : "Junior",
+                 : pos.yearsOfExperience >= 5
+                 ? "Junior"
+                 : "Fresher",
         experience_years: pos.yearsOfExperience,
+        education_requirement:
+          pos.education?.trim() ? pos.education.trim() : undefined,
         requirements: requirementsText,
         // Item-level budget fields
         estimated_budget: budgetValue,
@@ -602,7 +611,10 @@ const App: React.FC = () => {
     );
     payload.append("duration", requisitionData.projectDuration.trim() || "");
     payload.append("is_replacement", "false");
-    payload.append("manager_notes", "");
+    payload.append(
+      "manager_notes",
+      requisitionData.managerNotes?.trim() || "",
+    );
     payload.append("items_json", JSON.stringify(itemsPayload));
 
     // NOTE: Header-level budget_amount is NO LONGER sent.
@@ -646,6 +658,7 @@ const App: React.FC = () => {
           workMode: "",
           priority: "",
           businessJustification: "",
+          managerNotes: "",
           positions: [],
           // REMOVED: Header-level budget
           projectDuration: "",
@@ -678,6 +691,7 @@ const App: React.FC = () => {
       roleTitle: "",
       primarySkills: [],
       secondarySkills: [],
+      education: "",
       yearsOfExperience: 3,
       quantity: 1,
       isReplacement: false,
@@ -1040,6 +1054,21 @@ const App: React.FC = () => {
                     placeholder="Explain the business need for this requisition..."
                   />
                 </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Manager Notes (Optional)
+                  </label>
+                  <textarea
+                    value={requisitionData.managerNotes}
+                    onChange={(e) =>
+                      handleInputChange("managerNotes", e.target.value)
+                    }
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="Internal notes for HR/TA (not visible to candidates)..."
+                  />
+                </div>
               </div>
             </WizardStepContent>
 
@@ -1239,6 +1268,26 @@ const App: React.FC = () => {
                             </span>
                           ))}
                         </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Education (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={position.education}
+                          onChange={(e) =>
+                            updatePosition(
+                              position.id,
+                              "education",
+                              e.target.value,
+                            )
+                          }
+                          maxLength={100}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          placeholder="e.g. B.Tech, MCA, B.E"
+                        />
                       </div>
 
                       <div>

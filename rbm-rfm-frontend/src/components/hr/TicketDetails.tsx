@@ -392,6 +392,19 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       .join("");
   };
 
+  const formatDateTime = (dateValue?: string | null) => {
+    if (!dateValue) return "—";
+    const date = new Date(dateValue);
+    if (Number.isNaN(date.getTime())) return "—";
+    return date.toLocaleString("en-IN", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
+
   const formatRelativeTime = (dateValue?: string | null) => {
     if (!dateValue) return "—";
     const date = new Date(dateValue);
@@ -905,25 +918,28 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
     };
   });
 
-  // Calculate completion stats
+  // Calculate completion stats from real ticket.items
+  const fulfilled = ticket.items.filter(
+    (item) => item.itemStatus === "Fulfilled",
+  ).length;
+  const cancelled = ticket.items.filter(
+    (item) => item.itemStatus === "Cancelled",
+  ).length;
+  const openPositions = ticket.items.filter(
+    (item) =>
+      item.itemStatus !== "Fulfilled" && item.itemStatus !== "Cancelled",
+  ).length;
   const completionStats = {
     totalItems: ticket.items.length,
-    fulfilled: ticket.items.filter((item) => item.itemStatus === "Fulfilled")
-      .length,
+    fulfilled,
     pending: ticket.items.filter((item) => item.itemStatus === "Pending")
       .length,
-    cancelled: ticket.items.filter((item) => item.itemStatus === "Cancelled")
-      .length,
+    cancelled,
+    openPositions,
     progress:
       ticket.items.length > 0
         ? Math.round(
-            (ticket.items.filter(
-              (item) =>
-                item.itemStatus === "Fulfilled" ||
-                item.itemStatus === "Cancelled",
-            ).length /
-              ticket.items.length) *
-              100,
+            ((fulfilled + cancelled) / ticket.items.length) * 100,
           )
         : 0,
   };
@@ -1516,7 +1532,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                         Date Created:
                       </span>
                     </div>
-                    <span>{ticket.dateCreated}</span>
+                    <span>{formatDateTime(ticket.dateCreated)}</span>
                   </div>
                 </div>
               </div>
@@ -1550,12 +1566,10 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                   }}
                 >
                   <span style={{ color: "var(--text-secondary)" }}>
-                    SLA Status
+                    Days Open
                   </span>
-                  <span
-                    className={`sla-timer ${ticket.daysOpen > 10 ? "critical" : "warning"}`}
-                  >
-                    {ticket.slaHours - ticket.daysOpen * 24}h remaining
+                  <span style={{ fontWeight: 600 }}>
+                    {ticket.daysOpen} day{ticket.daysOpen !== 1 ? "s" : ""}
                   </span>
                 </div>
                 <div
@@ -1566,7 +1580,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                   }}
                 >
                   <span style={{ color: "var(--text-secondary)" }}>
-                    Match Rate
+                    Completion
                   </span>
                   <span style={{ color: "var(--success)", fontWeight: 600 }}>
                     {completionStats.progress}%
@@ -1580,10 +1594,10 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                   }}
                 >
                   <span style={{ color: "var(--text-secondary)" }}>
-                    Bench Availability
+                    Open Positions
                   </span>
-                  <span style={{ color: "var(--success)", fontWeight: 600 }}>
-                    {completionStats.pending} open positions
+                  <span style={{ fontWeight: 600 }}>
+                    {completionStats.openPositions} of {completionStats.totalItems}
                   </span>
                 </div>
               </div>
@@ -1604,36 +1618,33 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                   marginTop: "16px",
                 }}
               >
-                {/* <button
+                <button
                   className="action-button"
                   style={{ justifyContent: "flex-start", textAlign: "left" }}
                   onClick={() => setActiveTab("candidates")}
                 >
                   <Users size={16} />
                   View Candidates
-                </button> */}
-                {/* <button
+                </button>
+                <button
                   className="action-button"
                   style={{ justifyContent: "flex-start", textAlign: "left" }}
                   onClick={() => setActiveTab("items")}
                 >
                   <Briefcase size={16} />
                   Manage Requisition Items
-                </button> */}
+                </button>
                 <button
                   className="action-button"
                   style={{ justifyContent: "flex-start", textAlign: "left" }}
+                  onClick={() => {
+                    setActiveTab("timeline");
+                    setIsEditing(true);
+                  }}
                 >
                   <MessageSquare size={16} />
                   Add Internal Note
                 </button>
-                {/* <button
-                  className="action-button primary"
-                  style={{ justifyContent: "center" }}
-                >
-                  <ExternalLink size={16} />
-                  Generate Onboarding Plan
-                </button> */}
               </div>
             </div>
           </div>
