@@ -2024,7 +2024,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                             {item.education}
                           </div>
                         </div>
-                        <div>
+                        {/* <div>
                           <div
                             style={{
                               fontSize: "11px",
@@ -2048,7 +2048,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                           >
                             {item.assignedEmployeeName || "Unassigned"}
                           </div>
-                        </div>
+                        </div> */}
                         <div>
                           <div
                             style={{
@@ -2231,30 +2231,6 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                           </button>
                         )}
 
-                      {item.itemStatus === "Pending" && (
-                        <button
-                          className="action-button primary"
-                          style={{
-                            fontSize: "12px",
-                            padding: "8px 12px",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "6px",
-                          }}
-                          onClick={() =>
-                            setSelectedItemForAssignment(
-                              selectedItemForAssignment === item.id
-                                ? null
-                                : item.id,
-                            )
-                          }
-                        >
-                          <UserPlus size={12} />
-                          {selectedItemForAssignment === item.id
-                            ? "Cancel"
-                            : "Assign Employee"}
-                        </button>
-                      )}
 
                       {isEditing && (
                         <div style={{ display: "flex", gap: "4px" }}>
@@ -2280,7 +2256,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                         </div>
                       )}
 
-                      <button
+                      {/* <button
                         className="action-button"
                         style={{
                           fontSize: "12px",
@@ -2294,7 +2270,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                       >
                         <FileText size={12} />
                         {isExpanded ? "Hide JD" : "View JD"}
-                      </button>
+                      </button> */}
                     </div>
                   </div>
 

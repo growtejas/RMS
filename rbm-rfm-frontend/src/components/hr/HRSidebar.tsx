@@ -49,7 +49,7 @@ const HrSidebar: React.FC<HrSidebarProps> = ({
       label: "Dashboard",
       icon: <LayoutDashboard size={20} />,
     },
-    { id: "employees", label: "Employees", icon: <Users size={20} /> },
+    // { id: "employees", label: "Employees", icon: <Users size={20} /> },
     {
       id: "create-employee",
       label: "Create Employee",

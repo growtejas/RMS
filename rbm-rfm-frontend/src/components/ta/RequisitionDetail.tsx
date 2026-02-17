@@ -1700,7 +1700,11 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                         Assigned TA:
                       </span>
                     </div>
-                    <span style={{ fontWeight: 500 }}>{ticket.assignedTA}</span>
+                    <span style={{ fontWeight: 500 }}>
+                      {ticket.assignedTAId
+                        ? resolveUserName(ticket.assignedTAId)
+                        : "Unassigned"}
+                    </span>
                   </div>
                   <div>
                     <div
@@ -1716,7 +1720,17 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                         Date Created:
                       </span>
                     </div>
-                    <span>{ticket.dateCreated}</span>
+                    <span style={{ fontWeight: 500 }}>
+                      {ticket.dateCreated
+                        ? new Date(ticket.dateCreated).toLocaleDateString("en-US", {
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "—"}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -3783,10 +3797,10 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   color: "var(--text-primary)",
                 }}
               >
-                HR Workflow Guidance
+                TA Workflow Guidance
               </h3>
               <p style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-                Recommended steps to process this requisition
+                Recommended steps to source and fulfill this requisition
               </p>
             </div>
           </div>
@@ -3836,7 +3850,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   </span>
                 </div>
                 <span style={{ fontSize: "13px", fontWeight: 600 }}>
-                  Review Open Items
+                  Review Requirements
                 </span>
               </div>
               <p
@@ -3846,7 +3860,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   lineHeight: 1.4,
                 }}
               >
-                Check all pending positions in the "Requisition Items" tab
+                Review job descriptions, skills, and experience requirements for each position in the "Requisition Items" tab
               </p>
             </div>
 
@@ -3888,7 +3902,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   </span>
                 </div>
                 <span style={{ fontSize: "13px", fontWeight: 600 }}>
-                  Match Resources
+                  Source Candidates
                 </span>
               </div>
               <p
@@ -3898,8 +3912,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   lineHeight: 1.4,
                 }}
               >
-                Use the "Candidates" tab to add and track candidates through the
-                pipeline
+                Add candidates to items and move them through the pipeline: Sourcing → Shortlisted → Interviewing → Offered
               </p>
             </div>
 
@@ -3941,7 +3954,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   </span>
                 </div>
                 <span style={{ fontSize: "13px", fontWeight: 600 }}>
-                  Update Status
+                  Manage Interviews
                 </span>
               </div>
               <p
@@ -3951,7 +3964,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   lineHeight: 1.4,
                 }}
               >
-                Mark items as fulfilled or cancelled as you work through them
+                Schedule interviews, track feedback, and coordinate with hiring managers through the candidate pipeline
               </p>
             </div>
 
@@ -3993,7 +4006,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   </span>
                 </div>
                 <span style={{ fontSize: "13px", fontWeight: 600 }}>
-                  Document Progress
+                  Fulfill Positions
                 </span>
               </div>
               <p
@@ -4003,7 +4016,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   lineHeight: 1.4,
                 }}
               >
-                Add notes in the timeline section to track your progress
+                Once an offer is accepted, mark the item as "Fulfilled" and assign the selected employee to complete the requisition
               </p>
             </div>
           </div>

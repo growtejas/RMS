@@ -693,7 +693,7 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
           <div>
             <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
               <DollarSign size={20} className="text-blue-500" />
-              Step A — Financial Review
+              Financial Review
             </h2>
             <p className="text-sm text-slate-500 mt-1">
               Review and approve budget for each requisition item
@@ -788,7 +788,7 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
       {/* ================================================================== */}
       {/* SECTION 3 — STEP B: BUDGET CLEARANCE */}
       {/* ================================================================== */}
-      <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      {/* <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
           <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
             <Shield size={20} className="text-amber-500" />
@@ -829,12 +829,12 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
             )}
           </div>
         </div>
-      </section>
+      </section> */}
 
       {/* ================================================================== */}
       {/* SECTION 4 — STEP C: HR AUTHORIZATION */}
       {/* ================================================================== */}
-      <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      {/* <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 bg-slate-50">
           <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
             <User size={20} className="text-green-500" />
@@ -875,114 +875,116 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
             )}
           </div>
         </div>
-      </section>
+      </section> */}
 
       {/* ================================================================== */}
-      {/* SECTION 5 — WORKFLOW ACTION BAR */}
+      {/* SECTION 5 — WORKFLOW ACTION BAR (temporarily disabled) */}
       {/* ================================================================== */}
-      <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <div className="p-6">
-          <div className="flex items-center justify-between">
-            {/* Status Summary */}
-            <div className="space-y-2">
-              <h3 className="font-semibold text-slate-800">
-                Ready to Approve?
-              </h3>
-              <ul className="text-sm space-y-1">
-                <li
-                  className={`flex items-center gap-2 ${
-                    !computed.hasInvalidBudgets
-                      ? "text-green-600"
-                      : "text-red-600"
-                  }`}
-                >
-                  {!computed.hasInvalidBudgets ? (
-                    <CheckCircle size={14} />
-                  ) : (
-                    <XCircle size={14} />
-                  )}
-                  All item budgets valid (&gt; 0)
-                </li>
-                <li
-                  className={`flex items-center gap-2 ${
-                    !computed.hasUnsavedChanges
-                      ? "text-green-600"
-                      : "text-amber-600"
-                  }`}
-                >
-                  {!computed.hasUnsavedChanges ? (
-                    <CheckCircle size={14} />
-                  ) : (
-                    <AlertTriangle size={14} />
-                  )}
-                  {!computed.hasUnsavedChanges
-                    ? "No unsaved changes"
-                    : `${computed.dirtyItemIds.length} unsaved item(s)`}
-                </li>
-                <li
-                  className={`flex items-center gap-2 ${
-                    state.validation.budgetApprovedBy
-                      ? "text-green-600"
-                      : "text-red-600"
-                  }`}
-                >
-                  {state.validation.budgetApprovedBy ? (
-                    <CheckCircle size={14} />
-                  ) : (
-                    <XCircle size={14} />
-                  )}
-                  Budget approver specified
-                </li>
-                <li
-                  className={`flex items-center gap-2 ${
-                    state.validation.approvedBy
-                      ? "text-green-600"
-                      : "text-red-600"
-                  }`}
-                >
-                  {state.validation.approvedBy ? (
-                    <CheckCircle size={14} />
-                  ) : (
-                    <XCircle size={14} />
-                  )}
-                  HR approver specified
-                </li>
-              </ul>
-            </div>
+      {false && (
+        <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div className="p-6">
+            <div className="flex items-center justify-between">
+              {/* Status Summary */}
+              <div className="space-y-2">
+                <h3 className="font-semibold text-slate-800">
+                  Ready to Approve?
+                </h3>
+                <ul className="text-sm space-y-1">
+                  <li
+                    className={`flex items-center gap-2 ${
+                      !computed.hasInvalidBudgets
+                        ? "text-green-600"
+                        : "text-red-600"
+                    }`}
+                  >
+                    {!computed.hasInvalidBudgets ? (
+                      <CheckCircle size={14} />
+                    ) : (
+                      <XCircle size={14} />
+                    )}
+                    All item budgets valid (&gt; 0)
+                  </li>
+                  <li
+                    className={`flex items-center gap-2 ${
+                      !computed.hasUnsavedChanges
+                        ? "text-green-600"
+                        : "text-amber-600"
+                    }`}
+                  >
+                    {!computed.hasUnsavedChanges ? (
+                      <CheckCircle size={14} />
+                    ) : (
+                      <AlertTriangle size={14} />
+                    )}
+                    {!computed.hasUnsavedChanges
+                      ? "No unsaved changes"
+                      : `${computed.dirtyItemIds.length} unsaved item(s)`}
+                  </li>
+                  <li
+                    className={`flex items-center gap-2 ${
+                      state.validation.budgetApprovedBy
+                        ? "text-green-600"
+                        : "text-red-600"
+                    }`}
+                  >
+                    {state.validation.budgetApprovedBy ? (
+                      <CheckCircle size={14} />
+                    ) : (
+                      <XCircle size={14} />
+                    )}
+                    Budget approver specified
+                  </li>
+                  <li
+                    className={`flex items-center gap-2 ${
+                      state.validation.approvedBy
+                        ? "text-green-600"
+                        : "text-red-600"
+                    }`}
+                  >
+                    {state.validation.approvedBy ? (
+                      <CheckCircle size={14} />
+                    ) : (
+                      <XCircle size={14} />
+                    )}
+                    HR approver specified
+                  </li>
+                </ul>
+              </div>
 
-            {/* Action Button */}
-            <div>
-              <button
-                onClick={handleAuthorizeAndApprove}
-                disabled={!computed.canApprove || state.isSubmitting}
-                className={`px-8 py-3 text-base font-semibold rounded-xl flex items-center gap-3 transition-all ${
-                  computed.canApprove && !state.isSubmitting
-                    ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 shadow-lg shadow-green-200"
-                    : "bg-slate-200 text-slate-400 cursor-not-allowed"
-                }`}
-              >
-                {state.isSubmitting ? (
-                  <>
-                    <Loader2 size={20} className="animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle size={20} />
-                    Authorize & Approve
-                  </>
+              {/* Action Button */}
+              <div>
+                <button
+                  onClick={handleAuthorizeAndApprove}
+                  disabled={!computed.canApprove || state.isSubmitting}
+                  className={`px-8 py-3 text-base font-semibold rounded-xl flex items-center gap-3 transition-all ${
+                    computed.canApprove && !state.isSubmitting
+                      ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 shadow-lg shadow-green-200"
+                      : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                  }`}
+                >
+                  {state.isSubmitting ? (
+                    <>
+                      <Loader2 size={20} className="animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle size={20} />
+                      Authorize & Approve
+                    </>
+                  )}
+                </button>
+
+                {!computed.canApprove && !state.isSubmitting && (
+                  <p className="mt-2 text-xs text-slate-500 text-right">
+                    Complete all requirements above
+                  </p>
                 )}
-              </button>
-
-              {!computed.canApprove && !state.isSubmitting && (
-                <p className="mt-2 text-xs text-slate-500 text-right">
-                  Complete all requirements above
-                </p>
-              )}
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Approve Budget Modal - approved amount can differ from estimated */}
       {approveModal.open && approveModal.item && (

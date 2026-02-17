@@ -670,14 +670,18 @@ body {
 .manager-header,
 .viewer-header,
 .data-manager-header {
-  margin-bottom: 28px;
+  margin-bottom: 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
 }
 
 .manager-header h2,
 .viewer-header h2,
 .data-manager-header h2 {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
   color: var(--text-primary);
   margin-bottom: 6px;
 }
@@ -688,6 +692,69 @@ body {
   font-size: 13px;
   color: var(--text-tertiary);
   line-height: 1.5;
+}
+
+/* Master Data - Tabs */
+.data-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  margin-bottom: 16px;
+}
+
+.tab-button {
+  position: relative;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.tab-button .tab-count {
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.2);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tab-button.active {
+  background: #111827;
+  color: #f9fafb;
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.18);
+}
+
+.tab-button.active .tab-count {
+  background: rgba(248, 250, 252, 0.22);
+  color: #f9fafb;
+}
+
+.data-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 /* Stat Cards */

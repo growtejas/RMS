@@ -362,8 +362,8 @@ const MasterDataManager: React.FC = () => {
         <div className="header-left">
           <h2>Master Data Management</h2>
           <p className="subtitle">
-            Manage dropdown options for Skills, Locations, Departments, Company
-            Roles
+            Curate dropdown options for{" "}
+            <strong>Skills, Locations, Departments, and Company Roles</strong>.
           </p>
         </div>
         <button className="add-button" onClick={() => setShowAddModal(true)}>
@@ -375,38 +375,44 @@ const MasterDataManager: React.FC = () => {
       {/* Tabs */}
       <div className="data-tabs">
         <button
-          className={`tab-button ${activeTab === "skills" ? "" : ""}`}
+          className={`tab-button ${activeTab === "skills" ? "active" : ""}`}
           onClick={() => setActiveTab("skills")}
         >
-          Skills ({skills.length})
+          <span>Skills</span>
+          <span className="tab-count">{skills.length}</span>
         </button>
         <button
-          className={`tab-button ${activeTab === "locations" ? "" : ""}`}
+          className={`tab-button ${activeTab === "locations" ? "active" : ""}`}
           onClick={() => setActiveTab("locations")}
         >
-          Locations ({locations.length})
+          <span>Locations</span>
+          <span className="tab-count">{locations.length}</span>
         </button>
         <button
-          className={`tab-button ${activeTab === "departments" ? "" : ""}`}
+          className={`tab-button ${activeTab === "departments" ? "active" : ""}`}
           onClick={() => setActiveTab("departments")}
         >
-          Departments ({departments.length})
+          <span>Departments</span>
+          <span className="tab-count">{departments.length}</span>
         </button>
         <button
-          className={`tab-button ${activeTab === "company-roles" ? "" : ""}`}
+          className={`tab-button ${
+            activeTab === "company-roles" ? "active" : ""
+          }`}
           onClick={() => setActiveTab("company-roles")}
         >
-          Company Roles ({companyRoles.length})
+          <span>Company Roles</span>
+          <span className="tab-count">{companyRoles.length}</span>
         </button>
       </div>
 
-      {/* Search and Filters */}
+      {/* Search */}
       <div className="data-controls">
         <div className="search-box">
           <Search size={18} />
           <input
             type="text"
-            placeholder={`Search ${activeTab}...`}
+            placeholder={`Search ${activeTab.replace("-", " ")}...`}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
