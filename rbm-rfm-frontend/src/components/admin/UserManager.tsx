@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Users, Edit, Plus, Power, Search } from "lucide-react";
-import { fetchUsers, updateUser, AdminUser } from "../../api/users";
+import { fetchUsers, updateUser, AdminUser, createUser } from "../../api/users";
 import { fetchEmployees, EmployeeOption } from "../../api/employees";
 
-const defaultRoleOptions = ["Admin", "Owner", "HR", "Manager", "Employee"];
+const defaultRoleOptions = ["Admin", "Owner", "HR", "Manager", "Employee", "TA"];
 
 const UserManager: React.FC = () => {
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -17,6 +17,12 @@ const UserManager: React.FC = () => {
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>("");
   const [isActive, setIsActive] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newUsername, setNewUsername] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newRole, setNewRole] = useState<string>("Employee");
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
 
   const roleOptions = useMemo(() => {
     const roleSet = new Set(defaultRoleOptions);
@@ -97,6 +103,52 @@ const UserManager: React.FC = () => {
     return rolesChanged || employeeChanged || statusChanged;
   }, [editingUser, selectedRoles, selectedEmployeeId, isActive]);
 
+  const resetCreateForm = () => {
+    setNewUsername("");
+    setNewPassword("");
+    setNewRole("Employee");
+    setCreateError(null);
+  };
+
+  const handleOpenCreate = () => {
+    resetCreateForm();
+    setShowCreateModal(true);
+  };
+
+  const handleCreateUser = async () => {
+    if (!newUsername.trim()) {
+      setCreateError("Username is required.");
+      return;
+    }
+    if (!newPassword.trim()) {
+      setCreateError("Password is required.");
+      return;
+    }
+    if (!newRole) {
+      setCreateError("Role is required.");
+      return;
+    }
+
+    setIsCreating(true);
+    setCreateError(null);
+    try {
+      await createUser({
+        username: newUsername.trim(),
+        password: newPassword,
+        role: newRole,
+      });
+      await loadUsers();
+      setShowCreateModal(false);
+      resetCreateForm();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to create user";
+      setCreateError(message);
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!editingUser) {
       return;
@@ -170,7 +222,9 @@ const UserManager: React.FC = () => {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          {/* <button
+          <button
+            type="button"
+            onClick={handleOpenCreate}
             style={{
               display: "flex",
               alignItems: "center",
@@ -183,8 +237,8 @@ const UserManager: React.FC = () => {
               cursor: "pointer",
             }}
           >
-            <Plus size={18} /> Add User
-          </button> */}
+            <Plus size={18} /> Create User
+          </button>
         </div>
       </div>
 
@@ -415,6 +469,95 @@ const UserManager: React.FC = () => {
                 disabled={!isDirty || isLoading}
               >
                 Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCreateModal && (
+        <div className="modal-overlay">
+          <div className="modal-content edit-user-modal">
+            <div className="modal-header">
+              <div>
+                <h3>Create User</h3>
+                <p className="modal-subtitle">
+                  Create a new login with an initial role
+                </p>
+              </div>
+              <button
+                className="close-button"
+                onClick={() => {
+                  setShowCreateModal(false);
+                  resetCreateForm();
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="modal-body edit-user-body">
+              <div className="edit-user-section">
+                <div className="section-header">
+                  <h4>Account Details</h4>
+                  <p>Set username, password and primary role</p>
+                </div>
+                <div className="form-group">
+                  <label>Username</label>
+                  <input
+                    type="text"
+                    value={newUsername}
+                    onChange={(e) => setNewUsername(e.target.value)}
+                    placeholder="Enter username"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Password</label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Enter temporary password"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Role</label>
+                  <select
+                    value={newRole}
+                    onChange={(e) => setNewRole(e.target.value)}
+                  >
+                    <option value="">Select role</option>
+                    {roleOptions.map((role) => (
+                      <option key={role} value={role}>
+                        {role}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {createError && (
+                  <p style={{ color: "#ef4444", marginTop: "8px" }}>
+                    {createError}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button
+                className="cancel-button"
+                onClick={() => {
+                  setShowCreateModal(false);
+                  resetCreateForm();
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="save-button"
+                onClick={handleCreateUser}
+                disabled={isCreating}
+              >
+                {isCreating ? "Creating..." : "Create User"}
               </button>
             </div>
           </div>
