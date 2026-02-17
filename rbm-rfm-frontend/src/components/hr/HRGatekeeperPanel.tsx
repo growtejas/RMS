@@ -161,8 +161,11 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
 
   // Initialize edits when requisition changes
   useEffect(() => {
-    actions.initializeFromRequisition(requisition);
-  }, [requisition, actions]);
+    if (requisition) {
+      actions.initializeFromRequisition(requisition);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requisition?.req_id]);
 
   // ============================================================================
   // HANDLERS

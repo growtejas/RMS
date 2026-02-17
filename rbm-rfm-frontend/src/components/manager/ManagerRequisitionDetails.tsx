@@ -15,6 +15,7 @@ import {
   CheckCircle,
   Lock,
   History,
+  Users,
 } from "lucide-react";
 import { apiClient } from "../../api/client";
 import type { Candidate } from "../../api/candidateApi";
@@ -198,7 +199,9 @@ const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
   const label = getStatusLabel(status);
   const className = getStatusClass(status);
   return (
-    <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${className}`}>
+    <span
+      className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${className}`}
+    >
       {label}
     </span>
   );
@@ -239,20 +242,52 @@ const formatCurrency = (amount?: number | null) => {
   }).format(amount);
 };
 
-const getPhaseStyle = (phase: TimelinePhase): { bg: string; border: string; dot: string; text: string } => {
+const getPhaseStyle = (
+  phase: TimelinePhase,
+): { bg: string; border: string; dot: string; text: string } => {
   switch (phase) {
     case "Creation":
-      return { bg: "bg-indigo-50", border: "border-indigo-200", dot: "bg-indigo-500", text: "text-indigo-700" };
+      return {
+        bg: "bg-indigo-50",
+        border: "border-indigo-200",
+        dot: "bg-indigo-500",
+        text: "text-indigo-700",
+      };
     case "Budget":
-      return { bg: "bg-emerald-50", border: "border-emerald-200", dot: "bg-emerald-500", text: "text-emerald-700" };
+      return {
+        bg: "bg-emerald-50",
+        border: "border-emerald-200",
+        dot: "bg-emerald-500",
+        text: "text-emerald-700",
+      };
     case "Authorization":
-      return { bg: "bg-blue-50", border: "border-blue-200", dot: "bg-blue-500", text: "text-blue-700" };
+      return {
+        bg: "bg-blue-50",
+        border: "border-blue-200",
+        dot: "bg-blue-500",
+        text: "text-blue-700",
+      };
     case "Assignment":
-      return { bg: "bg-violet-50", border: "border-violet-200", dot: "bg-violet-500", text: "text-violet-700" };
+      return {
+        bg: "bg-violet-50",
+        border: "border-violet-200",
+        dot: "bg-violet-500",
+        text: "text-violet-700",
+      };
     case "Recruitment":
-      return { bg: "bg-amber-50", border: "border-amber-200", dot: "bg-amber-500", text: "text-amber-700" };
+      return {
+        bg: "bg-amber-50",
+        border: "border-amber-200",
+        dot: "bg-amber-500",
+        text: "text-amber-700",
+      };
     default:
-      return { bg: "bg-slate-50", border: "border-slate-200", dot: "bg-slate-500", text: "text-slate-700" };
+      return {
+        bg: "bg-slate-50",
+        border: "border-slate-200",
+        dot: "bg-slate-500",
+        text: "text-slate-700",
+      };
   }
 };
 
@@ -307,19 +342,21 @@ const MasterTimeline: React.FC<MasterTimelineProps> = ({ events }) => {
               <div
                 className={`w-3 h-3 rounded-full ${phaseStyle.dot} ring-4 ring-white z-10`}
               />
-              {!isLast && (
-                <div className="w-0.5 flex-1 bg-gray-200 -mt-1" />
-              )}
+              {!isLast && <div className="w-0.5 flex-1 bg-gray-200 -mt-1" />}
             </div>
 
             {/* Event card */}
-            <div className={`flex-1 ${phaseStyle.bg} ${phaseStyle.border} border rounded-lg p-4 -mt-1`}>
+            <div
+              className={`flex-1 ${phaseStyle.bg} ${phaseStyle.border} border rounded-lg p-4 -mt-1`}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1">
                   <h4 className={`font-semibold ${phaseStyle.text}`}>
                     {event.title}
                   </h4>
-                  <p className="text-sm text-gray-600 mt-1">{event.description}</p>
+                  <p className="text-sm text-gray-600 mt-1">
+                    {event.description}
+                  </p>
                 </div>
               </div>
 
@@ -337,7 +374,8 @@ const MasterTimeline: React.FC<MasterTimelineProps> = ({ events }) => {
                   </div>
                 )}
                 <span className="text-xs text-gray-500 ml-auto">
-                  {formatRelativeTime(event.timestamp)} · {formatDateTime(event.timestamp)}
+                  {formatRelativeTime(event.timestamp)} ·{" "}
+                  {formatDateTime(event.timestamp)}
                 </span>
               </div>
 
@@ -366,7 +404,9 @@ const ManagerRequisitionDetails: React.FC = () => {
   // State
   const [requisition, setRequisition] = useState<Requisition | null>(null);
   const [statusHistory, setStatusHistory] = useState<StatusHistoryEntry[]>([]);
-  const [masterTimeline, setMasterTimeline] = useState<MasterTimelineEvent[]>([]);
+  const [masterTimeline, setMasterTimeline] = useState<MasterTimelineEvent[]>(
+    [],
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -395,6 +435,29 @@ const ManagerRequisitionDetails: React.FC = () => {
   const [candidateItemFilter, setCandidateItemFilter] = useState<
     number | "all"
   >("all");
+
+  // Tab state
+  type ManagerTab = "overview" | "positions" | "candidates" | "timeline";
+  const [activeTab, setActiveTab] = useState<ManagerTab>("overview");
+
+  const managerTabs: {
+    id: ManagerTab;
+    label: string;
+    icon: React.ReactNode;
+  }[] = [
+    { id: "overview", label: "Overview", icon: <FileText size={16} /> },
+    {
+      id: "positions",
+      label: "Positions & Budget",
+      icon: <Briefcase size={16} />,
+    },
+    { id: "candidates", label: "Candidates", icon: <Users size={16} /> },
+    {
+      id: "timeline",
+      label: "Timeline & History",
+      icon: <History size={16} />,
+    },
+  ];
 
   // Permission check - Backend is single source of truth
   // Only Draft status allows editing by the creator
@@ -456,7 +519,10 @@ const ManagerRequisitionDetails: React.FC = () => {
 
     // Fallback for status history events
     const normalized = action.toLowerCase();
-    if (normalized.includes("pending_budget") || normalized.includes("budget")) {
+    if (
+      normalized.includes("pending_budget") ||
+      normalized.includes("budget")
+    ) {
       return "Budget";
     }
     if (normalized.includes("pending_hr") || normalized.includes("active")) {
@@ -507,9 +573,7 @@ const ManagerRequisitionDetails: React.FC = () => {
     }
 
     // Fallback: format as title case
-    return action
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (c) => c.toUpperCase());
+    return action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }, []);
 
   /**
@@ -522,7 +586,7 @@ const ManagerRequisitionDetails: React.FC = () => {
       entityType: "requisition" | "requisition_item",
       entityId: number,
       fromStatus: string | null,
-      toStatus: string
+      toStatus: string,
     ): string => {
       const upper = action.toUpperCase();
       const isItem = entityType === "requisition_item";
@@ -573,7 +637,7 @@ const ManagerRequisitionDetails: React.FC = () => {
       }
       return `${entityRef}: ${actionLabel(action)}.`;
     },
-    [actionLabel]
+    [actionLabel],
   );
 
   const buildMasterTimeline = useCallback(
@@ -583,7 +647,7 @@ const ManagerRequisitionDetails: React.FC = () => {
       reqWorkflowAudit: WorkflowAuditRecord[],
       itemWorkflowAudit: WorkflowAuditRecord[],
       reqAuditLogs: GenericAuditLog[],
-      itemAuditLogs: GenericAuditLog[]
+      itemAuditLogs: GenericAuditLog[],
     ): MasterTimelineEvent[] => {
       const events: MasterTimelineEvent[] = [];
       const seenKeys = new Set<string>();
@@ -629,7 +693,7 @@ const ManagerRequisitionDetails: React.FC = () => {
             "requisition",
             entry.entity_id,
             entry.from_status,
-            entry.to_status
+            entry.to_status,
           ),
           actor: resolveActor(entry),
           reason: entry.reason ?? null,
@@ -648,7 +712,7 @@ const ManagerRequisitionDetails: React.FC = () => {
             "requisition_item",
             entry.entity_id,
             entry.from_status,
-            entry.to_status
+            entry.to_status,
           ),
           actor: resolveActor(entry),
           reason: entry.reason ?? null,
@@ -665,8 +729,8 @@ const ManagerRequisitionDetails: React.FC = () => {
             wf.to_status === entry.new_status &&
             Math.abs(
               new Date(wf.created_at).getTime() -
-                new Date(entry.changed_at).getTime()
-            ) < 60000 // within 1 minute
+                new Date(entry.changed_at).getTime(),
+            ) < 60000, // within 1 minute
         );
 
         if (!alreadyCovered) {
@@ -718,7 +782,9 @@ const ManagerRequisitionDetails: React.FC = () => {
             title: actionLabel(log.action),
             description: `${entityRef}: ${actionLabel(log.action)}.`,
             actor:
-              log.performed_by_full_name ?? log.performed_by_username ?? "System",
+              log.performed_by_full_name ??
+              log.performed_by_username ??
+              "System",
           });
         }
       });
@@ -726,10 +792,10 @@ const ManagerRequisitionDetails: React.FC = () => {
       // Sort by timestamp descending (most recent first)
       return events.sort(
         (a, b) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
       );
     },
-    [actionLabel, inferPhaseFromAction, buildWorkflowDescription]
+    [actionLabel, inferPhaseFromAction, buildWorkflowDescription],
   );
 
   // Fetch data
@@ -745,11 +811,15 @@ const ManagerRequisitionDetails: React.FC = () => {
         setIsLoading(true);
         setError(null);
 
-        const [requisitionRes, historyRes, reqWorkflowAuditRes, reqAuditLogsRes] =
-          await Promise.all([
+        const [
+          requisitionRes,
+          historyRes,
+          reqWorkflowAuditRes,
+          reqAuditLogsRes,
+        ] = await Promise.all([
           apiClient.get<Requisition>(`/requisitions/${id}`),
           apiClient.get<StatusHistoryEntry[]>(
-            `/requisitions/${id}/status-history`
+            `/requisitions/${id}/status-history`,
           ),
           apiClient
             .get<WorkflowAuditResponse>(`/workflow/audit/${id}`, {
@@ -778,13 +848,13 @@ const ManagerRequisitionDetails: React.FC = () => {
             reason: entry.reason ?? null,
             transition_metadata: entry.transition_metadata ?? null,
             created_at: entry.created_at,
-          })
+          }),
         );
         const reqWorkflowAudit = workflowEntries.filter(
-          (entry) => entry.entity_type === "requisition"
+          (entry) => entry.entity_type === "requisition",
         );
         const itemWorkflowAudit = workflowEntries.filter(
-          (entry) => entry.entity_type === "requisition_item"
+          (entry) => entry.entity_type === "requisition_item",
         );
 
         const itemIds = reqData.items.map((item) => item.item_id);
@@ -797,12 +867,12 @@ const ManagerRequisitionDetails: React.FC = () => {
                   entity_id: String(itemId),
                 },
               })
-              .catch(() => ({ data: [] }))
-          )
+              .catch(() => ({ data: [] })),
+          ),
         );
 
         const itemAuditLogs = itemAuditLogResponses.flatMap(
-          (response) => response.data ?? []
+          (response) => response.data ?? [],
         );
 
         setRequisition(reqData);
@@ -814,14 +884,14 @@ const ManagerRequisitionDetails: React.FC = () => {
             reqWorkflowAudit,
             itemWorkflowAudit,
             reqAuditLogsRes.data || [],
-            itemAuditLogs
-          )
+            itemAuditLogs,
+          ),
         );
       } catch (err: unknown) {
         const axiosErr = err as { response?: { data?: { detail?: string } } };
         setError(
           axiosErr.response?.data?.detail ||
-            "Failed to load requisition details"
+            "Failed to load requisition details",
         );
       } finally {
         setIsLoading(false);
@@ -909,6 +979,7 @@ const ManagerRequisitionDetails: React.FC = () => {
     setIsEditing(true);
     setSaveMessage(null);
     setHasUnsavedChanges(false);
+    setActiveTab("positions");
   };
 
   // Cancel edit
@@ -916,7 +987,7 @@ const ManagerRequisitionDetails: React.FC = () => {
     if (
       hasUnsavedChanges &&
       !window.confirm(
-        "You have unsaved changes. Are you sure you want to cancel?"
+        "You have unsaved changes. Are you sure you want to cancel?",
       )
     ) {
       return;
@@ -930,7 +1001,7 @@ const ManagerRequisitionDetails: React.FC = () => {
   // Update form field
   const handleFieldChange = <K extends keyof RequisitionFormData>(
     field: K,
-    value: RequisitionFormData[K]
+    value: RequisitionFormData[K],
   ) => {
     if (!formData) return;
     setFormData({ ...formData, [field]: value });
@@ -941,7 +1012,7 @@ const ManagerRequisitionDetails: React.FC = () => {
   const handleItemUpdate = (
     index: number,
     field: keyof ItemFormData,
-    value: string | number
+    value: string | number,
   ) => {
     if (!formData) return;
 
@@ -1056,21 +1127,21 @@ const ManagerRequisitionDetails: React.FC = () => {
       // Refresh data (including master timeline sources)
       const [requisitionRes, historyRes, reqWorkflowAuditRes, reqAuditLogsRes] =
         await Promise.all([
-        apiClient.get<Requisition>(`/requisitions/${id}`),
-        apiClient.get<StatusHistoryEntry[]>(
-          `/requisitions/${id}/status-history`
-        ),
-        apiClient
-          .get<WorkflowAuditResponse>(`/workflow/audit/${id}`, {
-            params: { include_items: true, page: 1, page_size: 200 },
-          })
-          .catch(() => ({ data: { entries: [] } })),
-        apiClient
-          .get<GenericAuditLog[]>(`/audit-logs/`, {
-            params: { entity_name: "requisition", entity_id: id },
-          })
-          .catch(() => ({ data: [] })),
-      ]);
+          apiClient.get<Requisition>(`/requisitions/${id}`),
+          apiClient.get<StatusHistoryEntry[]>(
+            `/requisitions/${id}/status-history`,
+          ),
+          apiClient
+            .get<WorkflowAuditResponse>(`/workflow/audit/${id}`, {
+              params: { include_items: true, page: 1, page_size: 200 },
+            })
+            .catch(() => ({ data: { entries: [] } })),
+          apiClient
+            .get<GenericAuditLog[]>(`/audit-logs/`, {
+              params: { entity_name: "requisition", entity_id: id },
+            })
+            .catch(() => ({ data: [] })),
+        ]);
 
       const reqData = requisitionRes.data;
       const workflowEntries = (reqWorkflowAuditRes.data.entries || []).map(
@@ -1087,13 +1158,13 @@ const ManagerRequisitionDetails: React.FC = () => {
           reason: entry.reason ?? null,
           transition_metadata: entry.transition_metadata ?? null,
           created_at: entry.created_at,
-        })
+        }),
       );
       const reqWorkflowAudit = workflowEntries.filter(
-        (entry) => entry.entity_type === "requisition"
+        (entry) => entry.entity_type === "requisition",
       );
       const itemWorkflowAudit = workflowEntries.filter(
-        (entry) => entry.entity_type === "requisition_item"
+        (entry) => entry.entity_type === "requisition_item",
       );
 
       const itemIds = reqData.items.map((item) => item.item_id);
@@ -1106,12 +1177,12 @@ const ManagerRequisitionDetails: React.FC = () => {
                 entity_id: String(itemId),
               },
             })
-            .catch(() => ({ data: [] }))
-        )
+            .catch(() => ({ data: [] })),
+        ),
       );
 
       const itemAuditLogs = itemAuditLogResponses.flatMap(
-        (response) => response.data ?? []
+        (response) => response.data ?? [],
       );
 
       setRequisition(reqData);
@@ -1123,8 +1194,8 @@ const ManagerRequisitionDetails: React.FC = () => {
           reqWorkflowAudit,
           itemWorkflowAudit,
           reqAuditLogsRes.data || [],
-          itemAuditLogs
-        )
+          itemAuditLogs,
+        ),
       );
 
       setSaveMessage({
@@ -1155,10 +1226,12 @@ const ManagerRequisitionDetails: React.FC = () => {
         `/requisitions/${requisition.req_id}/jd`,
         {
           responseType: "blob",
-        }
+        },
       );
 
-      const blob = new Blob([response.data as BlobPart], { type: 'application/pdf' });
+      const blob = new Blob([response.data as BlobPart], {
+        type: "application/pdf",
+      });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -1218,12 +1291,12 @@ const ManagerRequisitionDetails: React.FC = () => {
           headers: {
             "Content-Type": "multipart/form-data",
           },
-        }
+        },
       );
 
       const jdKey = response.data?.jd_file_key ?? requisition.jd_file_key;
       setRequisition((prev) =>
-        prev ? { ...prev, jd_file_key: jdKey || prev.jd_file_key } : prev
+        prev ? { ...prev, jd_file_key: jdKey || prev.jd_file_key } : prev,
       );
       setJdFile(null);
       setJdInputKey((prev) => prev + 1);
@@ -1291,7 +1364,9 @@ const ManagerRequisitionDetails: React.FC = () => {
           <h3 className="text-lg font-semibold text-gray-900 mb-2">
             Unable to Load Requisition
           </h3>
-          <p className="text-gray-600 mb-6">{error || "Requisition not found"}</p>
+          <p className="text-gray-600 mb-6">
+            {error || "Requisition not found"}
+          </p>
           <button
             onClick={() => navigate(-1)}
             className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
@@ -1353,14 +1428,18 @@ const ManagerRequisitionDetails: React.FC = () => {
                     ) : (
                       <Lock className="h-4 w-4" />
                     )}
-                    <span>{canEdit ? "Edit Requisition" : "Editing Locked"}</span>
+                    <span>
+                      {canEdit ? "Edit Requisition" : "Editing Locked"}
+                    </span>
                   </button>
                 ) : (
                   <div className="flex items-center gap-3">
                     {hasUnsavedChanges && (
                       <span className="inline-flex items-center gap-1 text-amber-600">
                         <AlertCircle className="h-3 w-3" />
-                        <span className="text-xs font-medium">Unsaved changes</span>
+                        <span className="text-xs font-medium">
+                          Unsaved changes
+                        </span>
                       </span>
                     )}
                     <button
@@ -1408,7 +1487,9 @@ const ManagerRequisitionDetails: React.FC = () => {
                   ) : (
                     <AlertCircle className="h-4 w-4" />
                   )}
-                  <span className="text-sm font-medium">{saveMessage.message}</span>
+                  <span className="text-sm font-medium">
+                    {saveMessage.message}
+                  </span>
                 </div>
               </div>
             )}
@@ -1419,7 +1500,8 @@ const ManagerRequisitionDetails: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <Lock className="h-4 w-4" />
                   <span className="text-sm">
-                    <strong>Editing is locked.</strong> This requisition has progressed beyond the point where manager edits are allowed.
+                    <strong>Editing is locked.</strong> This requisition has
+                    progressed beyond the point where manager edits are allowed.
                   </span>
                 </div>
               </div>
@@ -1452,7 +1534,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                 <div className="text-lg font-semibold text-gray-900">
                   {formatCurrency(
                     requisition.total_estimated_budget ??
-                      requisition.budget_amount
+                      requisition.budget_amount,
                   )}
                 </div>
                 <div className="text-xs text-gray-500">Total Estimated</div>
@@ -1503,21 +1585,75 @@ const ManagerRequisitionDetails: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Main Details */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Basic Information */}
-            <div className="bg-white rounded-xl border border-gray-200">
-              <div className="p-6 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">
-                  Basic Information
-                </h3>
-                <p className="text-sm text-gray-500 mt-1">
-                  Core requisition details
-                </p>
-              </div>
-              <div className="p-6">
-                {!isEditing ? (
+        {/* Tab Bar */}
+        <div
+          style={{
+            display: "flex",
+            gap: "8px",
+            marginBottom: "24px",
+            padding: "4px",
+            backgroundColor: "#f3f4f6",
+            borderRadius: "12px",
+          }}
+        >
+          {managerTabs.map((tab) => (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                flex: 1,
+                padding: "12px 16px",
+                borderRadius: "8px",
+                border: "none",
+                background: activeTab === tab.id ? "#ffffff" : "transparent",
+                color: activeTab === tab.id ? "#111827" : "#6b7280",
+                boxShadow:
+                  activeTab === tab.id ? "0 1px 2px rgba(0,0,0,0.05)" : "none",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                fontSize: "14px",
+                fontWeight: activeTab === tab.id ? 600 : 500,
+                transition: "all 0.15s ease",
+              }}
+            >
+              {tab.icon}
+              <span>{tab.label}</span>
+              {tab.id === "positions" && hasUnsavedChanges && (
+                <span
+                  style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    backgroundColor: "#f59e0b",
+                    display: "inline-block",
+                  }}
+                />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* ═══════════════ OVERVIEW TAB ═══════════════ */}
+        {activeTab === "overview" && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left Column - Main Details */}
+            <div className="lg:col-span-2 space-y-6">
+              {/* Requisition Summary */}
+              <div className="bg-white rounded-xl border border-gray-200">
+                <div className="p-6 border-b border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Requisition Summary
+                  </h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Core requisition details and work arrangement
+                  </p>
+                </div>
+                <div className="p-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
@@ -1552,18 +1688,199 @@ const ManagerRequisitionDetails: React.FC = () => {
                           requisition.priority?.toLowerCase() === "high"
                             ? "bg-red-100 text-red-700"
                             : requisition.priority?.toLowerCase() === "critical"
-                            ? "bg-purple-100 text-purple-700"
-                            : requisition.priority?.toLowerCase() === "low"
-                            ? "bg-gray-100 text-gray-700"
-                            : "bg-amber-100 text-amber-700"
+                              ? "bg-purple-100 text-purple-700"
+                              : requisition.priority?.toLowerCase() === "low"
+                                ? "bg-gray-100 text-gray-700"
+                                : "bg-amber-100 text-amber-700"
                         }`}
                       >
                         {requisition.priority || "Medium"}
                       </span>
                     </div>
+                    <div>
+                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+                        Work Mode
+                      </div>
+                      <div className="text-gray-900">
+                        {requisition.work_mode || "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+                        Office Location
+                      </div>
+                      <div className="text-gray-900">
+                        {requisition.office_location || "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+                        Duration
+                      </div>
+                      <div className="text-gray-900">
+                        {requisition.duration || "—"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+                        Replacement Position
+                      </div>
+                      <div className="text-gray-900">
+                        {requisition.is_replacement ? "Yes" : "No"}
+                      </div>
+                    </div>
                   </div>
-                ) : (
-                  formData && (
+                </div>
+              </div>
+
+              {/* Budget Summary (compact, read-only) */}
+              <div className="bg-white rounded-xl border border-gray-200">
+                <div className="p-6 border-b border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Budget Summary
+                  </h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Computed budget totals and business case
+                  </p>
+                </div>
+                <div className="p-6 space-y-6">
+                  <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                    <div className="flex items-center gap-2 text-sm font-medium text-green-800 mb-4">
+                      <DollarSign className="h-4 w-4" />
+                      Budget Overview (Computed from Items)
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <div className="text-xs text-gray-500 mb-1">
+                          Total Estimated
+                        </div>
+                        <div className="font-semibold text-gray-900">
+                          {formatCurrency(
+                            requisition.total_estimated_budget ??
+                              requisition.budget_amount,
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500 mb-1">
+                          Total Approved
+                        </div>
+                        <div className="font-semibold text-green-700">
+                          {formatCurrency(requisition.total_approved_budget)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500 mb-1">
+                          Approval Status
+                        </div>
+                        <span
+                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                            requisition.budget_approval_status === "approved"
+                              ? "bg-green-100 text-green-700"
+                              : requisition.budget_approval_status === "partial"
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-gray-100 text-gray-700"
+                          }`}
+                        >
+                          {requisition.budget_approval_status === "approved"
+                            ? "All Items Approved"
+                            : requisition.budget_approval_status === "partial"
+                              ? "Partially Approved"
+                              : "Pending Approval"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-sm font-medium text-gray-700 mb-3">
+                      Justification
+                    </div>
+                    <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
+                      {requisition.justification || "No justification provided"}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-sm font-medium text-gray-700 mb-3">
+                      Manager Notes
+                    </div>
+                    <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
+                      {requisition.manager_notes || "No additional notes"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column */}
+            <div className="space-y-6">
+              {/* JD Preview */}
+              <div className="bg-white rounded-xl border border-gray-200">
+                <div className="p-6 border-b border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Job Description
+                  </h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Attached documents
+                  </p>
+                </div>
+                <div className="p-6">
+                  {requisition.jd_file_key ? (
+                    <div className="flex items-center gap-3">
+                      <FileText className="h-5 w-5 text-gray-600" />
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-gray-900">
+                          Job Description.pdf
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          Uploaded with requisition
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleDownloadJD}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
+                      >
+                        <Download className="h-4 w-4" />
+                        Download
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="text-center py-6">
+                      <FileText className="h-10 w-10 text-gray-400 mx-auto mb-3" />
+                      <p className="text-gray-500 text-sm">No JD uploaded</p>
+                    </div>
+                  )}
+                  <div className="mt-4 pt-4 border-t border-gray-100">
+                    <button
+                      onClick={() => setActiveTab("timeline")}
+                      className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                    >
+                      View full JD &amp; manage uploads →
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════ POSITIONS & BUDGET TAB ═══════════════ */}
+        {activeTab === "positions" && (
+          <div className="space-y-6">
+            {/* Requisition Details (edit mode only) */}
+            {isEditing && formData && (
+              <>
+                <div className="bg-white rounded-xl border border-gray-200">
+                  <div className="p-6 border-b border-gray-200">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Requisition Details
+                    </h3>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Core details and work arrangement
+                    </p>
+                  </div>
+                  <div className="p-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1603,7 +1920,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                           onChange={(e) =>
                             handleFieldChange(
                               "required_by_date",
-                              e.target.value
+                              e.target.value,
                             )
                           }
                           min={new Date().toISOString().split("T")[0]}
@@ -1627,61 +1944,6 @@ const ManagerRequisitionDetails: React.FC = () => {
                           <option value="Critical">Critical</option>
                         </select>
                       </div>
-                    </div>
-                  )
-                )}
-              </div>
-            </div>
-
-            {/* Project Details */}
-            <div className="bg-white rounded-xl border border-gray-200">
-              <div className="p-6 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">
-                  Project Details
-                </h3>
-                <p className="text-sm text-gray-500 mt-1">
-                  Work arrangement and location
-                </p>
-              </div>
-              <div className="p-6">
-                {!isEditing ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
-                        Work Mode
-                      </div>
-                      <div className="text-gray-900">
-                        {requisition.work_mode || "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
-                        Office Location
-                      </div>
-                      <div className="text-gray-900">
-                        {requisition.office_location || "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
-                        Duration
-                      </div>
-                      <div className="text-gray-900">
-                        {requisition.duration || "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
-                        Replacement Position
-                      </div>
-                      <div className="text-gray-900">
-                        {requisition.is_replacement ? "Yes" : "No"}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  formData && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                           Work Mode
@@ -1735,7 +1997,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                           onChange={(e) =>
                             handleFieldChange(
                               "is_replacement",
-                              e.target.value === "yes"
+                              e.target.value === "yes",
                             )
                           }
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
@@ -1745,12 +2007,12 @@ const ManagerRequisitionDetails: React.FC = () => {
                         </select>
                       </div>
                     </div>
-                  )
-                )}
-              </div>
-            </div>
+                  </div>
+                </div>
+              </>
+            )}
 
-            {/* Skills Required */}
+            {/* Skills Required / Positions */}
             <div className="bg-white rounded-xl border border-gray-200">
               <div className="p-6 border-b border-gray-200">
                 <h3 className="text-lg font-semibold text-gray-900">
@@ -1770,7 +2032,10 @@ const ManagerRequisitionDetails: React.FC = () => {
                   ) : (
                     <div className="space-y-4">
                       {requisition.items.map((item, index) => (
-                        <div key={item.item_id} className="border border-gray-200 rounded-lg p-4">
+                        <div
+                          key={item.item_id}
+                          className="border border-gray-200 rounded-lg p-4"
+                        >
                           <div className="flex items-start justify-between mb-4">
                             <div>
                               <h4 className="font-semibold text-gray-900">
@@ -1781,7 +2046,8 @@ const ManagerRequisitionDetails: React.FC = () => {
                                   {item.skill_level || "Not specified"}
                                 </span>
                                 <span className="text-sm text-gray-500">
-                                  {item.experience_years || "—"} years experience
+                                  {item.experience_years || "—"} years
+                                  experience
                                 </span>
                                 <span className="text-sm text-gray-500">
                                   {item.education_requirement || "—"}
@@ -1801,7 +2067,9 @@ const ManagerRequisitionDetails: React.FC = () => {
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                               <div>
-                                <span className="text-gray-500">Estimated:</span>{" "}
+                                <span className="text-gray-500">
+                                  Estimated:
+                                </span>{" "}
                                 <span className="font-medium text-gray-900">
                                   {item.estimated_budget != null
                                     ? `${item.currency || "INR"} ${item.estimated_budget.toLocaleString()}`
@@ -1865,7 +2133,10 @@ const ManagerRequisitionDetails: React.FC = () => {
                   formData && (
                     <div className="space-y-4">
                       {formData.items.map((item, index) => (
-                        <div key={index} className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                        <div
+                          key={index}
+                          className="border border-gray-200 rounded-lg p-4 bg-gray-50"
+                        >
                           <div className="flex items-center justify-between mb-4">
                             <h4 className="font-medium text-gray-900">
                               Position {index + 1}
@@ -1893,7 +2164,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                                   handleItemUpdate(
                                     index,
                                     "role_position",
-                                    e.target.value
+                                    e.target.value,
                                   )
                                 }
                                 placeholder="e.g., Senior Frontend Developer"
@@ -1910,7 +2181,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                                   handleItemUpdate(
                                     index,
                                     "skill_level",
-                                    e.target.value
+                                    e.target.value,
                                   )
                                 }
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
@@ -1935,7 +2206,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                                   handleItemUpdate(
                                     index,
                                     "experience_years",
-                                    parseInt(e.target.value) || 0
+                                    parseInt(e.target.value) || 0,
                                   )
                                 }
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
@@ -1952,7 +2223,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                                   handleItemUpdate(
                                     index,
                                     "education_requirement",
-                                    e.target.value
+                                    e.target.value,
                                   )
                                 }
                                 placeholder="e.g., B.Tech, MBA"
@@ -1972,7 +2243,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                                 handleItemUpdate(
                                   index,
                                   "job_description",
-                                  e.target.value
+                                  e.target.value,
                                 )
                               }
                               placeholder="Describe the role responsibilities..."
@@ -1991,7 +2262,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                                 handleItemUpdate(
                                   index,
                                   "requirements",
-                                  e.target.value
+                                  e.target.value,
                                 )
                               }
                               placeholder="Any specific certifications, skills, or requirements..."
@@ -2028,7 +2299,6 @@ const ManagerRequisitionDetails: React.FC = () => {
               <div className="p-6">
                 {!isEditing ? (
                   <div className="space-y-6">
-                    {/* Computed Budget Summary */}
                     <div className="bg-green-50 rounded-lg p-4 border border-green-200">
                       <div className="flex items-center gap-2 text-sm font-medium text-green-800 mb-4">
                         <DollarSign className="h-4 w-4" />
@@ -2042,7 +2312,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                           <div className="font-semibold text-gray-900">
                             {formatCurrency(
                               requisition.total_estimated_budget ??
-                                requisition.budget_amount
+                                requisition.budget_amount,
                             )}
                           </div>
                         </div>
@@ -2051,9 +2321,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                             Total Approved
                           </div>
                           <div className="font-semibold text-green-700">
-                            {formatCurrency(
-                              requisition.total_approved_budget
-                            )}
+                            {formatCurrency(requisition.total_approved_budget)}
                           </div>
                         </div>
                         <div>
@@ -2064,16 +2332,17 @@ const ManagerRequisitionDetails: React.FC = () => {
                             className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                               requisition.budget_approval_status === "approved"
                                 ? "bg-green-100 text-green-700"
-                                : requisition.budget_approval_status === "partial"
-                                ? "bg-amber-100 text-amber-700"
-                                : "bg-gray-100 text-gray-700"
+                                : requisition.budget_approval_status ===
+                                    "partial"
+                                  ? "bg-amber-100 text-amber-700"
+                                  : "bg-gray-100 text-gray-700"
                             }`}
                           >
                             {requisition.budget_approval_status === "approved"
                               ? "All Items Approved"
                               : requisition.budget_approval_status === "partial"
-                              ? "Partially Approved"
-                              : "Pending Approval"}
+                                ? "Partially Approved"
+                                : "Pending Approval"}
                           </span>
                         </div>
                       </div>
@@ -2084,7 +2353,8 @@ const ManagerRequisitionDetails: React.FC = () => {
                         Justification
                       </div>
                       <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
-                        {requisition.justification || "No justification provided"}
+                        {requisition.justification ||
+                          "No justification provided"}
                       </div>
                     </div>
 
@@ -2114,7 +2384,10 @@ const ManagerRequisitionDetails: React.FC = () => {
                               min="0"
                               value={formData.budget_amount}
                               onChange={(e) =>
-                                handleFieldChange("budget_amount", e.target.value)
+                                handleFieldChange(
+                                  "budget_amount",
+                                  e.target.value,
+                                )
                               }
                               placeholder="Enter amount"
                               className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
@@ -2130,7 +2403,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                             onChange={(e) =>
                               handleFieldChange(
                                 "is_replacement",
-                                e.target.value === "yes"
+                                e.target.value === "yes",
                               )
                             }
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
@@ -2176,18 +2449,19 @@ const ManagerRequisitionDetails: React.FC = () => {
               </div>
             </div>
           </div>
+        )}
 
-          {/* Right Column - Candidates, Timeline & Attachments */}
+        {/* ═══════════════ CANDIDATES TAB ═══════════════ */}
+        {activeTab === "candidates" && (
           <div className="space-y-6">
-            {/* Candidate Pipeline (read-only) */}
             <div className="bg-white rounded-xl border border-gray-200">
               <div className="p-6 border-b border-gray-200">
                 <h3 className="text-lg font-semibold text-gray-900">
                   Candidate Pipeline
                 </h3>
                 <p className="text-sm text-gray-500 mt-1">
-                  Read-only view of candidates linked to this requisition and their
-                  current stages.
+                  Read-only view of candidates linked to this requisition and
+                  their current stages.
                 </p>
               </div>
               <div className="p-6 space-y-4">
@@ -2259,7 +2533,8 @@ const ManagerRequisitionDetails: React.FC = () => {
                               ? candidates
                               : candidates.filter(
                                   (c) =>
-                                    c.requisition_item_id === candidateItemFilter,
+                                    c.requisition_item_id ===
+                                    candidateItemFilter,
                                 );
                           const count =
                             stage === "all"
@@ -2377,155 +2652,177 @@ const ManagerRequisitionDetails: React.FC = () => {
                 )}
               </div>
             </div>
-            {/* Job Description PDF */}
-            <div className="bg-white rounded-xl border border-gray-200">
-              <div className="p-6 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">
-                  Job Description
-                </h3>
-                <p className="text-sm text-gray-500 mt-1">
-                  Attached documents
-                </p>
-              </div>
-              <div className="p-6">
-                {requisition.jd_file_key ? (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div className="flex items-center gap-3">
-                        <FileText className="h-5 w-5 text-gray-600" />
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            Job Description.pdf
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            Uploaded with requisition
-                          </div>
-                        </div>
-                      </div>
-                      <button
-                        onClick={handleDownloadJD}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
-                      >
-                        <Download className="h-4 w-4" />
-                        Download
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center py-8">
-                    <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-500">No job description uploaded</p>
-                  </div>
-                )}
+          </div>
+        )}
 
-                {canEdit && (
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <input
-                      key={jdInputKey}
-                      type="file"
-                      accept="application/pdf"
-                      onChange={handleJdFileChange}
-                      disabled={isUploadingJd || isRemovingJd}
-                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                    />
-                    {jdError && (
-                      <div className="mt-2 text-sm text-red-600">{jdError}</div>
-                    )}
-                    <div className="flex gap-2 mt-4">
-                      <button
-                        onClick={handleUploadJD}
-                        disabled={!jdFile || isUploadingJd || isRemovingJd}
-                        className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                      >
-                        {isUploadingJd
-                          ? "Uploading..."
-                          : requisition.jd_file_key
-                          ? "Replace JD"
-                          : "Upload JD"}
-                      </button>
-                      {requisition.jd_file_key && (
-                        <button
-                          onClick={handleRemoveJD}
-                          disabled={isRemovingJd || isUploadingJd}
-                          className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 disabled:opacity-50 transition-colors"
-                        >
-                          {isRemovingJd ? "Removing..." : "Remove"}
-                        </button>
-                      )}
-                    </div>
-                    <p className="mt-2 text-xs text-gray-500">PDF only. Max 10MB.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Master Activity Timeline */}
-            <div className="bg-white rounded-xl border border-gray-200">
-              <div className="p-6 border-b border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900">
-                  Master Activity Timeline
-                </h3>
-                <p className="text-sm text-gray-500 mt-1">
-                  Creation, budget, authorization, assignment and recruitment events
-                </p>
-              </div>
-              <div className="p-6">
-                {masterTimeline.length === 0 ? (
-                  <div className="text-center py-8">
-                    <History className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-500">No activity history available</p>
-                  </div>
-                ) : (
-                  <MasterTimeline events={masterTimeline} />
-                )}
-              </div>
-            </div>
-
-            {/* Approval Information */}
-            {(requisition.budget_approved_at || requisition.hr_approved_at) && (
+        {/* ═══════════════ TIMELINE & HISTORY TAB ═══════════════ */}
+        {activeTab === "timeline" && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Main content — Timeline */}
+            <div className="lg:col-span-2 space-y-6">
               <div className="bg-white rounded-xl border border-gray-200">
                 <div className="p-6 border-b border-gray-200">
                   <h3 className="text-lg font-semibold text-gray-900">
-                    Approval Details
+                    Master Activity Timeline
                   </h3>
                   <p className="text-sm text-gray-500 mt-1">
-                    Review and approval information
+                    Creation, budget, authorization, assignment and recruitment
+                    events
                   </p>
                 </div>
-                <div className="p-6 space-y-4">
-                  {requisition.budget_approved_at && (
-                    <div className="flex items-start gap-3 p-3 bg-green-50 rounded-lg">
-                      <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
-                      <div>
-                        <div className="font-medium text-gray-900">
-                          Budget Approved
+                <div className="p-6">
+                  {masterTimeline.length === 0 ? (
+                    <div className="text-center py-8">
+                      <History className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <p className="text-gray-500">
+                        No activity history available
+                      </p>
+                    </div>
+                  ) : (
+                    <MasterTimeline events={masterTimeline} />
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Sidebar — JD + Approvals */}
+            <div className="space-y-6">
+              {/* Job Description PDF */}
+              <div className="bg-white rounded-xl border border-gray-200">
+                <div className="p-6 border-b border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Job Description
+                  </h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Attached documents
+                  </p>
+                </div>
+                <div className="p-6">
+                  {requisition.jd_file_key ? (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <FileText className="h-5 w-5 text-gray-600" />
+                          <div>
+                            <div className="text-sm font-medium text-gray-900">
+                              Job Description.pdf
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              Uploaded with requisition
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-sm text-gray-600">
-                          Approved on: {" "}
-                          {formatDateTime(requisition.budget_approved_at)}
-                        </div>
+                        <button
+                          onClick={handleDownloadJD}
+                          className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
+                        >
+                          <Download className="h-4 w-4" />
+                          Download
+                        </button>
                       </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <p className="text-gray-500">
+                        No job description uploaded
+                      </p>
                     </div>
                   )}
 
-                  {requisition.hr_approved_at && (
-                    <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg">
-                      <CheckCircle className="h-5 w-5 text-blue-600 mt-0.5" />
-                      <div>
-                        <div className="font-medium text-gray-900">
-                          HR Approved
+                  {canEdit && (
+                    <div className="mt-6 pt-6 border-t border-gray-200">
+                      <input
+                        key={jdInputKey}
+                        type="file"
+                        accept="application/pdf"
+                        onChange={handleJdFileChange}
+                        disabled={isUploadingJd || isRemovingJd}
+                        className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                      />
+                      {jdError && (
+                        <div className="mt-2 text-sm text-red-600">
+                          {jdError}
                         </div>
-                        <div className="text-sm text-gray-600">
-                          Approved on: {formatDateTime(requisition.hr_approved_at)}
-                        </div>
+                      )}
+                      <div className="flex gap-2 mt-4">
+                        <button
+                          onClick={handleUploadJD}
+                          disabled={!jdFile || isUploadingJd || isRemovingJd}
+                          className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                        >
+                          {isUploadingJd
+                            ? "Uploading..."
+                            : requisition.jd_file_key
+                              ? "Replace JD"
+                              : "Upload JD"}
+                        </button>
+                        {requisition.jd_file_key && (
+                          <button
+                            onClick={handleRemoveJD}
+                            disabled={isRemovingJd || isUploadingJd}
+                            className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-red-100 text-red-700 text-sm rounded-lg hover:bg-red-200 disabled:opacity-50 transition-colors"
+                          >
+                            {isRemovingJd ? "Removing..." : "Remove"}
+                          </button>
+                        )}
                       </div>
+                      <p className="mt-2 text-xs text-gray-500">
+                        PDF only. Max 10MB.
+                      </p>
                     </div>
                   )}
                 </div>
               </div>
-            )}
+
+              {/* Approval Information */}
+              {(requisition.budget_approved_at ||
+                requisition.hr_approved_at) && (
+                <div className="bg-white rounded-xl border border-gray-200">
+                  <div className="p-6 border-b border-gray-200">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Approval Details
+                    </h3>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Review and approval information
+                    </p>
+                  </div>
+                  <div className="p-6 space-y-4">
+                    {requisition.budget_approved_at && (
+                      <div className="flex items-start gap-3 p-3 bg-green-50 rounded-lg">
+                        <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
+                        <div>
+                          <div className="font-medium text-gray-900">
+                            Budget Approved
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            Approved on:{" "}
+                            {formatDateTime(requisition.budget_approved_at)}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {requisition.hr_approved_at && (
+                      <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg">
+                        <CheckCircle className="h-5 w-5 text-blue-600 mt-0.5" />
+                        <div>
+                          <div className="font-medium text-gray-900">
+                            HR Approved
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            Approved on:{" "}
+                            {formatDateTime(requisition.hr_approved_at)}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Candidate Detail Modal (read-only actions for Manager) */}

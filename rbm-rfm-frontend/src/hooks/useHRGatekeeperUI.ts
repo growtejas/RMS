@@ -237,22 +237,30 @@ export function useHRGatekeeperUI(
   }, []);
 
   const validateItem = useCallback((itemId: number): boolean => {
-    const edit = itemEdits[itemId];
-    if (!edit) return false;
-
-    const validation = validateBudget(edit.estimated_budget);
+    let isValid = false;
     
-    setItemEdits((prev) => ({
-      ...prev,
-      [itemId]: {
-        ...prev[itemId],
-        isValid: validation.isValid,
-        error: validation.error,
-      },
-    }));
+    setItemEdits((prev) => {
+      const edit = prev[itemId];
+      if (!edit) {
+        isValid = false;
+        return prev;
+      }
 
-    return validation.isValid;
-  }, [itemEdits]);
+      const validation = validateBudget(edit.estimated_budget);
+      isValid = validation.isValid;
+      
+      return {
+        ...prev,
+        [itemId]: {
+          ...edit,
+          isValid: validation.isValid,
+          error: validation.error,
+        },
+      };
+    });
+
+    return isValid;
+  }, []);
 
   const validateAll = useCallback((): boolean => {
     let allValid = true;
@@ -418,7 +426,7 @@ export function useHRGatekeeperUI(
       validateAll,
       resetItemEdit,
       resetAllEdits,
-      setSubmitting,
+      setSubmitting: setIsSubmitting,
       setGlobalError,
       setGlobalMessage,
       initializeFromRequisition,

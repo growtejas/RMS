@@ -50,7 +50,7 @@ interface WizardStep {
 interface ResourcePosition {
   id: string;
   roleTitle: string;
-  primarySkill: string;
+  primarySkills: string[];
   secondarySkills: string[];
   yearsOfExperience: number;
   quantity: number;
@@ -494,7 +494,7 @@ const App: React.FC = () => {
       requisitionData.positions.every(
         (pos) =>
           pos.roleTitle.trim() !== "" &&
-          pos.primarySkill.trim() !== "" &&
+          pos.primarySkills.length > 0 &&
           pos.yearsOfExperience > 0 &&
           pos.quantity > 0 &&
           // Budget validation: estimated_budget must be > 0
@@ -676,7 +676,7 @@ const App: React.FC = () => {
     const newPosition: ResourcePosition = {
       id: `pos_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       roleTitle: "",
-      primarySkill: "",
+      primarySkills: [],
       secondarySkills: [],
       yearsOfExperience: 3,
       quantity: 1,
@@ -719,18 +719,38 @@ const App: React.FC = () => {
     skill: string,
     type: "primary" | "secondary",
   ) => {
+    const position = requisitionData.positions.find(
+      (pos) => pos.id === positionId,
+    );
+    if (!position) return;
+
     if (type === "primary") {
-      updatePosition(positionId, "primarySkill", skill);
+      if (!position.primarySkills.includes(skill)) {
+        updatePosition(positionId, "primarySkills", [
+          ...position.primarySkills,
+          skill,
+        ]);
+      }
     } else {
-      const position = requisitionData.positions.find(
-        (pos) => pos.id === positionId,
-      );
-      if (position && !position.secondarySkills.includes(skill)) {
+      if (!position.secondarySkills.includes(skill)) {
         updatePosition(positionId, "secondarySkills", [
           ...position.secondarySkills,
           skill,
         ]);
       }
+    }
+  };
+
+  const removePrimarySkill = (positionId: string, skill: string) => {
+    const position = requisitionData.positions.find(
+      (pos) => pos.id === positionId,
+    );
+    if (position) {
+      updatePosition(
+        positionId,
+        "primarySkills",
+        position.primarySkills.filter((s) => s !== skill),
+      );
     }
   };
 
@@ -1069,20 +1089,22 @@ const App: React.FC = () => {
                         />
                       </div>
 
-                      <div>
+                      <div className="md:col-span-2">
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Primary Skill <span className="text-red-500">*</span>
+                          Primary Skills <span className="text-red-500">*</span>
                         </label>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 mb-2">
                           <select
-                            value={position.primarySkill}
-                            onChange={(e) =>
-                              addSkillToPosition(
-                                position.id,
-                                e.target.value,
-                                "primary",
-                              )
-                            }
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                addSkillToPosition(
+                                  position.id,
+                                  e.target.value,
+                                  "primary",
+                                );
+                                e.target.value = "";
+                              }
+                            }}
                             className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           >
                             <option value="">Select primary skill</option>
@@ -1121,6 +1143,25 @@ const App: React.FC = () => {
                           >
                             <Plus size={16} />
                           </button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {position.primarySkills.map((skill) => (
+                            <span
+                              key={skill}
+                              className="inline-flex items-center gap-1 px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm font-medium"
+                            >
+                              {skill}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  removePrimarySkill(position.id, skill)
+                                }
+                                className="hover:text-indigo-900"
+                              >
+                                <X size={14} />
+                              </button>
+                            </span>
+                          ))}
                         </div>
                       </div>
 
@@ -1452,7 +1493,7 @@ const App: React.FC = () => {
                               <td className="px-4 py-2">
                                 <span className="font-medium">{pos.roleTitle || `Position ${idx + 1}`}</span>
                                 <span className="text-gray-500 text-xs ml-2">
-                                  ({pos.primarySkill || "No skill"})
+                                  ({pos.primarySkills.length > 0 ? pos.primarySkills.join(", ") : "No skills"})
                                 </span>
                               </td>
                               <td className="px-4 py-2 text-center">{pos.quantity}</td>

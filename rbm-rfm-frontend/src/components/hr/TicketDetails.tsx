@@ -30,6 +30,7 @@ import {
   DollarSign,
   UserCog,
   ArrowRightLeft,
+  RefreshCw,
 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
 import { apiClient } from "../../api/client";
@@ -44,6 +45,7 @@ import {
   fetchCandidates,
   createCandidate,
   uploadResume,
+  getCandidateActionErrorMessage,
   type Candidate,
 } from "../../api/candidateApi";
 import CandidateDetailModal from "../shared/CandidateDetailModal";
@@ -68,6 +70,11 @@ interface RequisitionItem {
   assignedTAId?: number | null;
   description: string;
   requirements?: string;
+  replacementHire?: boolean;
+  replacedEmpId?: string | null;
+  estimatedBudget?: number | null;
+  approvedBudget?: number | null;
+  currency?: string;
 }
 
 interface TimelineEvent {
@@ -124,6 +131,11 @@ interface BackendRequisitionItem {
   requirements?: string | null;
   item_status: string;
   assigned_ta?: number | null;
+  replacement_hire?: boolean;
+  replaced_emp_id?: string | null;
+  estimated_budget?: number | null;
+  approved_budget?: number | null;
+  currency?: string | null;
 }
 
 interface BackendRequisition {
@@ -248,8 +260,9 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
   const [addingCandidate, setAddingCandidate] = useState(false);
   const [candidateStageFilter, setCandidateStageFilter] =
     useState<string>("all");
-  const [candidateItemFilter, setCandidateItemFilter] =
-    useState<number | "all">("all");
+  const [candidateItemFilter, setCandidateItemFilter] = useState<
+    number | "all"
+  >("all");
   const [candidateError, setCandidateError] = useState<string | null>(null);
 
   // ---- Phase 7: TA Reassignment state ----
@@ -325,6 +338,11 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
           assignedTAId: item.assigned_ta ?? null,
           description: item.job_description,
           requirements: item.requirements ?? undefined,
+          replacementHire: item.replacement_hire ?? false,
+          replacedEmpId: item.replaced_emp_id ?? null,
+          estimatedBudget: item.estimated_budget ?? null,
+          approvedBudget: item.approved_budget ?? null,
+          currency: item.currency ?? "INR",
         })) ?? [],
       timeline: [],
       notes: [],
@@ -346,6 +364,22 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
     if (!requirements) return null;
     const match = requirements.match(/Primary Skill:\s*([^|]+)/i);
     return match?.[1]?.trim() ?? null;
+  };
+
+  const formatItemBudget = (
+    amount: number | null | undefined,
+    currency: string = "INR",
+  ) => {
+    if (amount == null || amount === 0) return "—";
+    try {
+      return new Intl.NumberFormat("en-IN", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 0,
+      }).format(amount);
+    } catch {
+      return `${currency} ${amount.toLocaleString()}`;
+    }
   };
 
   const getInitials = (name?: string) => {
@@ -1310,9 +1344,9 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                       }}
                     >
                       <span style={{ color: "var(--text-secondary)" }}>
-                        Project Manager:
+                        Raised By:
                       </span>
-                      <span>{ticket.projectManager}</span>
+                      <span>{resolveUserName(ticket.raisedById)}</span>
                     </div>
                   </div>
                 </div>
@@ -1377,7 +1411,19 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                       <span style={{ color: "var(--text-secondary)" }}>
                         Budget:
                       </span>
-                      <span style={{ fontWeight: 500 }}>{ticket.budget}</span>
+                      <span style={{ fontWeight: 500 }}>
+                        {formatItemBudget(
+                          ticket.items.reduce(
+                            (sum, item) =>
+                              sum +
+                              (item.approvedBudget ??
+                                item.estimatedBudget ??
+                                0),
+                            0
+                          ),
+                          ticket.items[0]?.currency ?? "INR"
+                        )}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -1716,45 +1762,333 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                         <strong style={{ fontSize: "15px" }}>
                           {item.skill} ({item.level})
                         </strong>
+                        {/* Replacement badge */}
+                        {item.replacementHire && (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              padding: "2px 8px",
+                              borderRadius: "6px",
+                              backgroundColor: "rgba(245, 158, 11, 0.1)",
+                              color: "var(--warning)",
+                              fontSize: "11px",
+                              fontWeight: 600,
+                            }}
+                          >
+                            <RefreshCw size={10} />
+                            Replacement
+                          </span>
+                        )}
                       </div>
+
+                      {/* Skills */}
                       <div
                         style={{
                           display: "flex",
-                          gap: "16px",
-                          fontSize: "12px",
-                          color: "var(--text-tertiary)",
+                          flexDirection: "column",
+                          gap: "6px",
+                          marginBottom: "8px",
                         }}
                       >
-                        <span>📊 {item.experience} years exp</span>
-                        <span>🎓 {item.education}</span>
-                        <span>
-                          {item.assignedEmployeeName
-                            ? `👤 Assigned: ${item.assignedEmployeeName}`
-                            : "👤 Unassigned"}
-                        </span>
-                        {/* TA Badge */}
-                        <span
+                        <div
                           style={{
-                            display: "inline-flex",
+                            display: "flex",
                             alignItems: "center",
-                            gap: "4px",
-                            padding: "2px 8px",
-                            borderRadius: "6px",
-                            backgroundColor: item.assignedTAId
-                              ? "rgba(59, 130, 246, 0.08)"
-                              : "rgba(245, 158, 11, 0.08)",
-                            color: item.assignedTAId
-                              ? "var(--primary-accent)"
-                              : "var(--warning)",
-                            fontSize: "11px",
-                            fontWeight: 500,
+                            gap: "6px",
+                            flexWrap: "wrap",
                           }}
                         >
-                          <UserCog size={10} />
-                          {item.assignedTAId
-                            ? `TA: ${usersById[item.assignedTAId] ?? `#${item.assignedTAId}`}`
-                            : "No TA Assigned"}
-                        </span>
+                          <span
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 600,
+                              color: "var(--text-tertiary)",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.03em",
+                            }}
+                          >
+                            Primary:
+                          </span>
+                          <span
+                            style={{
+                              padding: "3px 10px",
+                              borderRadius: "6px",
+                              backgroundColor: "rgba(99, 102, 241, 0.1)",
+                              color: "var(--primary-accent)",
+                              fontWeight: 600,
+                              fontSize: "12px",
+                            }}
+                          >
+                            {primarySkill}
+                          </span>
+                        </div>
+                        {secondarySkills.length > 0 && (
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                color: "var(--text-tertiary)",
+                                textTransform: "uppercase",
+                                letterSpacing: "0.03em",
+                              }}
+                            >
+                              Secondary:
+                            </span>
+                            {secondarySkills.map((skill) => (
+                              <span
+                                key={skill}
+                                style={{
+                                  padding: "3px 10px",
+                                  borderRadius: "6px",
+                                  backgroundColor: "var(--bg-tertiary)",
+                                  border: "1px solid var(--border-subtle)",
+                                  fontSize: "12px",
+                                  color: "var(--text-secondary)",
+                                  fontWeight: 500,
+                                }}
+                              >
+                                {skill}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns:
+                            "repeat(auto-fill, minmax(150px, 1fr))",
+                          gap: "12px",
+                          marginTop: "4px",
+                        }}
+                      >
+                        <div>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 500,
+                              color: "var(--text-tertiary)",
+                              marginBottom: "2px",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.03em",
+                            }}
+                          >
+                            Experience
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "13px",
+                              color: "var(--text-primary)",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {item.experience} years
+                          </div>
+                        </div>
+                        <div>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 500,
+                              color: "var(--text-tertiary)",
+                              marginBottom: "2px",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.03em",
+                            }}
+                          >
+                            Education
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "13px",
+                              color: "var(--text-primary)",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {item.education}
+                          </div>
+                        </div>
+                        <div>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 500,
+                              color: "var(--text-tertiary)",
+                              marginBottom: "2px",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.03em",
+                            }}
+                          >
+                            Assigned To
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "13px",
+                              color: item.assignedEmployeeName
+                                ? "var(--text-primary)"
+                                : "var(--text-tertiary)",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {item.assignedEmployeeName || "Unassigned"}
+                          </div>
+                        </div>
+                        <div>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 500,
+                              color: "var(--text-tertiary)",
+                              marginBottom: "2px",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.03em",
+                            }}
+                          >
+                            TA Assignment
+                          </div>
+                          <div
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              padding: "2px 8px",
+                              borderRadius: "6px",
+                              backgroundColor: item.assignedTAId
+                                ? "rgba(59, 130, 246, 0.08)"
+                                : "rgba(245, 158, 11, 0.08)",
+                              color: item.assignedTAId
+                                ? "var(--primary-accent)"
+                                : "var(--warning)",
+                              fontSize: "12px",
+                              fontWeight: 500,
+                            }}
+                          >
+                            <UserCog size={11} />
+                            {item.assignedTAId
+                              ? `${usersById[item.assignedTAId] ?? `#${item.assignedTAId}`}`
+                              : "Not Assigned"}
+                          </div>
+                        </div>
+                        <div>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 500,
+                              color: "var(--text-tertiary)",
+                              marginBottom: "2px",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.03em",
+                            }}
+                          >
+                            Type
+                          </div>
+                          <div
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              fontSize: "13px",
+                              fontWeight: 500,
+                              color: item.replacementHire
+                                ? "var(--warning)"
+                                : "var(--success)",
+                            }}
+                          >
+                            {item.replacementHire ? (
+                              <>
+                                <RefreshCw size={11} />
+                                Replacement
+                                {item.replacedEmpId && (
+                                  <span
+                                    style={{
+                                      color: "var(--text-tertiary)",
+                                      fontSize: "11px",
+                                      fontWeight: 400,
+                                    }}
+                                  >
+                                    ({item.replacedEmpId})
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              "New Hire"
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 500,
+                              color: "var(--text-tertiary)",
+                              marginBottom: "2px",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.03em",
+                            }}
+                          >
+                            Est. Budget
+                          </div>
+                          <div
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              fontSize: "13px",
+                              color: "var(--text-primary)",
+                              fontWeight: 500,
+                            }}
+                          >
+                            <DollarSign size={12} />
+                            {formatItemBudget(
+                              item.estimatedBudget,
+                              item.currency,
+                            )}
+                          </div>
+                        </div>
+                        {item.approvedBudget != null &&
+                          item.approvedBudget > 0 && (
+                            <div>
+                              <div
+                                style={{
+                                  fontSize: "11px",
+                                  fontWeight: 500,
+                                  color: "var(--text-tertiary)",
+                                  marginBottom: "2px",
+                                  textTransform: "uppercase",
+                                  letterSpacing: "0.03em",
+                                }}
+                              >
+                                Approved Budget
+                              </div>
+                              <div
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                  fontSize: "13px",
+                                  color: "var(--success)",
+                                  fontWeight: 500,
+                                }}
+                              >
+                                <DollarSign size={12} />
+                                {formatItemBudget(
+                                  item.approvedBudget,
+                                  item.currency,
+                                )}
+                              </div>
+                            </div>
+                          )}
                       </div>
                     </div>
 
@@ -1844,20 +2178,17 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                       <button
                         className="action-button"
                         style={{
-                          width: "32px",
-                          height: "32px",
-                          padding: "0",
+                          fontSize: "12px",
+                          padding: "8px 12px",
                           display: "flex",
                           alignItems: "center",
-                          justifyContent: "center",
+                          gap: "6px",
                         }}
                         onClick={() => toggleItemExpansion(item.id)}
+                        title="View Job Description"
                       >
-                        {isExpanded ? (
-                          <ChevronUp size={14} />
-                        ) : (
-                          <ChevronDown size={14} />
-                        )}
+                        <FileText size={12} />
+                        {isExpanded ? "Hide JD" : "View JD"}
                       </button>
                     </div>
                   </div>
@@ -1870,6 +2201,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                         borderTop: "1px solid var(--border-subtle)",
                       }}
                     >
+                      {/* Job Description */}
                       <div
                         style={{
                           padding: "16px",
@@ -1881,81 +2213,25 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                       >
                         <div
                           style={{
-                            fontSize: "13px",
+                            fontSize: "11px",
                             fontWeight: 600,
-                            marginBottom: "10px",
+                            color: "var(--text-tertiary)",
+                            marginBottom: "8px",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.04em",
                           }}
                         >
-                          Skill Profile
+                          Job Description
                         </div>
                         <div
                           style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "8px",
-                            fontSize: "12px",
+                            fontSize: "13px",
+                            color: "var(--text-secondary)",
+                            lineHeight: 1.6,
                           }}
                         >
-                          <div>
-                            <span
-                              className="priority-indicator priority-high"
-                              style={{ marginRight: "8px" }}
-                            >
-                              {item.skill}
-                            </span>
-                            <span style={{ color: "var(--text-tertiary)" }}>
-                              Level: {item.level} • Experience:{" "}
-                              {item.experience} yrs
-                            </span>
-                          </div>
-                          <div>
-                            <span style={{ color: "var(--text-tertiary)" }}>
-                              Secondary Skills
-                            </span>
-                            <div
-                              style={{
-                                display: "flex",
-                                flexWrap: "wrap",
-                                gap: "8px",
-                                marginTop: "6px",
-                              }}
-                            >
-                              {secondarySkills.length > 0 ? (
-                                secondarySkills.map((skill) => (
-                                  <span
-                                    key={skill}
-                                    className="filter-chip"
-                                    style={{ padding: "6px 10px" }}
-                                  >
-                                    {skill}
-                                  </span>
-                                ))
-                              ) : (
-                                <span style={{ color: "var(--text-tertiary)" }}>
-                                  No secondary skills specified.
-                                </span>
-                              )}
-                            </div>
-                            <div
-                              style={{
-                                marginTop: "6px",
-                                color: "var(--text-tertiary)",
-                              }}
-                            >
-                              Level: {item.level} • Experience:{" "}
-                              {item.experience} yrs
-                            </div>
-                          </div>
+                          {item.description || "No description provided."}
                         </div>
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "13px",
-                          color: "var(--text-secondary)",
-                          marginBottom: "12px",
-                        }}
-                      >
-                        {item.description}
                       </div>
 
                       {selectedItemForAssignment === item.id && (
@@ -2146,12 +2422,12 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                 style={{ display: "flex", alignItems: "center", gap: "6px" }}
                 onClick={() => {
                   const editableItem = ticket.items.find((it) =>
-                    canEditItemForAddCandidate(it)
+                    canEditItemForAddCandidate(it),
                   );
                   setAddCandidateItemId(
                     editableItem?.numericItemId ??
                       ticket.items[0]?.numericItemId ??
-                      null
+                      null,
                   );
                   setShowAddCandidate(true);
                 }}
@@ -2190,10 +2466,12 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                 Filter by Position:
               </label>
               <select
-                value={candidateItemFilter === "all" ? "all" : candidateItemFilter}
+                value={
+                  candidateItemFilter === "all" ? "all" : candidateItemFilter
+                }
                 onChange={(e) =>
                   setCandidateItemFilter(
-                    e.target.value === "all" ? "all" : Number(e.target.value)
+                    e.target.value === "all" ? "all" : Number(e.target.value),
                   )
                 }
                 style={{
@@ -2210,7 +2488,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                 <option value="all">All Positions</option>
                 {ticket.items.map((item) => {
                   const itemCandidateCount = candidates.filter(
-                    (c) => c.requisition_item_id === item.numericItemId
+                    (c) => c.requisition_item_id === item.numericItemId,
                   ).length;
                   return (
                     <option key={item.numericItemId} value={item.numericItemId}>
@@ -2242,7 +2520,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                   candidateItemFilter === "all"
                     ? candidates
                     : candidates.filter(
-                        (c) => c.requisition_item_id === candidateItemFilter
+                        (c) => c.requisition_item_id === candidateItemFilter,
                       );
                 const count =
                   stage === "all"
@@ -2550,8 +2828,11 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                     Hired: { bg: "rgba(16,185,129,0.1)", text: "#10b981" },
                     Rejected: { bg: "rgba(239,68,68,0.1)", text: "#ef4444" },
                   };
-                  const sc =
-                    stageColors[c.current_stage] ?? stageColors.Sourced;
+                  const defaultStageColor = {
+                    bg: "rgba(100,116,139,0.1)",
+                    text: "#64748b",
+                  };
+                  const sc = stageColors[c.current_stage] ?? defaultStageColor;
 
                   return (
                     <div

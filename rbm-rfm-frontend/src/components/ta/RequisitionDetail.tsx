@@ -34,6 +34,8 @@ import {
   UserCheck,
   Phone,
   Gift,
+  DollarSign,
+  RefreshCw,
 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
 import { apiClient } from "../../api/client";
@@ -86,6 +88,12 @@ interface RequisitionItem {
   cvFileUrl?: string;
   cvFileName?: string;
   assignedTAId?: number | null; // Phase 7: Item-level TA assignment
+  requirements?: string;
+  replacementHire?: boolean;
+  replacedEmpId?: string | null;
+  estimatedBudget?: number | null;
+  approvedBudget?: number | null;
+  currency?: string;
 }
 
 // Phase 4: Item status milestone order for visual tracking
@@ -167,6 +175,11 @@ interface BackendRequisitionItem {
   requirements?: string | null;
   item_status: string;
   assigned_ta?: number | null; // Phase 7: Item-level TA assignment
+  replacement_hire?: boolean;
+  replaced_emp_id?: string | null;
+  estimated_budget?: number | null;
+  approved_budget?: number | null;
+  currency?: string | null;
 }
 
 interface BackendRequisition {
@@ -316,8 +329,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [addingCandidate, setAddingCandidate] = useState(false);
   const [candidateStageFilter, setCandidateStageFilter] =
     useState<string>("all");
-  const [candidateItemFilter, setCandidateItemFilter] =
-    useState<number | "all">("all");
+  const [candidateItemFilter, setCandidateItemFilter] = useState<
+    number | "all"
+  >("all");
 
   const parseReqId = (value?: string | null) => {
     if (!value) return null;
@@ -437,10 +451,49 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
           itemStatus: item.item_status,
           description: item.job_description,
           assignedTAId: item.assigned_ta ?? null, // Phase 7: Item-level TA
+          requirements: item.requirements ?? undefined,
+          replacementHire: item.replacement_hire ?? false,
+          replacedEmpId: item.replaced_emp_id ?? null,
+          estimatedBudget: item.estimated_budget ?? null,
+          approvedBudget: item.approved_budget ?? null,
+          currency: item.currency ?? "INR",
         })) ?? [],
       timeline: [],
       notes: [],
     };
+  };
+
+  const parseSecondarySkills = (requirements?: string) => {
+    if (!requirements) return [] as string[];
+    const match = requirements.match(/Secondary Skills:\s*([^|]+)/i);
+    const matched = match?.[1];
+    if (!matched) return [] as string[];
+    return matched
+      .split(",")
+      .map((skill) => skill.trim())
+      .filter(Boolean);
+  };
+
+  const parsePrimarySkill = (requirements?: string) => {
+    if (!requirements) return null;
+    const match = requirements.match(/Primary Skill:\s*([^|]+)/i);
+    return match?.[1]?.trim() ?? null;
+  };
+
+  const formatItemBudget = (
+    amount: number | null | undefined,
+    currency: string = "INR",
+  ) => {
+    if (amount == null || amount === 0) return "—";
+    try {
+      return new Intl.NumberFormat("en-IN", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 0,
+      }).format(amount);
+    } catch {
+      return `${currency} ${amount.toLocaleString()}`;
+    }
   };
 
   useEffect(() => {
@@ -1449,7 +1502,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                       <span style={{ color: "var(--text-secondary)" }}>
                         Project Manager:
                       </span>
-                      <span>{ticket.projectManager}</span>
+                      <span>{resolveUserName(ticket.raisedById)}</span>
                     </div>
                   </div>
                 </div>
@@ -1817,6 +1870,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
           >
             {ticket.items.map((item) => {
               const isExpanded = expandedItems.includes(item.id);
+              const primarySkill =
+                parsePrimarySkill(item.requirements) ?? item.skill;
+              const secondarySkills = parseSecondarySkills(item.requirements);
               const itemCandidates = candidates.filter(
                 (c) => c.requisition_item_id === item.numericItemId,
               );
@@ -1877,104 +1933,323 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                         <strong style={{ fontSize: "15px" }}>
                           {item.skill} ({item.level})
                         </strong>
-                      </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "16px",
-                          fontSize: "12px",
-                          color: "var(--text-tertiary)",
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <span>📊 {item.experience} years exp</span>
-                        <span>🎓 {item.education}</span>
-                        <span>
-                          {item.assignedEmployeeName
-                            ? `👤 Assigned: ${item.assignedEmployeeName}`
-                            : "👤 Unassigned"}
-                        </span>
-                        {item.cvFileName && (
-                          <span style={{ color: "var(--success)" }}>
-                            📄 CV: {item.cvFileName}
+                        {/* Replacement badge */}
+                        {item.replacementHire && (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              padding: "2px 8px",
+                              borderRadius: "6px",
+                              backgroundColor: "rgba(245, 158, 11, 0.1)",
+                              color: "var(--warning)",
+                              fontSize: "11px",
+                              fontWeight: 600,
+                            }}
+                          >
+                            <RefreshCw size={10} />
+                            Replacement
                           </span>
                         )}
                       </div>
 
-                      {/* Phase 4: Milestone Tracker */}
-                      {item.itemStatus !== "Cancelled" && (
-                        <div style={{ marginTop: "12px" }}>
-                          <div
+                      {/* Skills */}
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "6px",
+                          marginBottom: "8px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <span
                             style={{
                               fontSize: "11px",
+                              fontWeight: 600,
                               color: "var(--text-tertiary)",
-                              marginBottom: "6px",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.03em",
                             }}
                           >
-                            Milestone Progress
-                          </div>
+                            Primary:
+                          </span>
+                          <span
+                            style={{
+                              padding: "3px 10px",
+                              borderRadius: "6px",
+                              backgroundColor: "rgba(99, 102, 241, 0.1)",
+                              color: "var(--primary-accent)",
+                              fontWeight: 600,
+                              fontSize: "12px",
+                            }}
+                          >
+                            {primarySkill}
+                          </span>
+                        </div>
+                        {secondarySkills.length > 0 && (
                           <div
                             style={{
                               display: "flex",
                               alignItems: "center",
-                              gap: "4px",
+                              gap: "6px",
+                              flexWrap: "wrap",
                             }}
                           >
-                            {ITEM_MILESTONE_ORDER.map((milestone, idx) => {
-                              const currentIdx = getItemMilestoneIndex(
-                                item.itemStatus,
-                              );
-                              const isComplete = idx < currentIdx;
-                              const isCurrent = idx === currentIdx;
-                              return (
-                                <React.Fragment key={milestone}>
-                                  <div
-                                    style={{
-                                      width: "24px",
-                                      height: "24px",
-                                      borderRadius: "50%",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      fontSize: "10px",
-                                      fontWeight: 600,
-                                      backgroundColor: isComplete
-                                        ? "var(--success)"
-                                        : isCurrent
-                                          ? "var(--primary-accent)"
-                                          : "var(--border-subtle)",
-                                      color:
-                                        isComplete || isCurrent
-                                          ? "white"
-                                          : "var(--text-tertiary)",
-                                      transition: "all 0.2s ease",
-                                    }}
-                                    title={ITEM_STATUS_LABELS[milestone]}
-                                  >
-                                    {isComplete ? (
-                                      <CheckCircle size={12} />
-                                    ) : (
-                                      idx + 1
-                                    )}
-                                  </div>
-                                  {idx < ITEM_MILESTONE_ORDER.length - 1 && (
-                                    <div
-                                      style={{
-                                        flex: 1,
-                                        height: "2px",
-                                        backgroundColor: isComplete
-                                          ? "var(--success)"
-                                          : "var(--border-subtle)",
-                                        maxWidth: "20px",
-                                      }}
-                                    />
-                                  )}
-                                </React.Fragment>
-                              );
-                            })}
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                color: "var(--text-tertiary)",
+                                textTransform: "uppercase",
+                                letterSpacing: "0.03em",
+                              }}
+                            >
+                              Secondary:
+                            </span>
+                            {secondarySkills.map((skill) => (
+                              <span
+                                key={skill}
+                                style={{
+                                  padding: "3px 10px",
+                                  borderRadius: "6px",
+                                  backgroundColor: "var(--bg-tertiary)",
+                                  border: "1px solid var(--border-subtle)",
+                                  fontSize: "12px",
+                                  color: "var(--text-secondary)",
+                                  fontWeight: 500,
+                                }}
+                              >
+                                {skill}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns:
+                            "repeat(auto-fill, minmax(160px, 1fr))",
+                          gap: "12px",
+                          marginTop: "4px",
+                        }}
+                      >
+                        <div>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 500,
+                              color: "var(--text-tertiary)",
+                              marginBottom: "2px",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.03em",
+                            }}
+                          >
+                            Experience
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "13px",
+                              color: "var(--text-primary)",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {item.experience} years
                           </div>
                         </div>
-                      )}
+                        <div>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 500,
+                              color: "var(--text-tertiary)",
+                              marginBottom: "2px",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.03em",
+                            }}
+                          >
+                            Education
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "13px",
+                              color: "var(--text-primary)",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {item.education}
+                          </div>
+                        </div>
+                        <div>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 500,
+                              color: "var(--text-tertiary)",
+                              marginBottom: "2px",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.03em",
+                            }}
+                          >
+                            Assigned To
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "13px",
+                              color: item.assignedEmployeeName
+                                ? "var(--text-primary)"
+                                : "var(--text-tertiary)",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {item.assignedEmployeeName || "Unassigned"}
+                          </div>
+                        </div>
+                        {item.cvFileName && (
+                          <div>
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                fontWeight: 500,
+                                color: "var(--text-tertiary)",
+                                marginBottom: "2px",
+                                textTransform: "uppercase",
+                                letterSpacing: "0.03em",
+                              }}
+                            >
+                              CV Uploaded
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "13px",
+                                color: "var(--success)",
+                                fontWeight: 500,
+                              }}
+                            >
+                              {item.cvFileName}
+                            </div>
+                          </div>
+                        )}
+                        <div>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 500,
+                              color: "var(--text-tertiary)",
+                              marginBottom: "2px",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.03em",
+                            }}
+                          >
+                            Type
+                          </div>
+                          <div
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              fontSize: "13px",
+                              fontWeight: 500,
+                              color: item.replacementHire
+                                ? "var(--warning)"
+                                : "var(--success)",
+                            }}
+                          >
+                            {item.replacementHire ? (
+                              <>
+                                <RefreshCw size={11} />
+                                Replacement
+                                {item.replacedEmpId && (
+                                  <span
+                                    style={{
+                                      color: "var(--text-tertiary)",
+                                      fontSize: "11px",
+                                      fontWeight: 400,
+                                    }}
+                                  >
+                                    ({item.replacedEmpId})
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              "New Hire"
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              fontWeight: 500,
+                              color: "var(--text-tertiary)",
+                              marginBottom: "2px",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.03em",
+                            }}
+                          >
+                            Est. Budget
+                          </div>
+                          <div
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              fontSize: "13px",
+                              color: "var(--text-primary)",
+                              fontWeight: 500,
+                            }}
+                          >
+                            <DollarSign size={12} />
+                            {formatItemBudget(
+                              item.estimatedBudget,
+                              item.currency,
+                            )}
+                          </div>
+                        </div>
+                        {item.approvedBudget != null &&
+                          item.approvedBudget > 0 && (
+                            <div>
+                              <div
+                                style={{
+                                  fontSize: "11px",
+                                  fontWeight: 500,
+                                  color: "var(--text-tertiary)",
+                                  marginBottom: "2px",
+                                  textTransform: "uppercase",
+                                  letterSpacing: "0.03em",
+                                }}
+                              >
+                                Approved Budget
+                              </div>
+                              <div
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                  fontSize: "13px",
+                                  color: "var(--success)",
+                                  fontWeight: 500,
+                                }}
+                              >
+                                <DollarSign size={12} />
+                                {formatItemBudget(
+                                  item.approvedBudget,
+                                  item.currency,
+                                )}
+                              </div>
+                            </div>
+                          )}
+                      </div>
                     </div>
 
                     {/* Phase 4: Action Buttons */}
@@ -2152,20 +2427,17 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                       <button
                         className="action-button"
                         style={{
-                          width: "32px",
-                          height: "32px",
-                          padding: "0",
+                          fontSize: "12px",
+                          padding: "8px 12px",
                           display: "flex",
                           alignItems: "center",
-                          justifyContent: "center",
+                          gap: "6px",
                         }}
                         onClick={() => toggleItemExpansion(item.id)}
+                        title="View Job Description"
                       >
-                        {isExpanded ? (
-                          <ChevronUp size={14} />
-                        ) : (
-                          <ChevronDown size={14} />
-                        )}
+                        <FileText size={12} />
+                        {isExpanded ? "Hide JD" : "View JD"}
                       </button>
                     </div>
                   </div>
@@ -2178,15 +2450,41 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                         borderTop: "1px solid var(--border-subtle)",
                       }}
                     >
-                      <div
-                        style={{
-                          fontSize: "13px",
-                          color: "var(--text-secondary)",
-                          marginBottom: "12px",
-                        }}
-                      >
-                        {item.description}
-                      </div>
+                      {/* Job Description Card */}
+                      {item.description && (
+                        <div
+                          style={{
+                            backgroundColor: "var(--bg-secondary)",
+                            borderRadius: "8px",
+                            padding: "14px 16px",
+                            marginBottom: "12px",
+                            border: "1px solid var(--border-subtle)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: "10px",
+                              fontWeight: 600,
+                              textTransform: "uppercase",
+                              letterSpacing: "0.05em",
+                              color: "var(--text-tertiary)",
+                              marginBottom: "8px",
+                            }}
+                          >
+                            Job Description
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "13px",
+                              color: "var(--text-secondary)",
+                              lineHeight: "1.6",
+                              whiteSpace: "pre-wrap",
+                            }}
+                          >
+                            {item.description}
+                          </div>
+                        </div>
+                      )}
 
                       {selectedItemForAssignment === item.id &&
                         canEditItem(item) && (
@@ -2579,12 +2877,12 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 style={{ display: "flex", alignItems: "center", gap: "6px" }}
                 onClick={() => {
                   const editableItem = ticket.items.find((it) =>
-                    canEditItem(it)
+                    canEditItem(it),
                   );
                   setAddCandidateItemId(
                     editableItem?.numericItemId ??
                       ticket.items[0]?.numericItemId ??
-                      null
+                      null,
                   );
                   setShowAddCandidate(true);
                 }}
@@ -2623,10 +2921,12 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 Filter by Position:
               </label>
               <select
-                value={candidateItemFilter === "all" ? "all" : candidateItemFilter}
+                value={
+                  candidateItemFilter === "all" ? "all" : candidateItemFilter
+                }
                 onChange={(e) =>
                   setCandidateItemFilter(
-                    e.target.value === "all" ? "all" : Number(e.target.value)
+                    e.target.value === "all" ? "all" : Number(e.target.value),
                   )
                 }
                 style={{
@@ -2643,7 +2943,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 <option value="all">All Positions</option>
                 {ticket.items.map((item) => {
                   const itemCandidateCount = candidates.filter(
-                    (c) => c.requisition_item_id === item.numericItemId
+                    (c) => c.requisition_item_id === item.numericItemId,
                   ).length;
                   return (
                     <option key={item.numericItemId} value={item.numericItemId}>
@@ -2675,7 +2975,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   candidateItemFilter === "all"
                     ? candidates
                     : candidates.filter(
-                        (c) => c.requisition_item_id === candidateItemFilter
+                        (c) => c.requisition_item_id === candidateItemFilter,
                       );
                 const count =
                   stage === "all"
