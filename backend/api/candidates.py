@@ -301,6 +301,7 @@ def update_candidate_stage(
         )
         if not item:
             raise HTTPException(status_code=404, detail="Requisition item not found")
+        db.refresh(item)  # Ensure we see latest status after sync_item_to_offered()
         if item.item_status == "Fulfilled":
             raise HTTPException(
                 status_code=400,

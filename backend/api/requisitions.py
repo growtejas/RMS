@@ -226,7 +226,7 @@ def list_requisitions(
     if "TA" in roles:
         query = query.filter(
             Requisition.overall_status.in_(
-                ["Approved & Unassigned", "Active"]
+                ["Approved & Unassigned", "Active", "Fulfilled"]
             )
         )
 
@@ -234,7 +234,7 @@ def list_requisitions(
             # Phase 7: Include requisitions where ANY item is assigned to this TA
             # This handles item-level TA reassignment (not just header-level)
             query = query.filter(
-                Requisition.overall_status == "Active",
+                Requisition.overall_status.in_(["Active", "Fulfilled"]),
             ).filter(
                 # Either header-level assignment OR item-level assignment
                 or_(

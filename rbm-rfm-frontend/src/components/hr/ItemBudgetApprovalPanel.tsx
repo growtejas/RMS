@@ -668,7 +668,7 @@ const ItemBudgetApprovalPanel: React.FC = () => {
       )}
 
       {/* Requisitions List */}
-      <div className="mb-4 bg-white border border-slate-200 rounded-lg p-4">
+      {/* <div className="mb-4 bg-white border border-slate-200 rounded-lg p-4">
         <label className="block text-sm font-medium text-slate-700 mb-2">
           Budget Approved By <span className="text-red-500">*</span>
         </label>
@@ -682,7 +682,7 @@ const ItemBudgetApprovalPanel: React.FC = () => {
         <p className="mt-1 text-xs text-slate-500">
           Required for approving or saving approved budget from dashboard.
         </p>
-      </div>
+      </div> */}
 
       {!loading &&
         requisitions.length > 0 &&

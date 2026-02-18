@@ -32,6 +32,7 @@ interface Requisition {
   overallStatus: string;
   dateCreated: string;
   raisedBy?: string;
+  raised_by?: number | null;
   assignedTA?: string;
   assignedTAId?: number | null;
   items: RequisitionItem[];
@@ -83,6 +84,12 @@ interface BackendRequisition {
   items: BackendRequisitionItem[];
 }
 
+interface BackendUser {
+  user_id: number;
+  username: string;
+  roles?: string[];
+}
+
 /* ======================================================
    Data helpers
    ====================================================== */
@@ -98,6 +105,7 @@ const mapRequisitions = (data: BackendRequisition[]): Requisition[] =>
     overallStatus: req.overall_status ?? "—",
     dateCreated: req.created_at ?? "",
     raisedBy: req.raised_by ? `User #${req.raised_by}` : "—",
+    raised_by: req.raised_by ?? null,
     assignedTAId: req.assigned_ta ?? null,
     assignedTA: req.assigned_ta ? `User #${req.assigned_ta}` : undefined,
     workMode: (req.work_mode as Requisition["workMode"]) ?? undefined,
@@ -414,6 +422,13 @@ const Requisitions: React.FC<RequisitionsProps> = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [assigningReqId, setAssigningReqId] = useState<string | null>(null);
   const [assignError, setAssignError] = useState<string | null>(null);
+  const [allUsers, setAllUsers] = useState<BackendUser[]>([]);
+
+  const resolveUserName = (userId?: number | null): string => {
+    if (userId == null) return "—";
+    const u = allUsers.find((x) => x.user_id === userId);
+    return u?.username ?? `User #${userId}`;
+  };
 
   const fetchRequisitions = useCallback(async () => {
     try {
@@ -438,6 +453,22 @@ const Requisitions: React.FC<RequisitionsProps> = ({
   }, [activeFilter]);
 
   useEffect(() => {
+    let isMounted = true;
+    const fetchUsers = async () => {
+      try {
+        const res = await apiClient.get<BackendUser[]>("/users");
+        if (isMounted) setAllUsers(res.data ?? []);
+      } catch {
+        if (isMounted) setAllUsers([]);
+      }
+    };
+    fetchUsers();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     fetchRequisitions();
 
     const handleFocus = () => {
@@ -460,14 +491,11 @@ const Requisitions: React.FC<RequisitionsProps> = ({
     };
   }, [fetchRequisitions]);
 
-  // PHASE 3: TA users can see ALL APPROVED requisitions (Active status)
-  // These are requisitions that have passed budget and HR approval
-  // Unassigned items are viewable but not editable
+  // PHASE 3: TA users can see APPROVED requisitions (Active) and Fulfilled
+  // Active = in recruitment; Fulfilled = all positions filled (still visible for reference)
   const visibleRequisitions = requisitions.filter((req) => {
     const status = normalizeStatus(req.overallStatus);
-    // Show Active requisitions (post-HR approval)
-    // Active = APPROVED_UNASSIGNED in the spec terminology
-    return status === "Active";
+    return status === "Active" || status === "Fulfilled";
   });
 
   // Filter requisitions
@@ -483,11 +511,12 @@ const Requisitions: React.FC<RequisitionsProps> = ({
     // Search filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
+      const raisedByName = resolveUserName(req.raised_by).toLowerCase();
       return (
         req.id.toLowerCase().includes(query) ||
         req.project.toLowerCase().includes(query) ||
         req.client?.toLowerCase().includes(query) ||
-        req.raisedBy?.toLowerCase().includes(query)
+        raisedByName.includes(query)
       );
     }
 
@@ -938,14 +967,14 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                       // Multiple different TAs assigned
                       assignedLabel = `Multiple TAs (${sortedTAs.length})`;
                     } else {
-                      assignedLabel = `User #${primaryTAId}`;
+                      assignedLabel = resolveUserName(primaryTAId);
                     }
                   }
                   // If sortedTAs is empty (shouldn't happen), assignedLabel stays "Unassigned"
                 } else if (req.assignedTAId) {
                   // Fallback to header-level if no item-level assignments
                   primaryTAId = req.assignedTAId;
-                  assignedLabel = req.assignedTA ?? `User #${req.assignedTAId}`;
+                  assignedLabel = resolveUserName(req.assignedTAId);
                 }
                 // If neither condition is met, both stay at initial values
                 
@@ -1088,7 +1117,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                           style={{ display: "flex", flexDirection: "column" }}
                         >
                           <span style={{ fontSize: "13px" }}>
-                            {req.raisedBy}
+                            {resolveUserName(req.raised_by)}
                           </span>
                           <span
                             style={{

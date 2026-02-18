@@ -613,6 +613,25 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     }
   }, [effectiveTicketId]);
 
+  const refetchRequisition = useCallback(async () => {
+    const reqId = parseReqId(effectiveTicketId);
+    if (!reqId) return;
+    try {
+      const response = await apiClient.get<BackendRequisition>(
+        `/requisitions/${reqId}`,
+      );
+      const built = buildTicket(response.data);
+      setTicket(built);
+      const statusMap: Record<string, string> = {};
+      built.items.forEach((item) => {
+        statusMap[item.id] = item.itemStatus;
+      });
+      initialItemStatusesRef.current = statusMap;
+    } catch {
+      // Keep existing ticket on refetch error
+    }
+  }, [effectiveTicketId]);
+
   useEffect(() => {
     loadCandidates();
   }, [loadCandidates]);
@@ -3419,6 +3438,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 c.candidate_id === updated.candidate_id ? updated : c,
               ),
             );
+            if (updated.current_stage === "Hired") {
+              refetchRequisition();
+            }
             setSelectedCandidate(null);
           }}
           userRoles={userRoles}

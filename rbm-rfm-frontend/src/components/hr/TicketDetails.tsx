@@ -1575,7 +1575,11 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                         Assigned TA:
                       </span>
                     </div>
-                    <span style={{ fontWeight: 500 }}>{ticket.assignedTA}</span>
+                    <span style={{ fontWeight: 500 }}>
+                      {ticket.assignedTAId
+                        ? resolveUserName(ticket.assignedTAId)
+                        : "Unassigned"}
+                    </span>
                   </div>
                   <div>
                     <div
@@ -3038,6 +3042,9 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                 c.candidate_id === updated.candidate_id ? updated : c,
               ),
             );
+            if (updated.current_stage === "Hired") {
+              handleRefreshData();
+            }
             setSelectedCandidate(null);
           }}
           userRoles={user?.roles || []}

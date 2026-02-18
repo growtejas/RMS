@@ -42,10 +42,13 @@ interface Requisition {
   dateCreated: string;
   requiredBy: string;
   raisedBy: string;
+  raised_by?: number | null;
   assignedTA?: string;
   assignedTAId?: number | null;
   assignedAt?: string | null;
   budgetAmount?: number;
+  estimatedBudget?: number | null;
+  approvedBudget?: number | null;
   budgetApprovedBy?: number | null;
   approvedBy?: number | null;
   approvalHistory?: string | null;
@@ -108,6 +111,8 @@ interface BackendRequisition {
   approved_by?: number | null;
   approval_history?: string | null;
   rejection_reason?: string | null;
+  total_estimated_budget?: number | null;
+  total_approved_budget?: number | null;
   items: BackendRequisitionItem[];
 }
 
@@ -140,10 +145,13 @@ const mapRequisitions = (data: BackendRequisition[]): Requisition[] =>
     dateCreated: req.created_at ?? "",
     requiredBy: req.required_by_date ?? "",
     raisedBy: req.raised_by ? `User #${req.raised_by}` : "—",
+    raised_by: req.raised_by ?? null,
     assignedTAId: req.assigned_ta ?? null,
     assignedAt: req.assigned_at ?? null,
     assignedTA: req.assigned_ta ? `User #${req.assigned_ta}` : undefined,
     budgetAmount: req.budget_amount ?? undefined,
+    estimatedBudget: req.total_estimated_budget != null ? Number(req.total_estimated_budget) : null,
+    approvedBudget: req.total_approved_budget != null ? Number(req.total_approved_budget) : null,
     budgetApprovedBy: req.budget_approved_by ?? null,
     approvedBy: req.approved_by ?? null,
     approvalHistory: req.approval_history ?? null,
@@ -383,12 +391,14 @@ interface MatchmakingPanelProps {
   requisition: Requisition;
   employees: EmployeeMatch[];
   onAssignEmployee: (itemId: string, empId: string) => void;
+  requesterDisplayName?: string;
 }
 
 const MatchmakingPanel: React.FC<MatchmakingPanelProps> = ({
   requisition,
   employees,
   onAssignEmployee,
+  requesterDisplayName,
 }) => {
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
 
@@ -475,7 +485,7 @@ const MatchmakingPanel: React.FC<MatchmakingPanelProps> = ({
               >
                 Raised By
               </div>
-              <div>{requisition.raisedBy}</div>
+              <div>{requesterDisplayName ?? requisition.raisedBy}</div>
             </div>
           </div>
         </div>
@@ -764,6 +774,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [employees, setEmployees] = useState<EmployeeMatch[]>([]);
   const [taUsers, setTaUsers] = useState<BackendUser[]>([]);
+  const [allUsers, setAllUsers] = useState<BackendUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [budgetDrafts, setBudgetDrafts] = useState<Record<number, string>>({});
@@ -875,6 +886,12 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
     return match?.username ?? `User #${userId}`;
   };
 
+  const resolveUserName = (userId?: number | null): string => {
+    if (userId == null) return "—";
+    const match = allUsers.find((u) => u.user_id === userId);
+    return match?.username ?? `User #${userId}`;
+  };
+
   useEffect(() => {
     let isMounted = true;
 
@@ -916,7 +933,9 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
       try {
         const response = await apiClient.get<BackendUser[]>("/users");
         if (!isMounted) return;
-        const filtered = response.data.filter((user: BackendUser) => {
+        const list = response.data ?? [];
+        setAllUsers(list);
+        const filtered = list.filter((user: BackendUser) => {
           const roles = user.roles ?? [];
           return roles.some(
             (role: string) =>
@@ -926,6 +945,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
         setTaUsers(filtered);
       } catch {
         if (isMounted) {
+          setAllUsers([]);
           setTaUsers([]);
         }
       }
@@ -946,7 +966,11 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
       requisitions.forEach((req) => {
         if (next[req.reqId] === undefined) {
           next[req.reqId] =
-            req.budgetAmount !== undefined ? String(req.budgetAmount) : "";
+            req.approvedBudget != null
+              ? String(req.approvedBudget)
+              : req.budgetAmount !== undefined
+                ? String(req.budgetAmount)
+                : "";
         }
       });
       return next;
@@ -1114,7 +1138,10 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
       await apiClient.patch(`/requisitions/${reqId}`, {
         budget_amount: budgetValue,
       });
-      updateRequisitionState(reqId, { budgetAmount: budgetValue });
+      updateRequisitionState(reqId, {
+        budgetAmount: budgetValue,
+        approvedBudget: budgetValue ?? null,
+      });
       setEditingBudget((prev) => ({ ...prev, [reqId]: false }));
     } catch (err) {
       const message =
@@ -1174,6 +1201,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
       updateRequisitionState(req.reqId, {
         budgetApprovedBy: approverId,
         budgetAmount: budgetValue,
+        approvedBudget: budgetValue ?? null,
         overallStatus: "Active",
       });
 
@@ -1248,8 +1276,8 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
     .filter(approvalSearchMatches)
     .sort((a, b) => {
       if (!budgetSortDir) return 0;
-      const aValue = a.budgetAmount ?? 0;
-      const bValue = b.budgetAmount ?? 0;
+      const aValue = a.estimatedBudget ?? a.budgetAmount ?? 0;
+      const bValue = b.estimatedBudget ?? b.budgetAmount ?? 0;
       return budgetSortDir === "asc" ? aValue - bValue : bValue - aValue;
     });
 
@@ -1511,25 +1539,8 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                   <th>Req ID</th>
                   <th>Project / Client</th>
                   <th>Requester</th>
-                  <th>
-                    <button
-                      className="action-button compact approval-sort-button"
-                      type="button"
-                      onClick={() =>
-                        setBudgetSortDir((prev) =>
-                          prev === "asc" ? "desc" : "asc",
-                        )
-                      }
-                    >
-                      Budget
-                      {budgetSortDir
-                        ? budgetSortDir === "asc"
-                          ? " ↑"
-                          : " ↓"
-                        : ""}
-                    </button>
-                  </th>
-                  <th>Current Budget</th>
+                  <th>Estimated Budget</th>
+                  <th>Approved Budget</th>
                   <th>Budget Approved By</th>
                   <th>Status</th>
                   <th>Actions</th>
@@ -1537,7 +1548,6 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
               </thead>
               <tbody>
                 {sortedPendingApprovals.map((req) => {
-                  const isEditing = editingBudget[req.reqId];
                   // Backend-driven: check if transitions are allowed via allowedTransitionsMap
                   const canApprove =
                     canTransitionTo(req.reqId, "Pending_HR") ||
@@ -1560,54 +1570,23 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                           <div>{req.project}</div>
                           <div className="approval-subtext">{req.client}</div>
                         </td>
-                        <td>{req.raisedBy}</td>
-                        <td>
-                          {isEditing ? (
-                            <input
-                              value={budgetDrafts[req.reqId] ?? ""}
-                              onChange={(e) =>
-                                setBudgetDrafts((prev) => ({
-                                  ...prev,
-                                  [req.reqId]: e.target.value,
-                                }))
-                              }
-                              className="approval-input"
-                            />
-                          ) : (
-                            <span className="approval-budget-value">
-                              {formatCurrency(req.budgetAmount)}
-                            </span>
-                          )}
-                        </td>
+                        <td>{resolveUserName(req.raised_by)}</td>
                         <td>
                           <span className="approval-budget-value">
-                            {formatCurrency(req.budgetAmount)}
+                            {formatCurrency(
+                              req.estimatedBudget ?? req.budgetAmount ?? 0,
+                            )}
                           </span>
                         </td>
                         <td>
-                          {isEditing ? (
-                            <input
-                              value={
-                                approverDrafts[req.reqId] ??
-                                String(user?.user_id ?? "")
-                              }
-                              onChange={(e) =>
-                                setApproverDrafts((prev) => ({
-                                  ...prev,
-                                  [req.reqId]: e.target.value,
-                                }))
-                              }
-                              className="approval-input approval-input-sm"
-                              placeholder="User ID"
-                            />
-                          ) : (
-                            <span className="approval-muted">
-                              {approverDrafts[req.reqId] ||
-                                (req.budgetApprovedBy
-                                  ? `User #${req.budgetApprovedBy}`
-                                  : "—")}
-                            </span>
-                          )}
+                          <span className="approval-budget-value">
+                            {formatCurrency(req.approvedBudget ?? 0)}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="approval-muted">
+                            {resolveUserName(req.budgetApprovedBy)}
+                          </span>
                         </td>
                         <td>
                           <span className={getStatusClass(req.overallStatus)}>
@@ -1616,85 +1595,46 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                         </td>
                         <td>
                           <div className="approval-actions">
-                            {isEditing ? (
+                            {(canApprove || canReject) && (
                               <>
-                                <button
-                                  className="action-button primary compact"
-                                  onClick={() => handleSaveBudget(req.reqId)}
-                                  disabled={isActionLoading}
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  className="action-button compact"
-                                  onClick={() =>
-                                    setEditingBudget((prev) => ({
-                                      ...prev,
-                                      [req.reqId]: false,
-                                    }))
-                                  }
-                                  disabled={isActionLoading}
-                                >
-                                  Cancel
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  className="action-button compact"
-                                  onClick={() =>
-                                    setEditingBudget((prev) => ({
-                                      ...prev,
-                                      [req.reqId]: true,
-                                    }))
-                                  }
-                                  disabled={isActionLoading || isTerminal}
-                                >
-                                  Edit Budget
-                                </button>
-                                {/* Backend-driven: only show buttons if transitions are allowed */}
-                                {(canApprove || canReject) && (
-                                  <>
-                                    {canApprove && (
-                                      <button
-                                        className="action-button primary compact approval-approve"
-                                        disabled={isActionLoading}
-                                        onClick={() =>
-                                          handleApproveRelease(req)
-                                        }
-                                      >
-                                        {approvalLoading[req.reqId]
-                                          ? "..."
-                                          : "Approve & Release"}
-                                      </button>
-                                    )}
-                                    {canReject && (
-                                      <button
-                                        className="action-button danger compact"
-                                        disabled={isActionLoading}
-                                        onClick={() => openRejectModal(req)}
-                                      >
-                                        Reject
-                                      </button>
-                                    )}
-                                  </>
-                                )}
-                                {req.rejectionReason && (
+                                {canApprove && (
                                   <button
-                                    className="action-button compact"
+                                    className="action-button primary compact approval-approve"
+                                    disabled={isActionLoading}
                                     onClick={() =>
-                                      setExpandedRejections((prev) => ({
-                                        ...prev,
-                                        [req.reqId]: !prev[req.reqId],
-                                      }))
+                                      handleApproveRelease(req)
                                     }
                                   >
-                                    {expandedRejections[req.reqId]
-                                      ? "Hide Reason"
-                                      : "View Reason"}
+                                    {approvalLoading[req.reqId]
+                                      ? "..."
+                                      : "Approve & Release"}
+                                  </button>
+                                )}
+                                {canReject && (
+                                  <button
+                                    className="action-button danger compact"
+                                    disabled={isActionLoading}
+                                    onClick={() => openRejectModal(req)}
+                                  >
+                                    Reject
                                   </button>
                                 )}
                               </>
+                            )}
+                            {req.rejectionReason && (
+                              <button
+                                className="action-button compact"
+                                onClick={() =>
+                                  setExpandedRejections((prev) => ({
+                                    ...prev,
+                                    [req.reqId]: !prev[req.reqId],
+                                  }))
+                                }
+                              >
+                                {expandedRejections[req.reqId]
+                                  ? "Hide Reason"
+                                  : "View Reason"}
+                              </button>
                             )}
                           </div>
                         </td>
@@ -2293,6 +2233,10 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                   requisition={selectedRequisition}
                   employees={employees}
                   onAssignEmployee={handleAssignEmployee}
+                  requesterDisplayName={
+                    resolveUserName(selectedRequisition.raised_by) ||
+                    selectedRequisition.raisedBy
+                  }
                 />
               </div>
             </div>
