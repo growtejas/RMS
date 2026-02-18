@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { apiClient } from "../../api/client";
 import { assignRequisitionTA } from "../../api/workflowApi";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../contexts/useAuth";
 import { normalizeStatus, getStatusLabel } from "../../types/workflow";
 
 /* ======================================================

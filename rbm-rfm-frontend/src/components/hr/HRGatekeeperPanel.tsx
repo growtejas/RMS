@@ -40,7 +40,7 @@ import {
   getWorkflowErrorMessage,
 } from "../../api/workflowApi";
 import type { Requisition, RequisitionItem } from "../../types/workflow";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../contexts/useAuth";
 
 // ============================================================================
 // TYPES

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../contexts/useAuth";
 import Header from "../Header";
 import TAHeader from "./TAHeader";
 import TASidebar, { TADashboardView } from "./TASidebar";
@@ -264,13 +264,50 @@ const TADashboard: React.FC = () => {
   );
 
   /* ======================================================
-     Navigation Handlers
+     Navigation Handlers & Browser Back Support
      ====================================================== */
 
-  const handleViewDetail = (reqId: string) => {
-    setSelectedRequisitionId(reqId);
-    setActiveView("requisition-detail");
+  const goToView = (view: TADashboardView, requisitionId?: string | null) => {
+    const payload = {
+      taView: view,
+      requisitionId: requisitionId ?? null,
+    };
+    window.history.pushState(
+      payload,
+      "",
+      window.location.pathname + window.location.search,
+    );
+    setActiveView(view);
+    setSelectedRequisitionId(requisitionId ?? null);
   };
+
+  const handleViewDetail = (reqId: string) => {
+    goToView("requisition-detail", reqId);
+  };
+
+  useEffect(() => {
+    if (window.history.state?.taView == null) {
+      window.history.replaceState(
+        { taView: activeView, requisitionId: selectedRequisitionId },
+        "",
+        window.location.pathname + window.location.search,
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const state = window.history.state as
+        | { taView?: TADashboardView; requisitionId?: string | null }
+        | undefined;
+      const view = state?.taView ?? "dashboard";
+      const id = state?.requisitionId ?? null;
+      setActiveView(view);
+      setSelectedRequisitionId(id);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   const renderContent = () => {
     switch (activeView) {
@@ -287,7 +324,7 @@ const TADashboard: React.FC = () => {
         return (
           <RequisitionDetail
             requisitionId={selectedRequisitionId}
-            onBack={() => setActiveView("requisitions")}
+            onBack={() => window.history.back()}
           />
         );
 
@@ -313,7 +350,7 @@ const TADashboard: React.FC = () => {
     <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
       <TASidebar
         activeView={activeView}
-        onViewChange={setActiveView}
+        onViewChange={(view) => goToView(view)}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((prev) => !prev)}
       />

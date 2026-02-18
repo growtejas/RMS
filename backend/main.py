@@ -5,9 +5,45 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 # ---- Create app ----
 app = FastAPI(title="RBM Resource Fulfillment Module")
+
+
+@app.get("/api/health")
+def health():
+    """Quick health check: returns 200 if app is up and DB is reachable, 503 if DB is down."""
+    try:
+        from db.engine import engine
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"status": "ok", "database": "connected"}
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "database": "unreachable",
+                "detail": str(e),
+            },
+        )
+
+
+def _db_exception_handler(request, exc):
+    """Return 503 with clear message when DB is unreachable."""
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "Database is not responding. Check that PostgreSQL is running and DB_HOST/DB_PORT in .env are correct.",
+        },
+    )
+
+
+from sqlalchemy.exc import OperationalError, DBAPIError
+app.add_exception_handler(OperationalError, _db_exception_handler)
+app.add_exception_handler(DBAPIError, _db_exception_handler)
 
 # ---- Status Protection (GC-001 Enforcement) ----
 # Register SQLAlchemy event listeners to block direct status mutations

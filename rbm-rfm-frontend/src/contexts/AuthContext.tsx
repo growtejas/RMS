@@ -1,6 +1,5 @@
 import React, {
   createContext,
-  useContext,
   useState,
   useCallback,
   ReactNode,
@@ -8,7 +7,9 @@ import React, {
 
 import { User, AuthContextType } from "../types/auth";
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export const AuthContext = createContext<AuthContextType | undefined>(
+  undefined
+);
 
 const parseUserFromToken = (token: string | null): User | null => {
   if (!token) {
@@ -52,10 +53,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     setError(null);
 
     try {
-      const apiUrl = `${import.meta.env.VITE_API_BASE_URL}/auth/login`;
+      const baseUrl = import.meta.env.VITE_API_BASE_URL;
+      if (!baseUrl || baseUrl === "undefined") {
+        throw new Error(
+          "API URL is not configured. Set VITE_API_BASE_URL in .env (e.g. http://localhost:8000/api)."
+        );
+      }
+      const apiUrl = `${baseUrl}/auth/login`;
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const timeoutMs = 30000; // 30s for login (backend may be cold or slow)
+      const timeoutId = setTimeout(
+        () => controller.abort(new Error("Login request timed out")),
+        timeoutMs
+      );
 
       const response = await fetch(apiUrl, {
         method: "POST",
@@ -72,14 +83,38 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
         let errorMessage = "Login failed. Please try again.";
         try {
           const errorData = await response.json();
-          errorMessage = errorData.detail || errorMessage;
+          errorMessage =
+            (typeof errorData.detail === "string"
+              ? errorData.detail
+              : Array.isArray(errorData.detail)
+                ? errorData.detail[0]?.msg ?? errorMessage
+                : errorMessage) || errorMessage;
         } catch {
           // If response is not JSON, use default message
         }
         throw new Error(errorMessage);
       }
 
-      const data = await response.json();
+      let data: {
+        access_token?: string;
+        user_id?: number;
+        username?: string;
+        roles?: string[];
+      };
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("Invalid response from server. Please try again.");
+      }
+      if (
+        data.access_token == null ||
+        data.user_id == null ||
+        data.username == null
+      ) {
+        throw new Error(
+          "Invalid login response (missing token or user). Please try again."
+        );
+      }
 
       // Normalize roles to lowercase for consistent RBAC checks
       const normalizedRoles = Array.isArray(data.roles)
@@ -102,7 +137,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
       let message = "An unexpected error occurred";
       if (err instanceof DOMException && err.name === "AbortError") {
         message =
-          "Login request timed out. Please check if the server is running.";
+          "Login request timed out. Check that the backend is running (e.g. uvicorn from the backend folder) and VITE_API_BASE_URL in .env points to it (e.g. http://localhost:8000/api).";
       } else if (
         err instanceof TypeError &&
         err.message === "Failed to fetch"
@@ -112,7 +147,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
         message = err.message;
       }
       setError(message);
-      throw err;
+      // Rethrow with friendly message so Login page doesn't show raw "signal is aborted without reason"
+      throw new Error(message);
     } finally {
       setIsLoading(false);
     }
@@ -141,13 +177,4 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-};
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
-  return context;
 };

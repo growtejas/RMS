@@ -53,12 +53,12 @@ const TASidebar: React.FC<TASidebarProps> = ({
       label: "Resource Pool",
       icon: <Users size={20} />,
     },
-    { id: "reports", label: "Reports", icon: <BarChart3 size={20} /> },
-    {
-      id: "audit-logs",
-      label: "Audit Logs",
-      icon: <ClipboardCheck size={20} />,
-    },
+    //{ id: "reports", label: "Reports", icon: <BarChart3 size={20} /> },
+    // {
+    //   id: "audit-logs",
+    //   label: "Audit Logs",
+    //   icon: <ClipboardCheck size={20} />,
+    // },
   ];
 
   return (

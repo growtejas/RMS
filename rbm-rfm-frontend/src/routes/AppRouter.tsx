@@ -8,7 +8,7 @@ import TADashboard from "../components/ta/Dashboard";
 import ManagerDashboard from "../components/manager/ManagerDashboard";
 import ManagerRequisitionDetails from "../components/manager/ManagerRequisitionDetails";
 import OwnerDashboard from "../components/owner/OwnerDashboard";
-import { useAuth } from "../contexts/AuthContext";
+import { useAuth } from "../contexts/useAuth";
 
 const Dashboard = () => (
   <div style={{ padding: "40px 20px" }}>

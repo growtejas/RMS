@@ -12,7 +12,7 @@ import {
   BarChart3,
 } from "lucide-react";
 import { apiClient } from "../../api/client";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../contexts/useAuth";
 import {
   approveBudget,
   approveHR,

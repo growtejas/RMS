@@ -40,7 +40,7 @@ import {
 } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
 import { apiClient } from "../../api/client";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../contexts/useAuth";
 import { AuditSection } from "../audit";
 import {
   normalizeStatus,

@@ -41,7 +41,7 @@ import type {
   Requisition as WorkflowRequisition,
   RequisitionItem as WorkflowRequisitionItem,
 } from "../../types/workflow";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../contexts/useAuth";
 import {
   fetchCandidates,
   createCandidate,

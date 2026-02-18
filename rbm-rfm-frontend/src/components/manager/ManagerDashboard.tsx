@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../contexts/useAuth";
 import Header from "../Header";
 import ManagerHeader from "./ManagerHeader";
 import ManagerSidebar, { ManagerDashboardView } from "./ManagerSidebar";
@@ -37,6 +37,34 @@ const ManagerDashboard: React.FC = () => {
   );
 
   const activeLabel = useMemo(() => viewLabels[activeView], [activeView]);
+
+  const goToView = (view: ManagerDashboardView) => {
+    window.history.pushState(
+      { managerView: view },
+      "",
+      window.location.pathname + window.location.search,
+    );
+    setActiveView(view);
+  };
+
+  useEffect(() => {
+    if (window.history.state?.managerView == null) {
+      window.history.replaceState(
+        { managerView: activeView },
+        "",
+        window.location.pathname + window.location.search,
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const state = window.history.state as { managerView?: ManagerDashboardView } | undefined;
+      setActiveView(state?.managerView ?? "manager-dashboard");
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   useEffect(() => {
     if (user && !isManager) {
@@ -265,7 +293,7 @@ const ManagerDashboard: React.FC = () => {
     <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
       <ManagerSidebar
         activeView={activeView}
-        onViewChange={setActiveView}
+        onViewChange={goToView}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((prev) => !prev)}
       />

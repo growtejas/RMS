@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { useAuth } from "../../contexts/AuthContext";
+import React, { useEffect, useState } from "react";
+import { useAuth } from "../../contexts/useAuth";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import Header from "../../components/Header";
 import AdminHeader from "../../components/admin/AdminHeader";
@@ -25,6 +25,34 @@ const AdminDashboard: React.FC = () => {
   const { user } = useAuth();
   const [activeView, setActiveView] = useState<DashboardView>("overview");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  const goToView = (view: DashboardView) => {
+    window.history.pushState(
+      { adminView: view },
+      "",
+      window.location.pathname + window.location.search,
+    );
+    setActiveView(view);
+  };
+
+  useEffect(() => {
+    if (window.history.state?.adminView == null) {
+      window.history.replaceState(
+        { adminView: activeView },
+        "",
+        window.location.pathname + window.location.search,
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const state = window.history.state as { adminView?: DashboardView } | undefined;
+      setActiveView(state?.adminView ?? "overview");
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   const hasAdminAccess = user?.roles?.some((role) =>
     ["admin", "owner"].includes(role),
@@ -64,7 +92,7 @@ const AdminDashboard: React.FC = () => {
     >
       <AdminSidebar
         activeView={activeView}
-        onViewChange={setActiveView}
+        onViewChange={goToView}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
       />

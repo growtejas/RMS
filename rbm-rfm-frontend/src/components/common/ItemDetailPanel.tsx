@@ -34,7 +34,7 @@ import {
   ChevronRight,
   Loader2,
 } from "lucide-react";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../contexts/useAuth";
 import { RoleGuard, useRoleCheck } from "../common/RoleGuard";
 import StatusBadge from "../common/StatusBadge";
 import ActivityTimeline from "../common/ActivityTimeline";

@@ -15,7 +15,10 @@ DATABASE_URL = (
     f"@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 )
 
+# Fail fast when DB is unreachable: 5s connect timeout, 10s pool checkout
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True
+    pool_pre_ping=True,
+    connect_args={"connect_timeout": 5},
+    pool_timeout=10,
 )

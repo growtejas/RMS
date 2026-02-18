@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../contexts/useAuth";
 import Header from "../Header";
 import OwnerHeader from "./OwnerHeader";
 import OwnerSidebar, { OwnerDashboardView } from "./OwnerSidebar";
@@ -29,6 +29,34 @@ const OwnerDashboard: React.FC = () => {
 
   const activeLabel = useMemo(() => viewLabels[activeView], [activeView]);
 
+  const goToView = (view: OwnerDashboardView) => {
+    window.history.pushState(
+      { ownerView: view },
+      "",
+      window.location.pathname + window.location.search,
+    );
+    setActiveView(view);
+  };
+
+  useEffect(() => {
+    if (window.history.state?.ownerView == null) {
+      window.history.replaceState(
+        { ownerView: activeView },
+        "",
+        window.location.pathname + window.location.search,
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const state = window.history.state as { ownerView?: OwnerDashboardView } | undefined;
+      setActiveView(state?.ownerView ?? "executive-dashboard");
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
   const renderContent = () => {
     switch (activeView) {
       case "executive-dashboard":
@@ -55,7 +83,7 @@ const OwnerDashboard: React.FC = () => {
     <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
       <OwnerSidebar
         activeView={activeView}
-        onViewChange={setActiveView}
+        onViewChange={goToView}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((prev) => !prev)}
       />

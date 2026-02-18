@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../../api/client";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../contexts/useAuth";
 import { normalizeStatus, getStatusLabel } from "../../types/workflow";
 
 /* ======================================================

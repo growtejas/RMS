@@ -22,7 +22,7 @@ import { apiClient } from "../../api/client";
 import type { Candidate } from "../../api/candidateApi";
 import { fetchCandidates } from "../../api/candidateApi";
 import CandidateDetailModal from "../shared/CandidateDetailModal";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../contexts/useAuth";
 
 // Types
 interface RequisitionItem {

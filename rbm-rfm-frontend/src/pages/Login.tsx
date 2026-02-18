@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
+import { useAuth } from "../contexts/useAuth";
 import "../styles/Login.css";
 import RbmLogo from "../assets/rbm-logo.svg";
 
@@ -34,11 +34,11 @@ const Login: React.FC = () => {
         fromState && fromState !== "/login" ? fromState : defaultRedirect;
       navigate(target, { replace: true });
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: string } } };
-      setError(
-        axiosErr?.response?.data?.detail ||
-          "Invalid credentials. Please try again.",
-      );
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Invalid credentials. Please try again.";
+      setError(message);
     } finally {
       setIsLoading(false);
     }

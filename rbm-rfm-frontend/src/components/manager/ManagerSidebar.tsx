@@ -47,11 +47,11 @@ const ManagerSidebar: React.FC<ManagerSidebarProps> = ({
       label: "My Requisitions",
       icon: <ClipboardList size={20} />,
     },
-    {
-      id: "requisition-audit",
-      label: "Requisition Audit",
-      icon: <FileText size={20} />,
-    },
+    // {
+    //   id: "requisition-audit",
+    //   label: "Requisition Audit",
+    //   icon: <FileText size={20} />,
+    // },
   ];
 
   return (

@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../contexts/useAuth";
 import Header from "../Header";
 import HrHeader from "./HRHeader";
 import HrSidebar, { HrDashboardView } from "./HRSidebar";
@@ -39,14 +39,48 @@ const HrDashboard: React.FC = () => {
 
   const activeLabel = useMemo(() => viewLabels[activeView], [activeView]);
 
+  const goToView = (view: HrDashboardView, ticketId?: string | null) => {
+    const payload = { hrView: view, ticketId: ticketId ?? null };
+    window.history.pushState(
+      payload,
+      "",
+      window.location.pathname + window.location.search,
+    );
+    setActiveView(view);
+    setSelectedTicketId(ticketId ?? null);
+  };
+
+  useEffect(() => {
+    if (window.history.state?.hrView == null) {
+      window.history.replaceState(
+        { hrView: activeView, ticketId: selectedTicketId },
+        "",
+        window.location.pathname + window.location.search,
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const state = window.history.state as
+        | { hrView?: HrDashboardView; ticketId?: string | null }
+        | undefined;
+      const view = state?.hrView ?? "dashboard";
+      const id = state?.ticketId ?? null;
+      setActiveView(view);
+      setSelectedTicketId(id);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
   const renderContent = () => {
     switch (activeView) {
       case "dashboard":
         return (
           <HRDashboardView
             onViewRequisition={(reqId: number) => {
-              setSelectedTicketId(reqId.toString());
-              setActiveView("ticket-detail");
+              goToView("ticket-detail", reqId.toString());
             }}
           />
         );
@@ -71,8 +105,7 @@ const HrDashboard: React.FC = () => {
         return (
           <HrRequisitions
             onViewRequisition={(ticketId: string) => {
-              setSelectedTicketId(ticketId);
-              setActiveView("ticket-detail");
+              goToView("ticket-detail", ticketId);
             }}
           />
         );
@@ -80,7 +113,7 @@ const HrDashboard: React.FC = () => {
         return (
           <TicketDetails
             ticketId={selectedTicketId}
-            onBack={() => setActiveView("ticket")}
+            onBack={() => window.history.back()}
           />
         );
       default:
@@ -97,7 +130,7 @@ const HrDashboard: React.FC = () => {
     <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
       <HrSidebar
         activeView={activeView}
-        onViewChange={setActiveView}
+        onViewChange={(view) => goToView(view)}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((prev) => !prev)}
       />

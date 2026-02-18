@@ -6,7 +6,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CheckCircle, Eye, Loader2, ShieldAlert, XCircle } from "lucide-react";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../contexts/useAuth";
 import {
   hrDashboardService,
   HRPendingApprovalItem,

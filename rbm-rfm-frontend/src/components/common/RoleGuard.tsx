@@ -17,7 +17,7 @@
  */
 
 import React from "react";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../contexts/useAuth";
 
 export type UserRole = "admin" | "owner" | "hr" | "ta" | "manager";
 
