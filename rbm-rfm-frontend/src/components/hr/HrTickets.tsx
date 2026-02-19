@@ -412,7 +412,6 @@ const MatchmakingPanel: React.FC<MatchmakingPanelProps> = ({
           borderRadius: "16px",
           padding: "24px",
           border: "1px solid var(--border-subtle)",
-          overflowY: "auto",
         }}
       >
         <div style={{ marginBottom: "24px" }}>
@@ -587,7 +586,6 @@ const MatchmakingPanel: React.FC<MatchmakingPanelProps> = ({
           borderRadius: "16px",
           padding: "24px",
           border: "1px solid var(--border-subtle)",
-          overflowY: "auto",
         }}
       >
         <div
@@ -2273,8 +2271,6 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                 borderRadius: "16px",
                 padding: "24px",
                 border: "1px solid var(--border-subtle)",
-                height: "calc(100vh - 300px)",
-                overflow: "hidden",
                 display: "flex",
                 flexDirection: "column",
               }}
@@ -2312,7 +2308,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                 </button>
               </div>
 
-              <div style={{ flex: 1, overflow: "hidden" }}>
+              <div>
                 <MatchmakingPanel
                   requisition={selectedRequisition}
                   employees={employees}

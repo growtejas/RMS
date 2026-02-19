@@ -16,11 +16,21 @@ def create_skill(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_any_role("HR", "Admin"))
 ):
-    existing = db.query(Skill).filter(Skill.skill_name == payload.skill_name).first()
+    name = (payload.skill_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Skill name is required")
+
+    normalized_name = name.lower()
+    existing = db.query(Skill).filter(Skill.normalized_name == normalized_name).first()
     if existing:
         raise HTTPException(status_code=400, detail="Skill already exists")
 
-    skill = Skill(skill_name=payload.skill_name)
+    skill = Skill(
+        skill_name=name,
+        normalized_name=normalized_name,
+        is_verified=False,
+        created_by=current_user.user_id,
+    )
     db.add(skill)
     db.commit()
     db.refresh(skill)
@@ -124,7 +134,16 @@ def update_skill(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    skill.skill_name = payload.skill_name
+    name = (payload.skill_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Skill name is required")
+    normalized_name = name.lower()
+    existing = db.query(Skill).filter(Skill.normalized_name == normalized_name, Skill.skill_id != skill_id).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Skill already exists")
+
+    skill.skill_name = name
+    skill.normalized_name = normalized_name
     db.commit()
     db.refresh(skill)
 

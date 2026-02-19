@@ -23,6 +23,9 @@ router = APIRouter(
     tags=["Audit Logs"]
 )
 
+# Read-only actions are not shown in audit log; we only store and show write operations.
+READ_ONLY_ACTIONS = frozenset({"OVERVIEW_VIEW"})
+
 
 @router.post("/")
 def create_audit_log(
@@ -123,6 +126,9 @@ def _build_audit_query(
                 AuditLog.action.ilike(like),
             )
         )
+
+    # Only show write operations (exclude read-only actions)
+    query = query.filter(~AuditLog.action.in_(READ_ONLY_ACTIONS))
 
     return query
 
@@ -310,6 +316,7 @@ def export_audit_logs(
         end = datetime.combine(datetime.fromisoformat(date_to).date(), time(23, 59, 59))
         query = query.filter(AuditLog.performed_at <= end)
 
+    query = query.filter(~AuditLog.action.in_(READ_ONLY_ACTIONS))
     logs = query.order_by(AuditLog.performed_at.desc()).all()
 
     user_ids = {log.performed_by for log in logs if log.performed_by}

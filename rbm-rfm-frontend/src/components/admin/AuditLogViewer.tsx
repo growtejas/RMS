@@ -255,10 +255,10 @@ const AuditLogViewer: React.FC = () => {
     <div className="audit-log-viewer">
       <div className="viewer-header">
         <div className="header-left">
-          <h2>Audit Log Review</h2>
-          <p className="subtitle">
+          <h2>Audit Log Review Track all system changes and user activities</h2>
+          {/* <p className="subtitle">
             Track all system changes and user activities
-          </p>
+          </p> */}
         </div>
         <div className="header-actions">
           <button

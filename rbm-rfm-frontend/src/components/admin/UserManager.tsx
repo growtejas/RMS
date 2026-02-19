@@ -3,7 +3,14 @@ import { Users, Edit, Plus, Power, Search } from "lucide-react";
 import { fetchUsers, updateUser, AdminUser, createUser } from "../../api/users";
 import { fetchEmployees, EmployeeOption } from "../../api/employees";
 
-const defaultRoleOptions = ["Admin", "Owner", "HR", "Manager", "Employee", "TA"];
+const defaultRoleOptions = [
+  "Admin",
+  "Owner",
+  "HR",
+  "Manager",
+  "Employee",
+  "TA",
+];
 
 const UserManager: React.FC = () => {
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -198,16 +205,7 @@ const UserManager: React.FC = () => {
 
   return (
     <div className="user-management-container">
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "20px",
-          gap: "16px",
-          flexWrap: "wrap",
-        }}
-      >
+      <div className="viewer-header" style={{ gap: "16px", flexWrap: "wrap" }}>
         <div>
           <h2>User Management</h2>
           {error && <p style={{ color: "#ef4444" }}>{error}</p>}

@@ -82,6 +82,19 @@ const formatDate = (value?: string | null) => {
   return date.toLocaleDateString();
 };
 
+/** Extract user-friendly message from API (axios) errors. */
+const getApiErrorMessage = (err: unknown, fallback: string): string => {
+  const ax = err as { response?: { data?: { detail?: string | string[] }; status?: number }; message?: string };
+  if (ax.response?.data?.detail != null) {
+    const d = ax.response.data.detail;
+    return Array.isArray(d) ? d.map((x) => (x as { msg?: string }).msg ?? x).join(" ") : String(d);
+  }
+  if (ax.response?.status === 401) return "Please log in again.";
+  if (ax.response?.status === 403) return "You don't have permission to do this.";
+  if (ax.response?.status === 404) return "Resource not found.";
+  return ax.message && typeof ax.message === "string" ? ax.message : fallback;
+};
+
 const MasterDataManager: React.FC = () => {
   const [activeTab, setActiveTab] = useState<
     "skills" | "locations" | "departments" | "company-roles"
@@ -259,8 +272,7 @@ const MasterDataManager: React.FC = () => {
       setShowAddModal(false);
       setNewItem({ name: "", description: "", type: "skill" });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to add item";
-      setError(message);
+      setError(getApiErrorMessage(err, "Failed to add item"));
     } finally {
       setIsLoading(false);
     }
@@ -288,8 +300,7 @@ const MasterDataManager: React.FC = () => {
         await fetchLocations();
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to delete";
-      setError(message);
+      setError(getApiErrorMessage(err, "Failed to delete"));
     } finally {
       setIsLoading(false);
     }
@@ -336,8 +347,7 @@ const MasterDataManager: React.FC = () => {
       setShowEditModal(false);
       setEditingItem(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to update";
-      setError(message);
+      setError(getApiErrorMessage(err, "Failed to update"));
     } finally {
       setIsLoading(false);
     }
@@ -512,6 +522,9 @@ const MasterDataManager: React.FC = () => {
               </button>
             </div>
             <div className="modal-body edit-user-body">
+              {error && (
+                <p style={{ color: "#ef4444", marginBottom: "12px" }}>{error}</p>
+              )}
               <div className="edit-user-section">
                 <div className="section-header">
                   <h4>Details</h4>
@@ -569,8 +582,12 @@ const MasterDataManager: React.FC = () => {
               >
                 Cancel
               </button>
-              <button className="save-button" onClick={handleAddItem}>
-                Save {activeTab.slice(0, -1)}
+              <button
+                className="save-button"
+                onClick={handleAddItem}
+                disabled={isLoading}
+              >
+                {isLoading ? "Saving…" : `Save ${activeTab.slice(0, -1)}`}
               </button>
             </div>
           </div>
