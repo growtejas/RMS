@@ -16,7 +16,9 @@ import {
 import { apiClient } from "../../api/client";
 import { assignRequisitionTA } from "../../api/workflowApi";
 import { useAuth } from "../../contexts/useAuth";
-import { normalizeStatus, getStatusLabel } from "../../types/workflow";
+import { normalizeStatus } from "../../types/workflow";
+import { PlainStatusText } from "../common/PlainStatusText";
+import { PlainPriorityText } from "../common/PlainPriorityText";
 
 /* ======================================================
    Types
@@ -144,25 +146,6 @@ const getAgingClass = (days: number) => {
   if (days > 30) return "aging-30-plus";
   if (days > 7) return "aging-8-30";
   return "aging-0-7";
-};
-
-const getStatusClass = (status: Requisition["overallStatus"]) => {
-  const normalized = normalizeStatus(status);
-  switch (normalized) {
-    case "Draft":
-      return "open";
-    case "Pending_Budget":
-    case "Pending_HR":
-    case "Active":
-      return "in-progress";
-    case "Fulfilled":
-      return "fulfilled";
-    case "Cancelled":
-    case "Rejected":
-      return "closed";
-    default:
-      return "";
-  }
 };
 
 const getPriorityClass = (priority: Requisition["priority"]) => {
@@ -1097,19 +1080,11 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                       </td>
 
                       <td>
-                        <span
-                          className={`priority-indicator ${getPriorityClass(req.priority)}`}
-                        >
-                          {req.priority}
-                        </span>
+                        <PlainPriorityText priority={req.priority} />
                       </td>
 
                       <td>
-                        <span
-                          className={`ticket-status ${getStatusClass(req.overallStatus)}`}
-                        >
-                          {getStatusLabel(req.overallStatus)}
-                        </span>
+                        <PlainStatusText status={req.overallStatus} />
                       </td>
 
                       <td>

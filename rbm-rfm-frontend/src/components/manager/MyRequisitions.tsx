@@ -83,7 +83,7 @@ const MyRequisitions: React.FC = () => {
     return `status-badge ${status.toLowerCase().replace(/\s+/g, "-")}`;
   };
   return (
-    <>
+    <div className="bg-white rounded-xl shadow-sm p-6">
       {/* Page Header */}
       <div className="manager-header">
         <h2>My Requisitions</h2>
@@ -179,7 +179,7 @@ const MyRequisitions: React.FC = () => {
         • This view is read-only. • Item status, assignments, and closure are
         handled by HR / TA.
       </div>
-    </>
+    </div>
   );
 };
 

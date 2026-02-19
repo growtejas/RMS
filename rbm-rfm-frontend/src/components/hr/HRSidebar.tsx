@@ -77,7 +77,10 @@ const HrSidebar: React.FC<HrSidebarProps> = ({
   ];
 
   return (
-    <aside className={`admin-sidebar ${collapsed ? "collapsed" : ""}`}>
+    <aside
+      className={`admin-sidebar ${collapsed ? "collapsed" : ""}`}
+      aria-label="HR dashboard navigation"
+    >
       <div className="sidebar-header">
         {!collapsed && (
           <div className="sidebar-brand">
@@ -85,28 +88,43 @@ const HrSidebar: React.FC<HrSidebarProps> = ({
             <span className="brand-text">HR Dashboard</span>
           </div>
         )}
-        <button className="sidebar-toggle" onClick={onToggleCollapse}>
+        <button
+          type="button"
+          className="sidebar-toggle"
+          onClick={onToggleCollapse}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
+        >
           {collapsed ? <Menu size={20} /> : <X size={20} color="white" />}
         </button>
       </div>
 
-      <nav className="sidebar-nav">
-        <ul>
-          {menuItems.map((item) => (
-            <li key={item.id}>
-              <button
-                className={`nav-item ${activeView === item.id ? "active" : ""}`}
-                onClick={() => onViewChange(item.id)}
-                title={collapsed ? item.label : ""}
-              >
-                <span className="nav-icon">{item.icon}</span>
-                {!collapsed && <span className="nav-label">{item.label}</span>}
-                {!collapsed && activeView === item.id && (
-                  <span className="active-indicator"></span>
-                )}
-              </button>
-            </li>
-          ))}
+      <nav className="sidebar-nav" aria-label="Main menu">
+        <ul role="list">
+          {menuItems.map((item) => {
+            const isActive = activeView === item.id;
+            return (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className={`nav-item ${isActive ? "active" : ""}`}
+                  onClick={() => onViewChange(item.id)}
+                  title={collapsed ? item.label : undefined}
+                  aria-current={isActive ? "page" : undefined}
+                >
+                  <span className="nav-icon" aria-hidden>
+                    {item.icon}
+                  </span>
+                  {!collapsed && (
+                    <span className="nav-label">{item.label}</span>
+                  )}
+                  {!collapsed && isActive && (
+                    <span className="active-indicator" aria-hidden />
+                  )}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </nav>
     </aside>

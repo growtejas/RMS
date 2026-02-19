@@ -13,6 +13,7 @@ import RequisitionAudit from "./RequisitionAudit";
 import { AlertTriangle, Clock, TrendingUp } from "lucide-react";
 import { managerDashboardService } from "../../api/managerDashboardService";
 import { ManagerDashboardMetrics } from "../../types/managerDashboard";
+import { PageShell } from "../common/PageShell";
 
 const viewLabels: Record<ManagerDashboardView, string> = {
   "manager-dashboard": "Dashboard",
@@ -59,7 +60,9 @@ const ManagerDashboard: React.FC = () => {
 
   useEffect(() => {
     const handlePopState = () => {
-      const state = window.history.state as { managerView?: ManagerDashboardView } | undefined;
+      const state = window.history.state as
+        | { managerView?: ManagerDashboardView }
+        | undefined;
       setActiveView(state?.managerView ?? "manager-dashboard");
     };
     window.addEventListener("popstate", handlePopState);
@@ -311,7 +314,15 @@ const ManagerDashboard: React.FC = () => {
           }}
         />
 
-        <section className="admin-content-area">{renderContent()}</section>
+        <section className="admin-content-area">
+          {activeView === "manager-dashboard" || activeView === "raise-requisition" ? (
+            <PageShell maxWidth="7xl">{renderContent()}</PageShell>
+          ) : (
+            <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-6 px-4 md:px-6">
+              {renderContent()}
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );

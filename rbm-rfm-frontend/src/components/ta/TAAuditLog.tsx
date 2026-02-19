@@ -77,21 +77,6 @@ const getActionLabel = (action: AuditAction) => {
   }
 };
 
-const getActionBadgeClass = (action: AuditAction) => {
-  switch (action) {
-    case "STATUS_CHANGE":
-      return "priority-medium";
-    case "BUDGET_UPDATE":
-      return "priority-high";
-    case "ALLOCATION":
-      return "priority-low";
-    case "SELF_ASSIGN":
-      return "priority-low";
-    default:
-      return "";
-  }
-};
-
 /* ======================================================
    Component
    ====================================================== */
@@ -150,15 +135,7 @@ const TAAuditLog: React.FC = () => {
                   <strong>{log.requisitionId}</strong>
                 </td>
 
-                <td>
-                  <span
-                    className={`priority-indicator ${getActionBadgeClass(
-                      log.action,
-                    )}`}
-                  >
-                    {getActionLabel(log.action)}
-                  </span>
-                </td>
+                <td>{getActionLabel(log.action)}</td>
 
                 <td>{log.performedBy}</td>
 

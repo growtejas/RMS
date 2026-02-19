@@ -42,6 +42,7 @@ import {
   getWorkflowErrorMessage,
   WorkflowTransitionResponse,
 } from "../../api/workflowApi";
+import { PageShell } from "../common/PageShell";
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -1015,7 +1016,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
+    <PageShell>
       {submitNotice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div
@@ -1056,7 +1057,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <div className="max-w-6xl mx-auto">
+      <div>
         {/* Header */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
           <div className="flex items-center gap-3 mb-2">
@@ -1941,7 +1942,7 @@ const App: React.FC = () => {
           </RequisitionWizard>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 };
 

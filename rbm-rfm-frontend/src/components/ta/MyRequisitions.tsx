@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../../api/client";
 import { useAuth } from "../../contexts/useAuth";
-import { normalizeStatus, getStatusLabel } from "../../types/workflow";
+import { PlainStatusText } from "../common/PlainStatusText";
+import { PlainPriorityText } from "../common/PlainPriorityText";
 
 /* ======================================================
    Types
@@ -45,38 +46,6 @@ interface MyRequisitionsProps {
 /* ======================================================
    Helpers
    ====================================================== */
-
-const getStatusClass = (status: MyRequisition["status"]) => {
-  const normalized = normalizeStatus(status);
-  switch (normalized) {
-    case "Draft":
-      return "open";
-    case "Pending_Budget":
-    case "Pending_HR":
-    case "Active":
-      return "in-progress";
-    case "Fulfilled":
-      return "fulfilled";
-    case "Cancelled":
-    case "Rejected":
-      return "closed";
-    default:
-      return "";
-  }
-};
-
-const getPriorityClass = (priority: MyRequisition["priority"]) => {
-  switch (priority) {
-    case "High":
-      return "priority-high";
-    case "Medium":
-      return "priority-medium";
-    case "Low":
-      return "priority-low";
-    default:
-      return "";
-  }
-};
 
 const getSlaClass = (days: number) => {
   if (days <= 3) return "critical";
@@ -196,21 +165,11 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
                 <td>{req.role}</td>
 
                 <td>
-                  <span
-                    className={`ticket-status ${getStatusClass(req.status)}`}
-                  >
-                    {getStatusLabel(req.status)}
-                  </span>
+                  <PlainStatusText status={req.status} />
                 </td>
 
                 <td>
-                  <span
-                    className={`priority-indicator ${getPriorityClass(
-                      req.priority,
-                    )}`}
-                  >
-                    {req.priority}
-                  </span>
+                  <PlainPriorityText priority={req.priority} />
                 </td>
 
                 <td>

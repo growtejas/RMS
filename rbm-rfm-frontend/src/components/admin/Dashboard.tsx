@@ -111,7 +111,18 @@ const AdminDashboard: React.FC = () => {
           showUser={false}
         />
 
-        <div className="admin-content-area">{renderActiveView()}</div>
+        <div
+          className={`admin-content-area ${
+            activeView === "overview" ||
+            activeView === "master-data" ||
+            activeView === "audit-logs" ||
+            activeView === "users"
+              ? "admin-content-area--gradient-panels"
+              : ""
+          }`}
+        >
+          {renderActiveView()}
+        </div>
       </div>
     </div>
   );

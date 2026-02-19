@@ -542,6 +542,11 @@ body {
   box-shadow: var(--shadow-lg);
 }
 
+/* Gradient only as page background for Master Data, Audit Logs, User Management; panels stay white */
+.admin-content-area.admin-content-area--gradient-panels {
+  background: linear-gradient(135deg, #eff6ff 0%, #e0e7ff 100%);
+}
+
 /* ============================================================================
    AUDIT LOG FILTERS & SEARCH
    ============================================================================ */
@@ -977,26 +982,18 @@ body {
    ============================================================================ */
 
 .status-badge {
-  padding: 6px 12px;
+  /* Plain colored text only — no badges, borders, backgrounds, or rounded shapes */
   font-size: 12px;
   font-weight: 600;
-  border-radius: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   letter-spacing: 0.02em;
 }
 
 .status-badge.active {
-  background: rgba(16, 185, 129, 0.1);
   color: var(--success);
-  border: 1px solid rgba(16, 185, 129, 0.2);
 }
 
 .status-badge.inactive {
-  background: rgba(239, 68, 68, 0.1);
   color: var(--error);
-  border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
 .severity-badge {

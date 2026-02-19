@@ -1741,13 +1741,16 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                     </div>
                     <span style={{ fontWeight: 500 }}>
                       {ticket.dateCreated
-                        ? new Date(ticket.dateCreated).toLocaleDateString("en-US", {
-                            year: "numeric",
-                            month: "short",
-                            day: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
+                        ? new Date(ticket.dateCreated).toLocaleDateString(
+                            "en-US",
+                            {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            },
+                          )
                         : "—"}
                     </span>
                   </div>
@@ -2527,132 +2530,128 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                           borderRadius: "8px",
                         }}
                       >
-                            <div
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            marginBottom: "12px",
+                          }}
+                        >
+                          <span style={{ fontSize: "13px", fontWeight: 600 }}>
+                            Candidates ({itemCandidates.length})
+                          </span>
+                          {canEditItem(item) && (
+                            <button
+                              className="action-button primary"
                               style={{
+                                fontSize: "11px",
+                                padding: "4px 10px",
                                 display: "flex",
                                 alignItems: "center",
-                                justifyContent: "space-between",
-                                marginBottom: "12px",
+                                gap: "4px",
+                              }}
+                              onClick={() => {
+                                setAddCandidateItemId(item.numericItemId);
+                                setShowAddCandidate(true);
                               }}
                             >
-                              <span
-                                style={{ fontSize: "13px", fontWeight: 600 }}
+                              <UserPlus size={12} /> Add Candidate
+                            </button>
+                          )}
+                        </div>
+                        {itemCandidates.length === 0 ? (
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              color: "var(--text-tertiary)",
+                              textAlign: "center",
+                              padding: "12px",
+                            }}
+                          >
+                            No candidates yet. Add one to start the pipeline.
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "8px",
+                            }}
+                          >
+                            {itemCandidates.map((c) => (
+                              <div
+                                key={c.candidate_id}
+                                style={{
+                                  padding: "10px 12px",
+                                  backgroundColor: "var(--bg-primary)",
+                                  borderRadius: "8px",
+                                  border: "1px solid var(--border-subtle)",
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                  cursor: "pointer",
+                                }}
+                                onClick={() => setSelectedCandidate(c)}
                               >
-                                Candidates ({itemCandidates.length})
-                              </span>
-                              {canEditItem(item) && (
-                                <button
-                                  className="action-button primary"
+                                <div>
+                                  <div
+                                    style={{
+                                      fontWeight: 500,
+                                      fontSize: "13px",
+                                    }}
+                                  >
+                                    {c.full_name}
+                                  </div>
+                                  <div
+                                    style={{
+                                      fontSize: "11px",
+                                      color: "var(--text-tertiary)",
+                                    }}
+                                  >
+                                    {c.email} • {c.interviews.length} round(s)
+                                  </div>
+                                </div>
+                                <span
                                   style={{
+                                    padding: "2px 8px",
+                                    borderRadius: "12px",
                                     fontSize: "11px",
-                                    padding: "4px 10px",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "4px",
-                                  }}
-                                  onClick={() => {
-                                    setAddCandidateItemId(item.numericItemId);
-                                    setShowAddCandidate(true);
+                                    fontWeight: 600,
+                                    backgroundColor:
+                                      c.current_stage === "Hired"
+                                        ? "rgba(16,185,129,0.1)"
+                                        : c.current_stage === "Rejected"
+                                          ? "rgba(239,68,68,0.1)"
+                                          : "rgba(59,130,246,0.1)",
+                                    color:
+                                      c.current_stage === "Hired"
+                                        ? "#10b981"
+                                        : c.current_stage === "Rejected"
+                                          ? "#ef4444"
+                                          : "#3b82f6",
                                   }}
                                 >
-                                  <UserPlus size={12} /> Add Candidate
-                                </button>
-                              )}
-                            </div>
-                            {itemCandidates.length === 0 ? (
-                              <div
-                                style={{
-                                  fontSize: "12px",
-                                  color: "var(--text-tertiary)",
-                                  textAlign: "center",
-                                  padding: "12px",
-                                }}
-                              >
-                                No candidates yet. Add one to start the
-                                pipeline.
+                                  {c.current_stage}
+                                </span>
                               </div>
-                            ) : (
-                              <div
-                                style={{
-                                  display: "flex",
-                                  flexDirection: "column",
-                                  gap: "8px",
-                                }}
-                              >
-                                {itemCandidates.map((c) => (
-                                  <div
-                                    key={c.candidate_id}
-                                    style={{
-                                      padding: "10px 12px",
-                                      backgroundColor: "var(--bg-primary)",
-                                      borderRadius: "8px",
-                                      border: "1px solid var(--border-subtle)",
-                                      display: "flex",
-                                      justifyContent: "space-between",
-                                      alignItems: "center",
-                                      cursor: "pointer",
-                                    }}
-                                    onClick={() => setSelectedCandidate(c)}
-                                  >
-                                    <div>
-                                      <div
-                                        style={{
-                                          fontWeight: 500,
-                                          fontSize: "13px",
-                                        }}
-                                      >
-                                        {c.full_name}
-                                      </div>
-                                      <div
-                                        style={{
-                                          fontSize: "11px",
-                                          color: "var(--text-tertiary)",
-                                        }}
-                                      >
-                                        {c.email} • {c.interviews.length}{" "}
-                                        round(s)
-                                      </div>
-                                    </div>
-                                    <span
-                                      style={{
-                                        padding: "2px 8px",
-                                        borderRadius: "12px",
-                                        fontSize: "11px",
-                                        fontWeight: 600,
-                                        backgroundColor:
-                                          c.current_stage === "Hired"
-                                            ? "rgba(16,185,129,0.1)"
-                                            : c.current_stage === "Rejected"
-                                              ? "rgba(239,68,68,0.1)"
-                                              : "rgba(59,130,246,0.1)",
-                                        color:
-                                          c.current_stage === "Hired"
-                                            ? "#10b981"
-                                            : c.current_stage === "Rejected"
-                                              ? "#ef4444"
-                                              : "#3b82f6",
-                                      }}
-                                    >
-                                      {c.current_stage}
-                                    </span>
-                                  </div>
-                                ))}
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Item Audit History - Compact timeline */}
+                        <div style={{ marginTop: "16px" }}>
+                          <AuditSection
+                            entityType="requisition-item"
+                            entityId={Number(item.id.replace("ITEM-", ""))}
+                            title="Item Audit Trail"
+                            compact
+                            maxHeight={200}
+                            relativeTime
+                          />
+                        </div>
                       </div>
                     )}
-
-                      {/* Item Audit History - Compact timeline */}
-                      <div style={{ marginTop: "16px" }}>
-                        <AuditSection
-                          entityType="requisition-item"
-                          entityId={Number(item.id.replace("ITEM-", ""))}
-                          title="Item Audit Trail"
-                          compact
-                          maxHeight={200}
-                          relativeTime
-                        />
-                      </div>
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -3882,7 +3881,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   lineHeight: 1.4,
                 }}
               >
-                Review job descriptions, skills, and experience requirements for each position in the "Requisition Items" tab
+                Review job descriptions, skills, and experience requirements for
+                each position in the "Requisition Items" tab
               </p>
             </div>
 
@@ -3934,7 +3934,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   lineHeight: 1.4,
                 }}
               >
-                Add candidates to items and move them through the pipeline: Sourcing → Shortlisted → Interviewing → Offered
+                Add candidates to items and move them through the pipeline:
+                Sourcing → Shortlisted → Interviewing → Offered
               </p>
             </div>
 
@@ -3986,7 +3987,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   lineHeight: 1.4,
                 }}
               >
-                Schedule interviews, track feedback, and coordinate with hiring managers through the candidate pipeline
+                Schedule interviews, track feedback, and coordinate with hiring
+                managers through the candidate pipeline
               </p>
             </div>
 
@@ -4038,7 +4040,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   lineHeight: 1.4,
                 }}
               >
-                Once an offer is accepted, mark the item as "Fulfilled" and assign the selected employee to complete the requisition
+                Once an offer is accepted, mark the item as "Fulfilled" and
+                assign the selected employee to complete the requisition
               </p>
             </div>
           </div>

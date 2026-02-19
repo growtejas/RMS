@@ -41,6 +41,7 @@ import {
 } from "../../api/workflowApi";
 import type { Requisition, RequisitionItem } from "../../types/workflow";
 import { useAuth } from "../../contexts/useAuth";
+import { PlainStatusText } from "../common/PlainStatusText";
 
 // ============================================================================
 // TYPES
@@ -85,50 +86,6 @@ const formatDate = (dateStr: string | null): string => {
   } catch {
     return dateStr;
   }
-};
-
-// ============================================================================
-// STATUS BADGE COMPONENT
-// ============================================================================
-
-const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
-  const getStatusClass = () => {
-    switch (status) {
-      case "Pending_Budget":
-        return "bg-amber-100 text-amber-800 border-amber-200";
-      case "Pending_HR":
-        return "bg-blue-100 text-blue-800 border-blue-200";
-      case "Active":
-        return "bg-green-100 text-green-800 border-green-200";
-      case "Fulfilled":
-        return "bg-emerald-100 text-emerald-800 border-emerald-200";
-      case "Rejected":
-        return "bg-red-100 text-red-800 border-red-200";
-      case "Cancelled":
-        return "bg-slate-100 text-slate-800 border-slate-200";
-      default:
-        return "bg-slate-100 text-slate-600 border-slate-200";
-    }
-  };
-
-  const getLabel = () => {
-    switch (status) {
-      case "Pending_Budget":
-        return "Pending Budget";
-      case "Pending_HR":
-        return "Pending HR";
-      default:
-        return status;
-    }
-  };
-
-  return (
-    <span
-      className={`px-3 py-1 text-sm font-medium rounded-full border ${getStatusClass()}`}
-    >
-      {getLabel()}
-    </span>
-  );
 };
 
 // ============================================================================
@@ -353,7 +310,8 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
           This requisition is no longer in the budget approval phase.
         </p>
         <p className="text-sm text-slate-400 mt-1">
-          Current status: <StatusBadge status={requisition.overall_status} />
+          Current status:{" "}
+          <PlainStatusText status={requisition.overall_status} />
         </p>
       </div>
     );
@@ -679,7 +637,7 @@ const HRGatekeeperPanel: React.FC<HRGatekeeperPanelProps> = ({
               <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">
                 Status
               </p>
-              <StatusBadge status={requisition.overall_status} />
+              <PlainStatusText status={requisition.overall_status} />
             </div>
           </div>
         </div>

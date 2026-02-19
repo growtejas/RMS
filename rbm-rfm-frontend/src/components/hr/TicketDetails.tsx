@@ -50,6 +50,7 @@ import {
   type Candidate,
 } from "../../api/candidateApi";
 import CandidateDetailModal from "../shared/CandidateDetailModal";
+import { PlainPriorityText } from "../common/PlainPriorityText";
 
 interface TicketDetailsProps {
   ticketId?: string | null;
@@ -1209,10 +1210,9 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
             >
               {ticket.overallStatus}
             </span>
-            <span
-              className={`priority-indicator priority-${ticket.priority.toLowerCase()}`}
-            >
-              {ticket.priority} Priority
+            <span>
+              <PlainPriorityText priority={ticket.priority} />
+              &nbsp;Priority
             </span>
             <span
               className={`aging-indicator ${ticket.daysOpen <= 7 ? "aging-0-7" : ticket.daysOpen <= 30 ? "aging-8-30" : "aging-30-plus"}`}
@@ -2476,10 +2476,12 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                 lineHeight: 1.5,
               }}
             >
-              Each requisition item represents one position. When you assign an
-              employee, the item status changes to "Fulfilled". The overall
-              requisition will close automatically when all items are either
-              "Fulfilled" or "Cancelled".
+              Each requisition item represents a single position. HR manages
+              approval and TA assignment at item level, and the workflow engine
+              controls all status changes. The overall requisition will move to
+              a terminal state automatically when every item is either
+              "Fulfilled" or "Cancelled" — you cannot close the header manually
+              from this screen.
             </p>
           </div>
         </div>

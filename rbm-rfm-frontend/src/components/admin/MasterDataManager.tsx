@@ -360,11 +360,14 @@ const MasterDataManager: React.FC = () => {
     <div className="master-data-manager">
       <div className="data-manager-header">
         <div className="header-left">
-          <h2>Master Data Management</h2>
-          <p className="subtitle">
-            Curate dropdown options for{" "}
+          <h2>
+            Master Data Management for Skills, Locations, Departments, and
+            Company Roles
+          </h2>
+          {/* <p className="subtitle">
+            Create dropdown options for{" "}
             <strong>Skills, Locations, Departments, and Company Roles</strong>.
-          </p>
+          </p> */}
         </div>
         <button className="add-button" onClick={() => setShowAddModal(true)}>
           <Plus size={16} />

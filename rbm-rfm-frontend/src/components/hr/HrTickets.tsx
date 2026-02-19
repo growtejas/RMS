@@ -26,6 +26,7 @@ import {
   getStatusLabel,
   REQUISITION_STATUSES,
 } from "../../types/workflow";
+import { PlainPriorityText } from "../common/PlainPriorityText";
 /* ======================================================
    Types
    ====================================================== */
@@ -150,8 +151,14 @@ const mapRequisitions = (data: BackendRequisition[]): Requisition[] =>
     assignedAt: req.assigned_at ?? null,
     assignedTA: req.assigned_ta ? `User #${req.assigned_ta}` : undefined,
     budgetAmount: req.budget_amount ?? undefined,
-    estimatedBudget: req.total_estimated_budget != null ? Number(req.total_estimated_budget) : null,
-    approvedBudget: req.total_approved_budget != null ? Number(req.total_approved_budget) : null,
+    estimatedBudget:
+      req.total_estimated_budget != null
+        ? Number(req.total_estimated_budget)
+        : null,
+    approvedBudget:
+      req.total_approved_budget != null
+        ? Number(req.total_approved_budget)
+        : null,
     budgetApprovedBy: req.budget_approved_by ?? null,
     approvedBy: req.approved_by ?? null,
     approvalHistory: req.approval_history ?? null,
@@ -221,19 +228,6 @@ const getAgingClass = (days: number) => {
   if (days > 30) return "aging-30-plus";
   if (days > 7) return "aging-8-30";
   return "aging-0-7";
-};
-
-const getPriorityClass = (priority: Requisition["priority"]) => {
-  switch (priority) {
-    case "High":
-      return "priority-high";
-    case "Medium":
-      return "priority-medium";
-    case "Low":
-      return "priority-low";
-    default:
-      return "";
-  }
 };
 
 /**
@@ -827,6 +821,19 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
   const [transitionsLoading, setTransitionsLoading] = useState<
     Record<number, boolean>
   >({});
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    activeFilter,
+    searchQuery,
+    priorityFilter,
+    statusFilter,
+    locationFilter,
+    modeFilter,
+  ]);
 
   // Fetch allowed transitions for a single requisition from backend
   const fetchAllowedTransitions = useCallback(async (reqId: number) => {
@@ -1071,6 +1078,16 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
         req.project.toLowerCase().includes(searchQuery.toLowerCase()) ||
         req.client.toLowerCase().includes(searchQuery.toLowerCase()),
     );
+
+  const PAGE_SIZE = 10;
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredRequisitions.length / PAGE_SIZE),
+  );
+  const paginatedRequisitions = filteredRequisitions.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
 
   const handleAssignEmployee = (itemId: string, empId: string) => {
     const employee = employees.find((emp) => emp.id === empId);
@@ -1375,46 +1392,51 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
       )}
 
       {/* Filter Chips */}
-      <div className="filter-chips" style={{ marginBottom: "24px" }}>
+      <div className="filter-chips">
         <button
+          type="button"
           className={`filter-chip ${activeFilter === "all" ? "active" : ""}`}
           onClick={() => setActiveFilter("all")}
         >
-          <Filter size={12} style={{ marginRight: "6px" }} />
+          <span className="filter-chip-icon" aria-hidden>
+            <Filter size={14} />
+          </span>
           All Requisitions ({requisitions.length})
         </button>
         <button
+          type="button"
           className={`filter-chip ${activeFilter === "unassigned" ? "active" : ""}`}
           onClick={() => setActiveFilter("unassigned")}
         >
-          <AlertCircle size={12} style={{ marginRight: "6px" }} />
+          <span className="filter-chip-icon" aria-hidden>
+            <AlertCircle size={14} />
+          </span>
           Unassigned ({requisitions.filter((r) => !r.assignedTAId).length})
         </button>
         <button
+          type="button"
           className={`filter-chip ${activeFilter === "assigned" ? "active" : ""}`}
           onClick={() => setActiveFilter("assigned")}
         >
-          <CheckCircle size={12} style={{ marginRight: "6px" }} />
+          <span className="filter-chip-icon" aria-hidden>
+            <CheckCircle size={14} />
+          </span>
           Assigned Tickets ({requisitions.filter((r) => r.assignedTAId).length})
         </button>
-        {/* <button
-          className={`filter-chip ${activeFilter === "my" ? "active" : ""}`}
-          onClick={() => setActiveFilter("my")}
-        >
-          <Users size={12} style={{ marginRight: "6px" }} />
-          My Assignments ({requisitions.filter((r) => r.assignedTAId).length})
-        </button> */}
         <button
+          type="button"
           className={`filter-chip ${activeFilter === "approvals" ? "active" : ""}`}
           onClick={() => setActiveFilter("approvals")}
         >
-          <Target size={12} style={{ marginRight: "6px" }} />
+          <span className="filter-chip-icon" aria-hidden>
+            <Target size={14} />
+          </span>
           Pending Approvals ({pendingApprovals.length})
         </button>
       </div>
 
       {/* Search and Filters */}
-      <div className="log-filters" style={{ marginBottom: "24px" }}>
+      <div className="log-filters">
         <div className="filter-group">
           <div className="search-box">
             <Search size={14} />
@@ -1601,9 +1623,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                                   <button
                                     className="action-button primary compact approval-approve"
                                     disabled={isActionLoading}
-                                    onClick={() =>
-                                      handleApproveRelease(req)
-                                    }
+                                    onClick={() => handleApproveRelease(req)}
                                   >
                                     {approvalLoading[req.reqId]
                                       ? "..."
@@ -1729,11 +1749,13 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                     </span>
                   </div>
 
-                  <div className="form-field" style={{ marginBottom: "12px" }}>
+                  <div
+                    className="form-field assign-ta-field"
+                    style={{ marginBottom: "12px" }}
+                  >
                     <label>Assign Talent Acquisition Specialist</label>
-                    <input
-                      list={`ta-options-${req.reqId}`}
-                      placeholder="Search TA by name or ID"
+                    <select
+                      className="assign-ta-select"
                       value={assignmentDrafts[req.reqId] ?? ""}
                       onChange={(e) =>
                         setAssignmentDrafts((prev) => ({
@@ -1741,14 +1763,14 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                           [req.reqId]: e.target.value,
                         }))
                       }
-                    />
-                    <datalist id={`ta-options-${req.reqId}`}>
+                    >
+                      <option value="">Select TA...</option>
                       {taUsers.map((user) => (
                         <option key={user.user_id} value={user.user_id}>
-                          {user.username} (#{user.user_id})
+                          {user.username}
                         </option>
                       ))}
-                    </datalist>
+                    </select>
                   </div>
 
                   <button
@@ -1821,7 +1843,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
 
                   {!isLoading &&
                     !error &&
-                    filteredRequisitions.map((req) => {
+                    paginatedRequisitions.map((req) => {
                       const agingDays = getAgingDays(req.dateCreated);
                       const completion = calculateCompletion(req.items);
                       const isAssignedToMe = req.assignedTA === currentUser;
@@ -1930,11 +1952,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                           </td>
 
                           <td>
-                            <span
-                              className={`priority-indicator ${getPriorityClass(req.priority)}`}
-                            >
-                              {req.priority}
-                            </span>
+                            <PlainPriorityText priority={req.priority} />
                           </td>
 
                           <td>
@@ -2018,16 +2036,9 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                             {!req.assignedTAId &&
                             !hasItemLevelAssignments &&
                             normalizeStatus(req.overallStatus) === "Active" ? (
-                              <div
-                                style={{
-                                  display: "flex",
-                                  gap: "6px",
-                                  alignItems: "center",
-                                }}
-                              >
-                                <input
-                                  list={`ta-inline-${req.reqId}`}
-                                  placeholder="Assign TA"
+                              <div className="assign-ta-inline">
+                                <select
+                                  className="assign-ta-select assign-ta-select--inline"
                                   value={assignmentDrafts[req.reqId] ?? ""}
                                   onClick={(e) => e.stopPropagation()}
                                   onChange={(e) => {
@@ -2037,24 +2048,17 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                                       [req.reqId]: e.target.value,
                                     }));
                                   }}
-                                  style={{
-                                    minWidth: "120px",
-                                    padding: "6px 8px",
-                                    borderRadius: "8px",
-                                    border: "1px solid var(--border-subtle)",
-                                    fontSize: "11px",
-                                  }}
-                                />
-                                <datalist id={`ta-inline-${req.reqId}`}>
+                                >
+                                  <option value="">Assign TA</option>
                                   {taUsers.map((user) => (
                                     <option
                                       key={user.user_id}
                                       value={user.user_id}
                                     >
-                                      {user.username} (#{user.user_id})
+                                      {user.username}
                                     </option>
                                   ))}
-                                </datalist>
+                                </select>
                                 <button
                                   className="action-button primary"
                                   style={{
@@ -2139,6 +2143,76 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
               </table>
             </div>
 
+            {/* Pagination — 10 per page, red styling */}
+            {!isLoading && !error && filteredRequisitions.length > 0 && (
+              <nav
+                className="hr-requisition-pagination"
+                aria-label="Requisition list pagination"
+              >
+                <ul className="pagination">
+                  <li
+                    className={`page-item ${currentPage <= 1 ? "disabled" : ""}`}
+                  >
+                    <a
+                      className="page-link"
+                      href="#"
+                      tabIndex={currentPage <= 1 ? -1 : 0}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (currentPage > 1) setCurrentPage((p) => p - 1);
+                      }}
+                      aria-disabled={currentPage <= 1}
+                    >
+                      Previous
+                    </a>
+                  </li>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+                    (page) => (
+                      <li
+                        key={page}
+                        className={`page-item ${currentPage === page ? "active" : ""}`}
+                      >
+                        <a
+                          className="page-link"
+                          href="#"
+                          tabIndex={currentPage === page ? -1 : 0}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setCurrentPage(page);
+                          }}
+                          aria-current={
+                            currentPage === page ? "page" : undefined
+                          }
+                        >
+                          {page}
+                          {currentPage === page && (
+                            <span className="sr-only">(current)</span>
+                          )}
+                        </a>
+                      </li>
+                    ),
+                  )}
+                  <li
+                    className={`page-item ${currentPage >= totalPages ? "disabled" : ""}`}
+                  >
+                    <a
+                      className="page-link"
+                      href="#"
+                      tabIndex={currentPage >= totalPages ? -1 : 0}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (currentPage < totalPages)
+                          setCurrentPage((p) => p + 1);
+                      }}
+                      aria-disabled={currentPage >= totalPages}
+                    >
+                      Next
+                    </a>
+                  </li>
+                </ul>
+              </nav>
+            )}
+
             {/* Quick Stats */}
             <div
               style={{
@@ -2152,8 +2226,18 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <div>
                   <strong>
-                    Showing {filteredRequisitions.length} of{" "}
-                    {requisitions.length} requisitions
+                    Showing{" "}
+                    {filteredRequisitions.length === 0
+                      ? 0
+                      : (currentPage - 1) * PAGE_SIZE + 1}
+                    –
+                    {Math.min(
+                      currentPage * PAGE_SIZE,
+                      filteredRequisitions.length,
+                    )}{" "}
+                    of {filteredRequisitions.length} requisitions
+                    {filteredRequisitions.length !== requisitions.length &&
+                      ` (${requisitions.length} total)`}
                   </strong>
                 </div>
                 <div>
