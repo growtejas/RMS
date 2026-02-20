@@ -117,75 +117,86 @@ const ContactDetailsTab: React.FC<ContactDetailsTabProps> = ({
   };
 
   return (
-    <div className="master-data-manager">
-      <div className="manager-header">
-        <h3>Contact Details</h3>
+    <div className="form-section active">
+      <div className="section-header">
+        <h2>
+          <span className="section-icon">3</span> Contact Details
+        </h2>
+        <p className="section-subtitle">Phone and address.</p>
       </div>
+      <div className="section-content">
+        {error && (
+          <div className="validation-message error" style={{ marginBottom: 16 }}>
+            {error}
+          </div>
+        )}
 
-      {error && (
-        <div className="tickets-empty-state" style={{ color: "var(--error)" }}>
-          {error}
+        <div className="form-grid">
+          <div className="form-field">
+            <label>Phone</label>
+            <input
+              value={formState.phone}
+              onChange={(event) => handleChange("phone", event.target.value)}
+              disabled={isSaving}
+            />
+          </div>
+          <div className="form-field">
+            <label>Alternate Phone</label>
+            <input
+              value={formState.alternatePhone}
+              onChange={(event) =>
+                handleChange("alternatePhone", event.target.value)
+              }
+              disabled={isSaving}
+            />
+          </div>
+          <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+            <label>Address</label>
+            <input
+              value={formState.addressLine}
+              onChange={(event) =>
+                handleChange("addressLine", event.target.value)
+              }
+              placeholder="Address line"
+              disabled={isSaving}
+            />
+          </div>
+          <div className="form-field">
+            <label>City</label>
+            <input
+              value={formState.city}
+              onChange={(event) => handleChange("city", event.target.value)}
+              disabled={isSaving}
+            />
+          </div>
+          <div className="form-field">
+            <label>State</label>
+            <input
+              value={formState.state}
+              onChange={(event) => handleChange("state", event.target.value)}
+              disabled={isSaving}
+            />
+          </div>
+          <div className="form-field">
+            <label>Pincode</label>
+            <input
+              value={formState.pincode}
+              onChange={(event) => handleChange("pincode", event.target.value)}
+              disabled={isSaving}
+            />
+          </div>
         </div>
-      )}
 
-      <div className="form-field">
-        <label>Phone</label>
-        <input
-          value={formState.phone}
-          onChange={(event) => handleChange("phone", event.target.value)}
-        />
-      </div>
-
-      <div className="form-field">
-        <label>Alternate Phone</label>
-        <input
-          value={formState.alternatePhone}
-          onChange={(event) =>
-            handleChange("alternatePhone", event.target.value)
-          }
-        />
-      </div>
-
-      <div className="form-field">
-        <label>Address</label>
-        <input
-          value={formState.addressLine}
-          onChange={(event) => handleChange("addressLine", event.target.value)}
-        />
-      </div>
-
-      <div className="form-field">
-        <label>City</label>
-        <input
-          value={formState.city}
-          onChange={(event) => handleChange("city", event.target.value)}
-        />
-      </div>
-
-      <div className="form-field">
-        <label>State</label>
-        <input
-          value={formState.state}
-          onChange={(event) => handleChange("state", event.target.value)}
-        />
-      </div>
-
-      <div className="form-field">
-        <label>Pincode</label>
-        <input
-          value={formState.pincode}
-          onChange={(event) => handleChange("pincode", event.target.value)}
-        />
-      </div>
-
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button
-          className="action-button primary"
-          onClick={handleSave}
-          disabled={isSaving || !isValid}
-        >
-          {isSaving ? "Saving..." : "Save Changes"}
-        </button>
+        <div className="form-actions-row">
+          <button
+            type="button"
+            className="add-item-button"
+            onClick={handleSave}
+            disabled={isSaving || !isValid}
+          >
+            {isSaving ? "Saving..." : "Save Changes"}
+          </button>
+        </div>
       </div>
     </div>
   );

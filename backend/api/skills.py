@@ -44,7 +44,12 @@ def create_skill(
     db.add(audit)
     db.commit()
 
-    return skill
+    return SkillResponse(
+        skill_id=skill.skill_id,
+        skill_name=skill.skill_name,
+        created_by=current_user.username,
+        created_at=None,
+    )
 
 
 @router.post("/instant-add", response_model=SkillResponse)

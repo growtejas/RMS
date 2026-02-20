@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/useAuth";
 import Header from "../Header";
 import TAHeader from "./TAHeader";
-import TASidebar, { TADashboardView } from "./TASidebar";
+import TASidebar from "./TASidebar";
 import "../../styles/hr/hr-dashboard.css";
 import Requisitions from "./Requisitions";
 import MyRequisitions from "./MyRequisitions";
@@ -22,7 +22,7 @@ import {
    View Labels
    ====================================================== */
 
-const viewLabels: Record<TADashboardView, string> = {
+const viewLabels: Record<string, string> = {
   dashboard: "Dashboard",
   requisitions: "Requisitions",
   "my-requisitions": "My Requisitions",
@@ -59,21 +59,23 @@ interface BackendRequisition {
 
 const SLA_HOURS = 72;
 
-const getAgeHours = (dateValue?: string | null) => {
-  if (!dateValue) return 0;
+const getAgeHours = (dateValue?: string | null): number => {
+  if (!dateValue || String(dateValue).trim() === "") return 0;
   const created = new Date(dateValue);
+  if (Number.isNaN(created.getTime())) return 0;
   const diffMs = Date.now() - created.getTime();
   return Math.max(0, diffMs / 3600000);
 };
 
-const getDaysOpen = (dateValue?: string | null) => {
-  if (!dateValue) return 0;
+const getDaysOpen = (dateValue?: string | null): number => {
+  if (!dateValue || String(dateValue).trim() === "") return 0;
   const created = new Date(dateValue);
+  if (Number.isNaN(created.getTime())) return 0;
   const diffMs = Math.max(0, Date.now() - created.getTime());
   return Math.ceil(diffMs / 86400000);
 };
 
-const getSlaDaysRemaining = (dateValue?: string | null) => {
+const getSlaDaysRemaining = (dateValue?: string | null): number => {
   const remainingHours = SLA_HOURS - getAgeHours(dateValue);
   return Math.ceil(remainingHours / 24);
 };
@@ -88,9 +90,9 @@ const isOpenStatus = (status?: string | null) =>
 const TADashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const currentUserId = user?.user_id ?? null;
 
-  const [activeView, setActiveView] = useState<TADashboardView>("dashboard");
   const [collapsed, setCollapsed] = useState(false);
   const [selectedRequisitionId, setSelectedRequisitionId] = useState<
     string | null
@@ -98,6 +100,7 @@ const TADashboard: React.FC = () => {
   const [requisitions, setRequisitions] = useState<BackendRequisition[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [visibleAlertCount, setVisibleAlertCount] = useState(20);
 
   useEffect(() => {
     let isMounted = true;
@@ -159,12 +162,12 @@ const TADashboard: React.FC = () => {
         value: assignedToMe,
         variant: "success",
       },
-      {
-        key: "avgTime",
-        label: "Avg Fulfillment Time (Days)",
-        value: avgFulfillmentDays,
-        variant: "neutral",
-      },
+      // {
+      //   key: "avgTime",
+      //   label: "Avg Fulfillment Time (Days)",
+      //   value: avgFulfillmentDays,
+      //   variant: "neutral",
+      // },
     ];
   }, [requisitions, currentUserId]);
 
@@ -181,14 +184,18 @@ const TADashboard: React.FC = () => {
             severity: "critical" as const,
           };
         }
-        if (slaDays <= 2) {
+        if (slaDays <= 2 && slaDays >= 0) {
           return {
             id: `REQ-${req.req_id}`,
-            message: `REQ-${req.req_id} nearing SLA breach (${Math.max(
-              0,
-              slaDays,
-            )} days left)`,
+            message: `REQ-${req.req_id} nearing SLA breach (${slaDays} day${slaDays === 1 ? "" : "s"} left)`,
             severity: "warning" as const,
+          };
+        }
+        if (slaDays < 0) {
+          return {
+            id: `REQ-${req.req_id}`,
+            message: `REQ-${req.req_id} SLA breached (${Math.abs(slaDays)} day${Math.abs(slaDays) === 1 ? "" : "s"} overdue)`,
+            severity: "critical" as const,
           };
         }
         return null;
@@ -196,7 +203,25 @@ const TADashboard: React.FC = () => {
       .filter(Boolean) as TAAlert[];
   }, [requisitions]);
 
-  const activeLabel = useMemo(() => viewLabels[activeView], [activeView]);
+  useEffect(() => {
+    setVisibleAlertCount(20);
+  }, [alerts.length]);
+
+  const activeLabel = useMemo(() => {
+    if (location.pathname.startsWith("/ta/requisitions/")) {
+      return viewLabels["requisition-detail"];
+    }
+    if (location.pathname.startsWith("/ta/requisitions")) {
+      return viewLabels["requisitions"];
+    }
+    if (location.pathname.startsWith("/ta/my-requisitions")) {
+      return viewLabels["my-requisitions"];
+    }
+    if (location.pathname.startsWith("/ta/resource-pool")) {
+      return viewLabels["resource-pool"];
+    }
+    return viewLabels["dashboard"];
+  }, [location.pathname]);
 
   /* ======================================================
      Dashboard Render
@@ -234,30 +259,77 @@ const TADashboard: React.FC = () => {
             <p>No alerts at the moment</p>
           </div>
         ) : (
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {alerts.map((alert) => (
-              <li
-                key={alert.id}
+          <>
+            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {alerts.slice(0, visibleAlertCount).map((alert) => (
+                <li
+                  key={alert.id}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "14px 0",
+                    borderBottom: "1px solid var(--border-light)",
+                  }}
+                >
+                  <span>{alert.message}</span>
+
+                  {alert.severity === "critical" ? (
+                    <span className="aging-indicator aging-30-plus">
+                      Critical
+                    </span>
+                  ) : (
+                    <span className="sla-timer warning">SLA Warning</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+
+            {alerts.length > visibleAlertCount && (
+              <div
                 style={{
+                  marginTop: "16px",
                   display: "flex",
-                  justifyContent: "space-between",
+                  justifyContent: "center",
+                  flexDirection: "column",
                   alignItems: "center",
-                  padding: "14px 0",
-                  borderBottom: "1px solid var(--border-light)",
+                  gap: "8px",
                 }}
               >
-                <span>{alert.message}</span>
+                <button
+                  type="button"
+                  className="action-button"
+                  onClick={() =>
+                    setVisibleAlertCount((prev) => prev + 20)
+                  }
+                >
+                  Load more alerts
+                </button>
+                <span
+                  style={{
+                    fontSize: "12px",
+                    color: "var(--text-tertiary)",
+                  }}
+                >
+                  Showing {visibleAlertCount} of {alerts.length} alerts
+                </span>
+              </div>
+            )}
 
-                {alert.severity === "critical" ? (
-                  <span className="aging-indicator aging-30-plus">
-                    Critical
-                  </span>
-                ) : (
-                  <span className="sla-timer warning">SLA Warning</span>
-                )}
-              </li>
-            ))}
-          </ul>
+            {alerts.length > 0 &&
+              alerts.length <= visibleAlertCount && (
+                <div
+                  style={{
+                    marginTop: "12px",
+                    fontSize: "12px",
+                    color: "var(--text-tertiary)",
+                    textAlign: "center",
+                  }}
+                >
+                  Showing all {alerts.length} alerts
+                </div>
+              )}
+          </>
         )}
       </div>
     </>
@@ -267,79 +339,9 @@ const TADashboard: React.FC = () => {
      Navigation Handlers & Browser Back Support
      ====================================================== */
 
-  const goToView = (view: TADashboardView, requisitionId?: string | null) => {
-    const payload = {
-      taView: view,
-      requisitionId: requisitionId ?? null,
-    };
-    window.history.pushState(
-      payload,
-      "",
-      window.location.pathname + window.location.search,
-    );
-    setActiveView(view);
-    setSelectedRequisitionId(requisitionId ?? null);
-  };
-
   const handleViewDetail = (reqId: string) => {
-    goToView("requisition-detail", reqId);
-  };
-
-  useEffect(() => {
-    if (window.history.state?.taView == null) {
-      window.history.replaceState(
-        { taView: activeView, requisitionId: selectedRequisitionId },
-        "",
-        window.location.pathname + window.location.search,
-      );
-    }
-  }, []);
-
-  useEffect(() => {
-    const handlePopState = () => {
-      const state = window.history.state as
-        | { taView?: TADashboardView; requisitionId?: string | null }
-        | undefined;
-      const view = state?.taView ?? "dashboard";
-      const id = state?.requisitionId ?? null;
-      setActiveView(view);
-      setSelectedRequisitionId(id);
-    };
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
-
-  const renderContent = () => {
-    switch (activeView) {
-      case "dashboard":
-        return renderDashboard();
-
-      case "requisitions":
-        return <Requisitions onViewRequisition={handleViewDetail} />;
-
-      case "my-requisitions":
-        return <MyRequisitions onViewRequisition={handleViewDetail} />;
-
-      case "requisition-detail":
-        return (
-          <RequisitionDetail
-            requisitionId={selectedRequisitionId}
-            onBack={() => window.history.back()}
-          />
-        );
-
-      case "resource-pool":
-        return <ResourcePool />;
-
-      case "reports":
-        return <TAReports />;
-
-      case "audit-logs":
-        return <TAAuditLog />;
-
-      default:
-        return null;
-    }
+    setSelectedRequisitionId(reqId);
+    navigate(`/ta/requisitions/${reqId}`);
   };
 
   /* ======================================================
@@ -349,8 +351,6 @@ const TADashboard: React.FC = () => {
   return (
     <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
       <TASidebar
-        activeView={activeView}
-        onViewChange={(view) => goToView(view)}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((prev) => !prev)}
       />
@@ -361,7 +361,7 @@ const TADashboard: React.FC = () => {
         <Header />
 
         <TAHeader
-          title={activeLabel}
+          title={activeLabel ?? "Dashboard"}
           user={user}
           onLogout={() => {
             logout();
@@ -369,7 +369,28 @@ const TADashboard: React.FC = () => {
           }}
         />
 
-        <section className="admin-content-area">{renderContent()}</section>
+        <section className="admin-content-area">
+          {location.pathname === "/ta" ? (
+            renderDashboard()
+          ) : location.pathname === "/ta/requisitions" ? (
+            <Requisitions onViewRequisition={handleViewDetail} />
+          ) : location.pathname === "/ta/my-requisitions" ? (
+            <MyRequisitions onViewRequisition={handleViewDetail} />
+          ) : location.pathname.startsWith("/ta/requisitions/") ? (
+            <RequisitionDetail
+              requisitionId={selectedRequisitionId}
+              onBack={() => navigate(-1)}
+            />
+          ) : location.pathname === "/ta/resource-pool" ? (
+            <ResourcePool />
+          ) : location.pathname === "/ta/reports" ? (
+            <TAReports />
+          ) : location.pathname === "/ta/audit-logs" ? (
+            <TAAuditLog />
+          ) : (
+            <Outlet />
+          )}
+        </section>
       </div>
     </div>
   );

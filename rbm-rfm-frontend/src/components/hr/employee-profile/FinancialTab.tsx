@@ -58,76 +58,81 @@ const FinancialTab: React.FC<FinancialTabProps> = ({
   };
 
   return (
-    <div className="master-data-manager">
-      <div className="manager-header">
-        <h3>Financial Details</h3>
+    <div className="form-section active">
+      <div className="section-header">
+        <h2>
+          <span className="section-icon">5</span> Financial
+        </h2>
+        <p className="section-subtitle">Restricted financial data.</p>
       </div>
-
-      <div className="form-field">
-        <label>Bank Name</label>
-        <input
-          value={isEditing ? bankName : bankName || "—"}
-          onChange={(event) => setBankName(event.target.value)}
-          disabled={!isEditing}
-        />
-      </div>
-
-      <div className="form-field">
-        <label>Account Number</label>
-        <input
-          value={isEditing ? accountNumber : maskValue(accountNumber || "—")}
-          onChange={(event) => setAccountNumber(event.target.value)}
-          disabled={!isEditing}
-        />
-      </div>
-
-      <div className="form-field">
-        <label>IFSC Code</label>
-        <input
-          value={isEditing ? ifsc : ifsc || "—"}
-          onChange={(event) => setIfsc(event.target.value)}
-          disabled={!isEditing}
-        />
-      </div>
-
-      <div className="form-field">
-        <label>PAN</label>
-        <input
-          value={isEditing ? pan : maskValue(pan || "—")}
-          onChange={(event) => setPan(event.target.value)}
-          disabled={!isEditing}
-        />
-      </div>
-
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px" }}>
-        {!isEditing ? (
-          <button
-            className="action-button primary"
-            type="button"
-            onClick={() => setIsEditing(true)}
-          >
-            Edit Financial Details
-          </button>
-        ) : (
-          <>
-            <button
-              className="action-button"
-              type="button"
-              onClick={() => setIsEditing(false)}
-              disabled={isSaving}
-            >
-              Cancel
-            </button>
-            <button
-              className="action-button primary"
-              type="button"
-              onClick={handleSave}
-              disabled={isSaving}
-            >
-              {isSaving ? "Saving..." : "Save Changes"}
-            </button>
-          </>
-        )}
+      <div className="section-content">
+        <div className="secure-section">
+          <div className="secure-banner">Restricted • HR Only</div>
+          <div className="form-grid">
+            <div className="form-field">
+              <label>Bank Name</label>
+              <input
+                value={isEditing ? bankName : bankName || "—"}
+                onChange={(event) => setBankName(event.target.value)}
+                disabled={!isEditing}
+              />
+            </div>
+            <div className="form-field">
+              <label>Account Number</label>
+              <input
+                value={isEditing ? accountNumber : maskValue(accountNumber || "—")}
+                onChange={(event) => setAccountNumber(event.target.value)}
+                disabled={!isEditing}
+              />
+            </div>
+            <div className="form-field">
+              <label>IFSC Code</label>
+              <input
+                value={isEditing ? ifsc : ifsc || "—"}
+                onChange={(event) => setIfsc(event.target.value)}
+                disabled={!isEditing}
+              />
+            </div>
+            <div className="form-field">
+              <label>PAN</label>
+              <input
+                value={isEditing ? pan : maskValue(pan || "—")}
+                onChange={(event) => setPan(event.target.value)}
+                disabled={!isEditing}
+              />
+            </div>
+          </div>
+          <div className="form-actions-row">
+            {!isEditing ? (
+              <button
+                type="button"
+                className="add-item-button"
+                onClick={() => setIsEditing(true)}
+              >
+                Edit Financial Details
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="action-button"
+                  onClick={() => setIsEditing(false)}
+                  disabled={isSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="add-item-button"
+                  onClick={handleSave}
+                  disabled={isSaving}
+                >
+                  {isSaving ? "Saving..." : "Save Changes"}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -87,6 +87,12 @@ const AuditLogViewer: React.FC = () => {
   });
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
+  const [visibleCount, setVisibleCount] = useState(20);
+
+  // Reset visible count when filters or data change
+  useEffect(() => {
+    setVisibleCount(20);
+  }, [debouncedSearch, filters.dateFrom, filters.dateTo, filters.user, filters.action]);
 
   const fetchSummary = async () => {
     try {
@@ -131,6 +137,7 @@ const AuditLogViewer: React.FC = () => {
       const mapped = raw.map(normalizeAudit);
       setLogs(mapped);
       setFilteredLogs(mapped);
+      setVisibleCount(20);
       await fetchSummary();
     } catch (err) {
       const message =
@@ -255,10 +262,10 @@ const AuditLogViewer: React.FC = () => {
     <div className="audit-log-viewer">
       <div className="viewer-header">
         <div className="header-left">
-          <h2>Audit Log Review Track all system changes and user activities</h2>
-          {/* <p className="subtitle">
-            Track all system changes and user activities
-          </p> */}
+          <h2>Audit Log Review</h2>
+          <p className="subtitle">
+            Write operations only — creates, updates, deletes, approvals, and workflow changes. View/list actions are excluded.
+          </p>
         </div>
         <div className="header-actions">
           <button
@@ -425,7 +432,9 @@ const AuditLogViewer: React.FC = () => {
                 </td>
               </tr>
             )}
-            {filteredLogs.map((log) => (
+            {filteredLogs
+              .slice(0, visibleCount)
+              .map((log) => (
               <tr key={log.id} className="log-row">
                 <td className="timestamp">
                   <div className="date">
@@ -460,6 +469,46 @@ const AuditLogViewer: React.FC = () => {
             ))}
           </tbody>
         </table>
+        {!isLoading && filteredLogs.length > visibleCount && (
+          <div
+            style={{
+              marginTop: "16px",
+              display: "flex",
+              justifyContent: "center",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <button
+              type="button"
+              className="action-button"
+              onClick={() => setVisibleCount((prev) => prev + 20)}
+            >
+              Load more audit logs
+            </button>
+            <span
+              style={{
+                fontSize: "12px",
+                color: "var(--text-tertiary)",
+              }}
+            >
+              Showing {visibleCount} of {filteredLogs.length} logs
+            </span>
+          </div>
+        )}
+        {!isLoading && filteredLogs.length > 0 && filteredLogs.length <= visibleCount && (
+          <div
+            style={{
+              marginTop: "12px",
+              fontSize: "12px",
+              color: "var(--text-tertiary)",
+              textAlign: "center",
+            }}
+          >
+            Showing all {filteredLogs.length} logs
+          </div>
+        )}
         {!isLoading && filteredLogs.length === 0 && (
           <div className="empty-logs">
             <AlertTriangle size={48} />

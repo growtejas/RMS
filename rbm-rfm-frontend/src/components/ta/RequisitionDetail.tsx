@@ -1789,9 +1789,23 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                     SLA Status
                   </span>
                   <span
-                    className={`sla-timer ${ticket.daysOpen > 10 ? "critical" : "warning"}`}
+                    className={`sla-timer ${
+                      (() => {
+                        const remainingHours =
+                          ticket.slaHours - ticket.daysOpen * 24;
+                        if (remainingHours <= 0) return "critical";
+                        if (remainingHours <= 48) return "warning";
+                        return "";
+                      })()
+                    }`}
                   >
-                    {ticket.slaHours - ticket.daysOpen * 24}h remaining
+                    {(() => {
+                      const remainingHours =
+                        ticket.slaHours - ticket.daysOpen * 24;
+                      if (remainingHours <= 0)
+                        return "Breached";
+                      return `${remainingHours}h remaining`;
+                    })()}
                   </span>
                 </div>
                 <div

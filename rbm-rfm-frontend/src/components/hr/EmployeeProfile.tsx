@@ -26,6 +26,7 @@ import {
   EmployeeSkill,
   SkillCatalog,
 } from "./employee-profile/types";
+import "../../styles/hr/create-employee.css";
 
 type ProfileTab =
   | "overview"
@@ -452,27 +453,28 @@ const EmployeeProfile: React.FC = () => {
   };
 
   return (
-    <>
+    <div className="create-employee-container employee-profile-detail">
       <button
         className="action-button"
-        style={{ marginBottom: "16px" }}
+        style={{ marginBottom: "20px" }}
         onClick={() => setSelectedEmployeeId(null)}
       >
         <ArrowLeft size={14} />
         Back to Employee List
       </button>
 
-      <div className="manager-header">
-        <h2>{employeeCore?.full_name ?? selectedEmployeeId}</h2>
+      <div className="create-employee-header">
+        <h1>{employeeCore?.full_name ?? selectedEmployeeId}</h1>
         <p className="subtitle">{employeeCore?.emp_id ?? selectedEmployeeId}</p>
       </div>
 
-      <div style={{ display: "flex", gap: "8px", marginBottom: "24px" }}>
+      <div className="employee-profile-tabs">
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            className={`control-button ${
-              activeTab === tab.id ? "primary" : ""
+            type="button"
+            className={`employee-profile-tab ${
+              activeTab === tab.id ? "active" : ""
             }`}
             onClick={() => setActiveTab(tab.id)}
           >
@@ -483,15 +485,15 @@ const EmployeeProfile: React.FC = () => {
       </div>
 
       {error && (
-        <div className="tickets-empty-state" style={{ color: "var(--error)" }}>
-          {error}
-        </div>
+        <div className="validation-message error form-banner">{error}</div>
       )}
 
       {isLoadingDetail || !employeeCore ? (
-        <div className="tickets-empty-state">Loading employee profile…</div>
+        <div className="empty-state">
+          <p>Loading employee profile…</p>
+        </div>
       ) : (
-        <>
+        <div className="employee-form-container employee-profile-form">
           {activeTab === "overview" && (
             <OverviewTab
               employee={employeeCore}
@@ -541,9 +543,9 @@ const EmployeeProfile: React.FC = () => {
               isSaving={isSaving}
             />
           )}
-        </>
+        </div>
       )}
-    </>
+    </div>
   );
 };
 

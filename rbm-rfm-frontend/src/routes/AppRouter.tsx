@@ -3,8 +3,22 @@ import Login from "../pages/Login";
 import Header from "../components/Header";
 import ProtectedRoute from "../components/ProtectedRoute";
 import AdminDashboard from "../components/admin/Dashboard";
+import AdminMetrics from "../components/admin/AdminMetrics";
+import MasterDataManager from "../components/admin/MasterDataManager";
+import AuditLogViewer from "../components/admin/AuditLogViewer";
+import UserManager from "../components/admin/UserManager";
 import HrDashboard from "../components/hr/Dashboard";
+import EmployeeList from "../components/hr/EmployeeList";
+import CreateEmployee from "../components/hr/CreateEmployee";
+import EmployeeProfile from "../components/hr/EmployeeProfile";
+import SkillsOverview from "../components/hr/SkillsOverview";
+import HrTickets from "../components/hr/HrTickets";
+import TicketDetails from "../components/hr/TicketDetails";
 import TADashboard from "../components/ta/Dashboard";
+import Requisitions from "../components/ta/Requisitions";
+import MyRequisitions from "../components/ta/MyRequisitions";
+import RequisitionDetail from "../components/ta/RequisitionDetail";
+import ResourcePool from "../components/ta/ResourcePool";
 import ManagerDashboard from "../components/manager/ManagerDashboard";
 import ManagerRequisitionDetails from "../components/manager/ManagerRequisitionDetails";
 import OwnerDashboard from "../components/owner/OwnerDashboard";
@@ -85,7 +99,12 @@ export const AppRouter = () => {
               <AdminDashboard />
             </ProtectedRoute>
           }
-        />
+        >
+          <Route index element={<AdminMetrics />} />
+          <Route path="master-data" element={<MasterDataManager />} />
+          <Route path="audit-logs" element={<AuditLogViewer />} />
+          <Route path="users" element={<UserManager />} />
+        </Route>
         <Route
           path="/owner"
           element={
@@ -101,7 +120,14 @@ export const AppRouter = () => {
               <HrDashboard />
             </ProtectedRoute>
           }
-        />
+        >
+          <Route path="employees" element={<EmployeeList />} />
+          <Route path="create-employee" element={<CreateEmployee />} />
+          <Route path="employee-profile" element={<EmployeeProfile />} />
+          <Route path="skills" element={<SkillsOverview />} />
+          <Route path="requisitions" element={<HrTickets />} />
+          <Route path="requisitions/:id" element={<TicketDetails />} />
+        </Route>
         <Route
           path="/ta"
           element={
@@ -109,20 +135,27 @@ export const AppRouter = () => {
               <TADashboard />
             </ProtectedRoute>
           }
-        />
-        <Route
-          path="/manager"
-          element={
-            <ProtectedRoute requiredRoles={["manager"]}>
-              <ManagerDashboard />
-            </ProtectedRoute>
-          }
-        />
+        >
+          <Route path="requisitions" element={<Requisitions />} />
+          <Route path="requisitions/:id" element={<RequisitionDetail />} />
+          <Route path="my-requisitions" element={<MyRequisitions />} />
+          <Route path="resource-pool" element={<ResourcePool />} />
+        </Route>
+        {/* More specific manager route first so /manager/requisitions/:id matches */}
         <Route
           path="/manager/requisitions/:id"
           element={
             <ProtectedRoute requiredRoles={["manager"]}>
               <ManagerRequisitionDetails />
+            </ProtectedRoute>
+          }
+        />
+        {/* Splat matches /manager, /manager/raise-requisition, /manager/my-requisitions, etc. */}
+        <Route
+          path="/manager/*"
+          element={
+            <ProtectedRoute requiredRoles={["manager"]}>
+              <ManagerDashboard />
             </ProtectedRoute>
           }
         />

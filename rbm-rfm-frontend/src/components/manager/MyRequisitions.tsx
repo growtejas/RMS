@@ -14,11 +14,14 @@ interface Requisition {
   created_at: string;
 }
 
+const INITIAL_VISIBLE = 20;
+
 const MyRequisitions: React.FC = () => {
   const navigate = useNavigate();
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
 
   useEffect(() => {
     let isMounted = true;
@@ -29,7 +32,8 @@ const MyRequisitions: React.FC = () => {
         setError(null);
         const response = await apiClient.get<Requisition[]>("/requisitions/my");
         if (isMounted) {
-          setRequisitions(response.data);
+          setRequisitions(response.data ?? []);
+          setVisibleCount(INITIAL_VISIBLE);
         }
       } catch (err) {
         if (!isMounted) return;
@@ -141,7 +145,7 @@ const MyRequisitions: React.FC = () => {
 
             {!isLoading &&
               !error &&
-              requisitions.map((req) => (
+              requisitions.slice(0, visibleCount).map((req) => (
                 <tr key={req.req_id}>
                   <td>
                     <strong>REQ-{req.req_id}</strong>
@@ -173,6 +177,48 @@ const MyRequisitions: React.FC = () => {
           </tbody>
         </table>
       </div>
+
+      {!isLoading && !error && requisitions.length > visibleCount && (
+        <div
+          style={{
+            marginTop: "16px",
+            display: "flex",
+            justifyContent: "center",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "8px",
+          }}
+        >
+          <button
+            type="button"
+            className="action-button"
+            onClick={() => setVisibleCount((prev) => prev + 20)}
+          >
+            Load more requisitions
+          </button>
+          <span
+            style={{ fontSize: "12px", color: "var(--text-tertiary)" }}
+          >
+            Showing {visibleCount} of {requisitions.length} requisitions
+          </span>
+        </div>
+      )}
+
+      {!isLoading &&
+        !error &&
+        requisitions.length > 0 &&
+        requisitions.length <= visibleCount && (
+          <div
+            style={{
+              marginTop: "12px",
+              fontSize: "12px",
+              color: "var(--text-tertiary)",
+              textAlign: "center",
+            }}
+          >
+            Showing all {requisitions.length} requisitions
+          </div>
+        )}
 
       {/* Authority Notice */}
       <div className="mt-4 text-xs text-slate-500">

@@ -54,7 +54,7 @@ interface RequisitionItem {
   assignedEmployeeName?: string;
   assignedDate?: string;
   description?: string;
-  assignedTAId?: number | null;  // Phase 7: Item-level TA assignment
+  assignedTAId?: number | null; // Phase 7: Item-level TA assignment
 }
 
 interface BackendRequisitionItem {
@@ -66,7 +66,7 @@ interface BackendRequisitionItem {
   job_description: string;
   requirements?: string | null;
   item_status: string;
-  assigned_ta?: number | null;  // Phase 7: Item-level TA assignment
+  assigned_ta?: number | null; // Phase 7: Item-level TA assignment
 }
 
 interface BackendRequisition {
@@ -122,7 +122,7 @@ const mapRequisitions = (data: BackendRequisition[]): Requisition[] =>
         education: item.education_requirement ?? "—",
         itemStatus: item.item_status,
         description: item.job_description,
-        assignedTAId: item.assigned_ta ?? null,  // Phase 7: Item-level TA
+        assignedTAId: item.assigned_ta ?? null, // Phase 7: Item-level TA
       })) ?? [],
   }));
 
@@ -161,8 +161,10 @@ const getPriorityClass = (priority: Requisition["priority"]) => {
   }
 };
 
-const calculateAgingDays = (dateString: string) => {
+const calculateAgingDays = (dateString: string): number => {
+  if (!dateString || dateString.trim() === "") return 0;
   const created = new Date(dateString);
+  if (Number.isNaN(created.getTime())) return 0;
   const today = new Date();
   const diffTime = Math.abs(today.getTime() - created.getTime());
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -271,7 +273,7 @@ const TAKpiCards: React.FC<{
         </div>
       </div>
 
-      <div className="ticket-kpi-card neutral">
+      {/* <div className="ticket-kpi-card neutral">
         <div className="kpi-number">{stats.overdue}</div>
         <div className="kpi-label">
           <Clock size={12} />
@@ -280,7 +282,7 @@ const TAKpiCards: React.FC<{
         <div className="kpi-trend">
           {stats.overdue > 0 ? "Needs attention" : "All good"}
         </div>
-      </div>
+      </div> */}
     </div>
   );
 };
@@ -406,6 +408,11 @@ const Requisitions: React.FC<RequisitionsProps> = ({
   const [assigningReqId, setAssigningReqId] = useState<string | null>(null);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [allUsers, setAllUsers] = useState<BackendUser[]>([]);
+  const [visibleCount, setVisibleCount] = useState(20);
+
+  useEffect(() => {
+    setVisibleCount(20);
+  }, [activeFilter, searchQuery]);
 
   const resolveUserName = (userId?: number | null): string => {
     if (userId == null) return "—";
@@ -426,6 +433,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
       const endpoint = `${baseEndpoint}${separator}_t=${Date.now()}`;
       const response = await apiClient.get<BackendRequisition[]>(endpoint);
       setRequisitions(mapRequisitions(response.data));
+      setVisibleCount(20);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to load requisitions";
@@ -457,7 +465,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
     const handleFocus = () => {
       fetchRequisitions();
     };
-    
+
     // Phase 7: Listen for TA reassignment events to refresh the list
     const handleReassignment = () => {
       fetchRequisitions();
@@ -701,14 +709,14 @@ const Requisitions: React.FC<RequisitionsProps> = ({
           </div>
 
           <div
-            style={{
-              padding: "16px",
-              backgroundColor: "var(--bg-primary)",
-              borderRadius: "12px",
-              border: "1px solid var(--border-subtle)",
-            }}
+          // style={{
+          //   padding: "16px",
+          //   backgroundColor: "var(--bg-primary)",
+          //   borderRadius: "12px",
+          //   border: "1px solid var(--border-subtle)",
+          // }}
           >
-            <div
+            {/* <div
               style={{
                 fontSize: "12px",
                 color: "var(--text-tertiary)",
@@ -725,10 +733,10 @@ const Requisitions: React.FC<RequisitionsProps> = ({
               }}
             >
               {myStats.overdue}
-            </div>
-            <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+            </div> */}
+            {/* <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
               Requiring immediate attention
-            </div>
+            </div> */}
           </div>
         </div>
       )}
@@ -799,18 +807,19 @@ const Requisitions: React.FC<RequisitionsProps> = ({
           High Priority (
           {requisitions.filter((r) => r.priority === "High").length})
         </button>
-        <button
+        {/* <button
           className={`filter-chip ${activeFilter === "overdue" ? "active" : ""}`}
           onClick={() => setActiveFilter("overdue")}
         >
           <Clock size={12} />
           Overdue (
           {
-            requisitions.filter((r) => calculateAgingDays(r.dateCreated) > 30)
-              .length
+            visibleRequisitions.filter(
+              (r) => calculateAgingDays(r.dateCreated) > 30,
+            ).length
           }
           )
-        </button>
+        </button> */}
       </div>
 
       {/* Search and Filters */}
@@ -912,40 +921,49 @@ const Requisitions: React.FC<RequisitionsProps> = ({
 
             {!isLoading &&
               !error &&
-              filteredRequisitions.map((req) => {
+              filteredRequisitions.slice(0, visibleCount).map((req) => {
                 const agingDays = calculateAgingDays(req.dateCreated);
                 const completion = calculateCompletion(req.items);
-                
+
                 // Phase 7: Check item-level TA assignments (not just header-level)
                 const activeItems = req.items.filter(
-                  (item) => item.itemStatus !== "Fulfilled" && item.itemStatus !== "Cancelled"
+                  (item) =>
+                    item.itemStatus !== "Fulfilled" &&
+                    item.itemStatus !== "Cancelled",
                 );
                 const assignedTAs = activeItems
                   .map((item) => item.assignedTAId)
-                  .filter((taId): taId is number => taId !== null && taId !== undefined);
-                
+                  .filter(
+                    (taId): taId is number =>
+                      taId !== null && taId !== undefined,
+                  );
+
                 // Check if current user is assigned to ANY item
-                const isAssignedToMe = assignedTAs.includes(currentUserId ?? -1);
-                
+                const isAssignedToMe = assignedTAs.includes(
+                  currentUserId ?? -1,
+                );
+
                 // Determine the primary TA label
                 // Phase 7: Prioritize item-level assignments (they're more accurate after reassignment)
                 let assignedLabel: string = "Unassigned";
                 let primaryTAId: number | null = null;
-                
+
                 if (assignedTAs.length > 0) {
                   // Use item-level: find most common TA
                   const taCounts: Record<number, number> = {};
                   assignedTAs.forEach((taId) => {
                     taCounts[taId] = (taCounts[taId] ?? 0) + 1;
                   });
-                  const sortedTAs = Object.entries(taCounts).sort((a, b) => b[1] - a[1]);
-                  
+                  const sortedTAs = Object.entries(taCounts).sort(
+                    (a, b) => b[1] - a[1],
+                  );
+
                   // TypeScript safety: sortedTAs will have at least one entry if assignedTAs.length > 0
                   // We know assignedTAs.length > 0, so taCounts has entries, so sortedTAs[0] exists
                   if (sortedTAs.length > 0 && sortedTAs[0]) {
                     const topTA = sortedTAs[0];
                     primaryTAId = Number(topTA[0]);
-                    
+
                     if (sortedTAs.length > 1) {
                       // Multiple different TAs assigned
                       assignedLabel = `Multiple TAs (${sortedTAs.length})`;
@@ -960,7 +978,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                   assignedLabel = resolveUserName(req.assignedTAId);
                 }
                 // If neither condition is met, both stay at initial values
-                
+
                 const isUnassigned = !primaryTAId && assignedTAs.length === 0;
 
                 return (
@@ -1115,7 +1133,10 @@ const Requisitions: React.FC<RequisitionsProps> = ({
 
                       <td>
                         {(() => {
-                          const hasAssignment = (primaryTAId !== null && primaryTAId !== undefined) || assignedTAs.length > 0;
+                          const hasAssignment =
+                            (primaryTAId !== null &&
+                              primaryTAId !== undefined) ||
+                            assignedTAs.length > 0;
                           return hasAssignment ? (
                             <div
                               style={{
@@ -1286,6 +1307,35 @@ const Requisitions: React.FC<RequisitionsProps> = ({
         </table>
       </div>
 
+      {!isLoading && !error && filteredRequisitions.length > visibleCount && (
+        <div
+          style={{
+            marginTop: "16px",
+            display: "flex",
+            justifyContent: "center",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "8px",
+          }}
+        >
+          <button
+            type="button"
+            className="action-button"
+            onClick={() => setVisibleCount((prev) => prev + 20)}
+          >
+            Load more requisitions
+          </button>
+          <span
+            style={{
+              fontSize: "12px",
+              color: "var(--text-tertiary)",
+            }}
+          >
+            Showing {visibleCount} of {filteredRequisitions.length} requisitions
+          </span>
+        </div>
+      )}
+
       {/* Summary Footer */}
       <div
         style={{
@@ -1305,8 +1355,11 @@ const Requisitions: React.FC<RequisitionsProps> = ({
           }}
         >
           <div>
-            Showing <strong>{filteredRequisitions.length}</strong> of{" "}
-            <strong>{visibleRequisitions.length}</strong> requisitions
+            Showing{" "}
+            <strong>
+              {Math.min(visibleCount, filteredRequisitions.length)}
+            </strong>{" "}
+            of <strong>{filteredRequisitions.length}</strong> requisitions
             {activeFilter === "my" && (
               <span
                 style={{ marginLeft: "12px", color: "var(--primary-accent)" }}

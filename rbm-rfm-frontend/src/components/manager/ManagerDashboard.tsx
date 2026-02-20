@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/useAuth";
 import Header from "../Header";
 import ManagerHeader from "./ManagerHeader";
-import ManagerSidebar, { ManagerDashboardView } from "./ManagerSidebar";
+import ManagerSidebar from "./ManagerSidebar";
 import "../../styles/hr/hr-dashboard.css";
 import "../../styles/manager/manager-dashboard.css";
 import { getStatusLabel } from "../../types/workflow";
@@ -15,7 +15,7 @@ import { managerDashboardService } from "../../api/managerDashboardService";
 import { ManagerDashboardMetrics } from "../../types/managerDashboard";
 import { PageShell } from "../common/PageShell";
 
-const viewLabels: Record<ManagerDashboardView, string> = {
+const viewLabels: Record<string, string> = {
   "manager-dashboard": "Dashboard",
   "raise-requisition": "Raise Requisition",
   "my-requisitions": "My Requisitions",
@@ -25,8 +25,8 @@ const viewLabels: Record<ManagerDashboardView, string> = {
 const ManagerDashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [activeView, setActiveView] =
-    useState<ManagerDashboardView>("manager-dashboard");
+  const location = useLocation();
+  const [activeView, setActiveView] = useState<string>("manager-dashboard");
   const [collapsed, setCollapsed] = useState(false);
   const [metrics, setMetrics] = useState<ManagerDashboardMetrics | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -37,37 +37,19 @@ const ManagerDashboard: React.FC = () => {
     [user?.roles],
   );
 
-  const activeLabel = useMemo(() => viewLabels[activeView], [activeView]);
-
-  const goToView = (view: ManagerDashboardView) => {
-    window.history.pushState(
-      { managerView: view },
-      "",
-      window.location.pathname + window.location.search,
-    );
-    setActiveView(view);
-  };
-
-  useEffect(() => {
-    if (window.history.state?.managerView == null) {
-      window.history.replaceState(
-        { managerView: activeView },
-        "",
-        window.location.pathname + window.location.search,
-      );
+  const activeLabel = useMemo(() => {
+    const path = location.pathname || "";
+    if (path.startsWith("/manager/raise-requisition")) {
+      return viewLabels["raise-requisition"]!;
     }
-  }, []);
-
-  useEffect(() => {
-    const handlePopState = () => {
-      const state = window.history.state as
-        | { managerView?: ManagerDashboardView }
-        | undefined;
-      setActiveView(state?.managerView ?? "manager-dashboard");
-    };
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+    if (path.startsWith("/manager/my-requisitions")) {
+      return viewLabels["my-requisitions"]!;
+    }
+    if (path.startsWith("/manager/requisition-audit")) {
+      return viewLabels["requisition-audit"]!;
+    }
+    return viewLabels["manager-dashboard"]!;
+  }, [location.pathname]);
 
   useEffect(() => {
     if (user && !isManager) {
@@ -76,7 +58,8 @@ const ManagerDashboard: React.FC = () => {
   }, [isManager, navigate, user]);
 
   useEffect(() => {
-    if (!isManager || activeView !== "manager-dashboard") return;
+    if (!isManager || !location.pathname.startsWith("/manager")) return;
+    const isOnDashboard = location.pathname === "/manager";
 
     const controller = new AbortController();
     const loadMetrics = async () => {
@@ -112,10 +95,12 @@ const ManagerDashboard: React.FC = () => {
       }
     };
 
-    loadMetrics();
+    if (isOnDashboard) {
+      loadMetrics();
+    }
 
     return () => controller.abort();
-  }, [activeView, isManager]);
+  }, [isManager, location.pathname]);
 
   const formattedMetrics = useMemo(() => {
     const avgDays = metrics?.avg_fulfillment_days ?? 0;
@@ -128,11 +113,11 @@ const ManagerDashboard: React.FC = () => {
         label: "Total Requisitions",
         value: metrics?.total_requisitions ?? 0,
       },
-      { label: getStatusLabel("Active"), value: metrics?.open ?? 0 },
-      { label: getStatusLabel("Pending_HR"), value: metrics?.in_progress ?? 0 },
+      { label: getStatusLabel("Active"), value: metrics?.in_progress ?? 0 },
+      { label: getStatusLabel("Pending_HR"), value: metrics?.open ?? 0 },
       { label: getStatusLabel("Fulfilled"), value: metrics?.closed ?? 0 },
       { label: "Pending Positions", value: metrics?.pending_positions ?? 0 },
-      { label: "Avg Fulfillment (Days)", value: avgLabel },
+      // { label: "Avg Fulfillment (Days)", value: avgLabel },
     ];
   }, [metrics]);
 
@@ -276,27 +261,9 @@ const ManagerDashboard: React.FC = () => {
     </>
   );
 
-  /* ===== MAIN CONTENT SWITCH ===== */
-  const renderContent = () => {
-    switch (activeView) {
-      case "manager-dashboard":
-        return renderDashboard();
-      case "raise-requisition":
-        return <RequisitionWizard />;
-      case "my-requisitions":
-        return <MyRequisitions />;
-      case "requisition-audit":
-        return <RequisitionAudit />;
-      default:
-        return null;
-    }
-  };
-
   return (
     <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
       <ManagerSidebar
-        activeView={activeView}
-        onViewChange={goToView}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((prev) => !prev)}
       />
@@ -315,12 +282,25 @@ const ManagerDashboard: React.FC = () => {
         />
 
         <section className="admin-content-area">
-          {activeView === "manager-dashboard" || activeView === "raise-requisition" ? (
-            <PageShell maxWidth="7xl">{renderContent()}</PageShell>
-          ) : (
+          {location.pathname === "/manager" ||
+          location.pathname === "/manager/raise-requisition" ? (
+            <PageShell maxWidth="7xl">
+              {location.pathname === "/manager" ? (
+                renderDashboard()
+              ) : (
+                <RequisitionWizard />
+              )}
+            </PageShell>
+          ) : location.pathname === "/manager/my-requisitions" ? (
             <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-6 px-4 md:px-6">
-              {renderContent()}
+              <MyRequisitions />
             </div>
+          ) : location.pathname === "/manager/requisition-audit" ? (
+            <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-6 px-4 md:px-6">
+              <RequisitionAudit />
+            </div>
+          ) : (
+            <Outlet />
           )}
         </section>
       </div>

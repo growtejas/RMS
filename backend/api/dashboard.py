@@ -288,17 +288,20 @@ def get_recent_hr_activity(db: Session, limit: int = 5) -> list[dict]:
 
 MANAGER_SLA_DAYS = int(os.getenv("MANAGER_SLA_DAYS", "30"))
 
+# Align with workflow_matrix: canonical (Pending_Budget, Pending_HR, Active, Fulfilled) + legacy
 OPEN_STATUSES = {
+    "Pending_Budget",
+    "Pending_HR",
     "Pending Budget Approval",
     "Pending HR Approval",
 }
 
 IN_PROGRESS_STATUSES = {
-    "Approved & Unassigned",
     "Active",
+    "Approved & Unassigned",
 }
 
-CLOSED_STATUSES = {"Closed"}
+CLOSED_STATUSES = {"Fulfilled", "Closed"}
 
 
 def get_manager_status_counts(db: Session, manager_id: int) -> dict[str, int]:
@@ -369,7 +372,9 @@ def get_manager_sla_risks(
         db.query(Requisition.req_id, Requisition.created_at)
         .filter(
             Requisition.raised_by == manager_id,
-            Requisition.overall_status.notin_(["Closed", "Rejected"]),
+            Requisition.overall_status.notin_(
+                ["Closed", "Rejected", "Fulfilled", "Cancelled"],
+            ),
         )
         .all()
     )
@@ -390,13 +395,15 @@ def get_manager_sla_risks(
 
 
 def get_manager_avg_fulfillment_days(db: Session, manager_id: int) -> float:
-    """Average days to close requisitions for a manager."""
+    """Average days to close requisitions for a manager (created_at -> first Fulfilled/Closed)."""
     closed_subquery = (
         db.query(
             RequisitionStatusHistory.req_id,
             func.min(RequisitionStatusHistory.changed_at).label("closed_at"),
         )
-        .filter(RequisitionStatusHistory.new_status == "Closed")
+        .filter(
+            RequisitionStatusHistory.new_status.in_(["Fulfilled", "Closed"]),
+        )
         .group_by(RequisitionStatusHistory.req_id)
         .subquery()
     )

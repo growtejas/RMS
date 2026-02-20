@@ -1,57 +1,42 @@
 import React from "react";
+import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
   ClipboardList,
   FilePlus,
-  FileText,
   Menu,
   X,
 } from "lucide-react";
 
-export type ManagerDashboardView =
-  | "manager-dashboard"
-  | "raise-requisition"
-  | "my-requisitions"
-  | "requisition-audit";
-
 interface ManagerSidebarProps {
-  activeView: ManagerDashboardView;
-  onViewChange: (view: ManagerDashboardView) => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
 }
 
 const ManagerSidebar: React.FC<ManagerSidebarProps> = ({
-  activeView,
-  onViewChange,
   collapsed,
   onToggleCollapse,
 }) => {
   const menuItems: {
-    id: ManagerDashboardView;
+    to: string;
     label: string;
     icon: React.ReactNode;
   }[] = [
     {
-      id: "manager-dashboard",
+      to: "/manager",
       label: "Dashboard",
       icon: <LayoutDashboard size={20} />,
     },
     {
-      id: "raise-requisition",
+      to: "/manager/raise-requisition",
       label: "Raise Requisition",
       icon: <FilePlus size={20} />,
     },
     {
-      id: "my-requisitions",
+      to: "/manager/my-requisitions",
       label: "My Requisitions",
       icon: <ClipboardList size={20} />,
     },
-    // {
-    //   id: "requisition-audit",
-    //   label: "Requisition Audit",
-    //   icon: <FileText size={20} />,
-    // },
   ];
 
   return (
@@ -71,18 +56,19 @@ const ManagerSidebar: React.FC<ManagerSidebarProps> = ({
       <nav className="sidebar-nav">
         <ul>
           {menuItems.map((item) => (
-            <li key={item.id}>
-              <button
-                className={`nav-item ${activeView === item.id ? "active" : ""}`}
-                onClick={() => onViewChange(item.id)}
+            <li key={item.to}>
+              <NavLink
+                to={item.to}
+                end={item.to === "/manager"}
+                className={({ isActive }) =>
+                  `nav-item ${isActive ? "active" : ""}`
+                }
                 title={collapsed ? item.label : ""}
               >
                 <span className="nav-icon">{item.icon}</span>
                 {!collapsed && <span className="nav-label">{item.label}</span>}
-                {!collapsed && activeView === item.id && (
-                  <span className="active-indicator"></span>
-                )}
-              </button>
+                {!collapsed && <span className="active-indicator"></span>}
+              </NavLink>
             </li>
           ))}
         </ul>

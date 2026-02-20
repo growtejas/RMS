@@ -1,64 +1,44 @@
 import React from "react";
+import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
   FileText,
   ClipboardList,
-  ClipboardCheck,
   Users,
-  BarChart3,
   Menu,
   X,
 } from "lucide-react";
 
-export type TADashboardView =
-  | "dashboard"
-  | "requisitions"
-  | "my-requisitions"
-  | "requisition-detail"
-  | "resource-pool"
-  | "reports"
-  | "audit-logs";
-
 interface TASidebarProps {
-  activeView: TADashboardView;
-  onViewChange: (view: TADashboardView) => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
 }
 
 const TASidebar: React.FC<TASidebarProps> = ({
-  activeView,
-  onViewChange,
   collapsed,
   onToggleCollapse,
 }) => {
   const menuItems: {
-    id: TADashboardView;
+    to: string;
     label: string;
     icon: React.ReactNode;
   }[] = [
     {
-      id: "dashboard",
+      to: "/ta",
       label: "Dashboard",
       icon: <LayoutDashboard size={20} />,
     },
-    { id: "requisitions", label: "Requisitions", icon: <FileText size={20} /> },
+    { to: "/ta/requisitions", label: "Requisitions", icon: <FileText size={20} /> },
     {
-      id: "my-requisitions",
+      to: "/ta/my-requisitions",
       label: "My Requisitions",
       icon: <ClipboardList size={20} />,
     },
     {
-      id: "resource-pool",
+      to: "/ta/resource-pool",
       label: "Resource Pool",
       icon: <Users size={20} />,
     },
-    //{ id: "reports", label: "Reports", icon: <BarChart3 size={20} /> },
-    // {
-    //   id: "audit-logs",
-    //   label: "Audit Logs",
-    //   icon: <ClipboardCheck size={20} />,
-    // },
   ];
 
   return (
@@ -78,18 +58,19 @@ const TASidebar: React.FC<TASidebarProps> = ({
       <nav className="sidebar-nav">
         <ul>
           {menuItems.map((item) => (
-            <li key={item.id}>
-              <button
-                className={`nav-item ${activeView === item.id ? "active" : ""}`}
-                onClick={() => onViewChange(item.id)}
+            <li key={item.to}>
+              <NavLink
+                to={item.to}
+                end={item.to === "/ta"}
+                className={({ isActive }) =>
+                  `nav-item ${isActive ? "active" : ""}`
+                }
                 title={collapsed ? item.label : ""}
               >
                 <span className="nav-icon">{item.icon}</span>
                 {!collapsed && <span className="nav-label">{item.label}</span>}
-                {!collapsed && activeView === item.id && (
-                  <span className="active-indicator"></span>
-                )}
-              </button>
+                {!collapsed && <span className="active-indicator"></span>}
+              </NavLink>
             </li>
           ))}
         </ul>

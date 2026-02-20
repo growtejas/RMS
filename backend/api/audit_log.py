@@ -23,8 +23,11 @@ router = APIRouter(
     tags=["Audit Logs"]
 )
 
-# Read-only actions are not shown in audit log; we only store and show write operations.
-READ_ONLY_ACTIONS = frozenset({"OVERVIEW_VIEW"})
+# Read-only / view actions are excluded; admin audit log shows only write operations.
+READ_ONLY_ACTIONS = frozenset({
+    "OVERVIEW_VIEW",
+    "USER_VIEW",
+})
 
 
 @router.post("/")
@@ -127,8 +130,9 @@ def _build_audit_query(
             )
         )
 
-    # Only show write operations (exclude read-only actions)
+    # Only show write operations (exclude read-only / view actions)
     query = query.filter(~AuditLog.action.in_(READ_ONLY_ACTIONS))
+    query = query.filter(~AuditLog.action.endswith("_VIEW"))
 
     return query
 
@@ -317,6 +321,7 @@ def export_audit_logs(
         query = query.filter(AuditLog.performed_at <= end)
 
     query = query.filter(~AuditLog.action.in_(READ_ONLY_ACTIONS))
+    query = query.filter(~AuditLog.action.endswith("_VIEW"))
     logs = query.order_by(AuditLog.performed_at.desc()).all()
 
     user_ids = {log.performed_by for log in logs if log.performed_by}

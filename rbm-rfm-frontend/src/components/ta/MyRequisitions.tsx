@@ -53,9 +53,10 @@ const getSlaClass = (days: number) => {
   return "";
 };
 
-const getSlaDaysRemaining = (dateValue?: string | null) => {
-  if (!dateValue) return 0;
+const getSlaDaysRemaining = (dateValue?: string | null): number => {
+  if (!dateValue || String(dateValue).trim() === "") return 0;
   const created = new Date(dateValue);
+  if (Number.isNaN(created.getTime())) return 0;
   const diffMs = Date.now() - created.getTime();
   const diffHours = Math.max(0, diffMs / 3600000);
   return Math.ceil((SLA_HOURS - diffHours) / 24);
@@ -73,6 +74,7 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
   const [requisitions, setRequisitions] = useState<MyRequisition[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(20);
 
   useEffect(() => {
     let isMounted = true;
@@ -103,6 +105,7 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
           };
         });
         setRequisitions(mapped);
+        setVisibleCount(20);
       } catch (err) {
         if (!isMounted) return;
         const message =
@@ -154,7 +157,7 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
           </thead>
 
           <tbody>
-            {visibleRequisitions.map((req) => (
+            {visibleRequisitions.slice(0, visibleCount).map((req) => (
               <tr key={req.id}>
                 <td>
                   <strong>{req.id}</strong>
@@ -226,6 +229,43 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
           </tbody>
         </table>
       </div>
+
+      {!isLoading && !error && visibleRequisitions.length > visibleCount && (
+        <div
+          style={{
+            marginTop: "16px",
+            display: "flex",
+            justifyContent: "center",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "8px",
+          }}
+        >
+          <button
+            type="button"
+            className="action-button"
+            onClick={() => setVisibleCount((prev) => prev + 20)}
+          >
+            Load more requisitions
+          </button>
+          <span style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+            Showing {visibleCount} of {visibleRequisitions.length} requisitions
+          </span>
+        </div>
+      )}
+
+      {!isLoading && !error && visibleRequisitions.length > 0 && visibleRequisitions.length <= visibleCount && (
+        <div
+          style={{
+            marginTop: "12px",
+            fontSize: "12px",
+            color: "var(--text-tertiary)",
+            textAlign: "center",
+          }}
+        >
+          Showing all {visibleRequisitions.length} requisitions
+        </div>
+      )}
     </>
   );
 };

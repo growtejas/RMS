@@ -362,7 +362,11 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
       <div className="header-title mb-6 flex items-start justify-between">
         <div>
           <h1>HR Dashboard</h1>
-          <p>Welcome back, {user?.username}! Here's your workforce overview.</p>
+          <p>
+            Welcome back, {user?.username}! Here's your workforce overview.
+            <br />
+            Track employee status, approvals, and more.
+          </p>
         </div>
         <button
           className="action-button"
@@ -408,12 +412,12 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
             label="On Bench"
             colorClass="uptime"
           /> */}
-          <MetricCard
+          {/* <MetricCard
             icon={<Clock size={20} />}
             value={metrics.upcoming_probation_count}
             label="Probation Due"
             subtext="Next 30 days"
-          />
+          /> */}
         </div>
       )}
 

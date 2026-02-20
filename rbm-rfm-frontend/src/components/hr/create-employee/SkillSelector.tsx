@@ -24,6 +24,7 @@ const SkillSelector: React.FC<SkillSelectorProps> = ({
   const [selectedSkillId, setSelectedSkillId] = useState<number | null>(null);
   const [level, setLevel] = useState<ProficiencyLevel>("Junior");
   const [years, setYears] = useState("1");
+  const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const availableSkills = useMemo(() => {
     const taken = new Set(selectedSkills.map((skill) => skill.skill_id));
@@ -32,11 +33,16 @@ const SkillSelector: React.FC<SkillSelectorProps> = ({
 
   const filteredOptions = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return availableSkills;
+    if (!query) return availableSkills.slice(0, 50);
     return availableSkills.filter((skill) =>
       skill.skill_name.toLowerCase().includes(query),
     );
   }, [availableSkills, search]);
+
+  const selectedSkill = useMemo(
+    () => availableSkills.find((s) => s.skill_id === selectedSkillId),
+    [availableSkills, selectedSkillId],
+  );
 
   const handleAdd = () => {
     if (!selectedSkillId) return;
@@ -48,61 +54,71 @@ const SkillSelector: React.FC<SkillSelectorProps> = ({
     setSelectedSkillId(null);
     setSearch("");
     setYears("1");
+    setDropdownOpen(false);
+  };
+
+  const handleSelectSkill = (skillId: number) => {
+    setSelectedSkillId(skillId);
+    const skill = availableSkills.find((s) => s.skill_id === skillId);
+    if (skill) setSearch(skill.skill_name);
+    setDropdownOpen(false);
   };
 
   return (
     <div className="skill-selector">
-      <div className="form-field">
-        <label>Skill Search</label>
-        <div className="searchable-dropdown">
-          <input
-            placeholder="Search skills"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            disabled={isDisabled}
-          />
-          {filteredOptions.length > 0 && (
-            <div className="dropdown-options">
-              {filteredOptions.map((skill) => (
-                <button
-                  key={skill.skill_id}
-                  type="button"
-                  className={`dropdown-option ${
-                    selectedSkillId === skill.skill_id ? "selected" : ""
-                  }`}
-                  onClick={() => setSelectedSkillId(skill.skill_id)}
-                  disabled={isDisabled}
-                >
-                  <span>{skill.skill_name}</span>
-                </button>
-              ))}
-            </div>
-          )}
+      <div className="add-skill-dropdown-row">
+        <div className="form-field add-skill-dropdown-wrap">
+          <label>Add Skill</label>
+          <div className="searchable-dropdown">
+            <input
+              placeholder="Select or search a skill..."
+              value={selectedSkill ? selectedSkill.skill_name : search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                if (!selectedSkillId) setDropdownOpen(true);
+                else setSelectedSkillId(null);
+              }}
+              onFocus={() => setDropdownOpen(true)}
+              onBlur={() => {
+                setTimeout(() => setDropdownOpen(false), 150);
+              }}
+              disabled={isDisabled}
+            />
+            <span className="dropdown-chevron" aria-hidden>
+              ▼
+            </span>
+            {dropdownOpen && (
+              <div className="dropdown-options">
+                {filteredOptions.length === 0 ? (
+                  <div className="dropdown-option dropdown-empty">
+                    {availableSkills.length === 0
+                      ? "All skills added"
+                      : "No matching skills"}
+                  </div>
+                ) : (
+                  filteredOptions.map((skill) => (
+                    <button
+                      key={skill.skill_id}
+                      type="button"
+                      className={`dropdown-option ${
+                        selectedSkillId === skill.skill_id ? "selected" : ""
+                      }`}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        handleSelectSkill(skill.skill_id);
+                      }}
+                      disabled={isDisabled}
+                    >
+                      <span>{skill.skill_name}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
 
-      <div className="form-grid">
-        <div className="form-field">
-          <label>Selected Skill</label>
-          <select
-            value={selectedSkillId ?? ""}
-            onChange={(event) =>
-              setSelectedSkillId(
-                event.target.value ? Number(event.target.value) : null,
-              )
-            }
-            disabled={isDisabled}
-          >
-            <option value="">Select a skill</option>
-            {availableSkills.map((skill) => (
-              <option key={skill.skill_id} value={skill.skill_id}>
-                {skill.skill_name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="form-field">
+        <div className="form-field add-skill-proficiency">
           <label>Proficiency</label>
           <select
             value={level}
@@ -119,8 +135,8 @@ const SkillSelector: React.FC<SkillSelectorProps> = ({
           </select>
         </div>
 
-        <div className="form-field">
-          <label>Years of Experience</label>
+        <div className="form-field add-skill-years">
+          <label>Years</label>
           <input
             type="number"
             min={0}
@@ -128,19 +144,21 @@ const SkillSelector: React.FC<SkillSelectorProps> = ({
             value={years}
             onChange={(event) => setYears(event.target.value)}
             disabled={isDisabled}
+            placeholder="0"
           />
         </div>
-      </div>
 
-      <div className="skill-action-row">
-        <button
-          type="button"
-          className="add-item-button"
-          onClick={handleAdd}
-          disabled={isDisabled || !selectedSkillId}
-        >
-          Add Skill
-        </button>
+        <div className="form-field add-skill-button-wrap">
+          <label>&nbsp;</label>
+          <button
+            type="button"
+            className="add-item-button"
+            onClick={handleAdd}
+            disabled={isDisabled || !selectedSkillId}
+          >
+            Add Skill
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import React from "react";
+import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
   Activity,
@@ -9,53 +10,42 @@ import {
   X,
 } from "lucide-react";
 
-export type OwnerDashboardView =
-  | "executive-dashboard"
-  | "resource-utilization"
-  | "requisition-overview"
-  | "ta-hr-performance"
-  | "audit-approvals";
-
 interface OwnerSidebarProps {
-  activeView: OwnerDashboardView;
-  onViewChange: (view: OwnerDashboardView) => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
 }
 
 const OwnerSidebar: React.FC<OwnerSidebarProps> = ({
-  activeView,
-  onViewChange,
   collapsed,
   onToggleCollapse,
 }) => {
   const menuItems: {
-    id: OwnerDashboardView;
+    to: string;
     label: string;
     icon: React.ReactNode;
   }[] = [
     {
-      id: "executive-dashboard",
+      to: "/owner",
       label: "Executive Dashboard",
       icon: <LayoutDashboard size={20} />,
     },
     {
-      id: "resource-utilization",
+      to: "/owner/resource-utilization",
       label: "Resource Utilization",
       icon: <Activity size={20} />,
     },
     {
-      id: "requisition-overview",
+      to: "/owner/requisition-overview",
       label: "Requisition Overview",
       icon: <FileText size={20} />,
     },
     {
-      id: "ta-hr-performance",
+      to: "/owner/ta-hr-performance",
       label: "TA & HR Performance",
       icon: <Users size={20} />,
     },
     {
-      id: "audit-approvals",
+      to: "/owner/audit-approvals",
       label: "Audit & Approvals",
       icon: <ShieldCheck size={20} />,
     },
@@ -78,18 +68,19 @@ const OwnerSidebar: React.FC<OwnerSidebarProps> = ({
       <nav className="sidebar-nav">
         <ul>
           {menuItems.map((item) => (
-            <li key={item.id}>
-              <button
-                className={`nav-item ${activeView === item.id ? "active" : ""}`}
-                onClick={() => onViewChange(item.id)}
+            <li key={item.to}>
+              <NavLink
+                to={item.to}
+                end={item.to === "/owner"}
+                className={({ isActive }) =>
+                  `nav-item ${isActive ? "active" : ""}`
+                }
                 title={collapsed ? item.label : ""}
               >
                 <span className="nav-icon">{item.icon}</span>
                 {!collapsed && <span className="nav-label">{item.label}</span>}
-                {!collapsed && activeView === item.id && (
-                  <span className="active-indicator"></span>
-                )}
-              </button>
+                {!collapsed && <span className="active-indicator"></span>}
+              </NavLink>
             </li>
           ))}
         </ul>

@@ -25,6 +25,11 @@ const ResourcePool: React.FC = () => {
   const [resources, setResources] = useState<Resource[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(20);
+
+  useEffect(() => {
+    setVisibleCount(20);
+  }, [skillFilter]);
 
   useEffect(() => {
     let isMounted = true;
@@ -106,6 +111,7 @@ const ResourcePool: React.FC = () => {
 
         if (!isMounted) return;
         setResources(resourceList);
+        setVisibleCount(20);
       } catch (err) {
         if (!isMounted) return;
         const message =
@@ -169,7 +175,7 @@ const ResourcePool: React.FC = () => {
           </thead>
 
           <tbody>
-            {filteredResources.map((res) => (
+            {filteredResources.slice(0, visibleCount).map((res) => (
               <tr key={res.empId}>
                 <td>
                   <strong>{res.name}</strong>
@@ -227,6 +233,43 @@ const ResourcePool: React.FC = () => {
             )}
           </tbody>
         </table>
+
+        {!isLoading && !error && filteredResources.length > visibleCount && (
+          <div
+            style={{
+              marginTop: "16px",
+              display: "flex",
+              justifyContent: "center",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <button
+              type="button"
+              className="action-button"
+              onClick={() => setVisibleCount((prev) => prev + 20)}
+            >
+              Load more resources
+            </button>
+            <span style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+              Showing {visibleCount} of {filteredResources.length} resources
+            </span>
+          </div>
+        )}
+
+        {!isLoading && !error && filteredResources.length > 0 && filteredResources.length <= visibleCount && (
+          <div
+            style={{
+              marginTop: "12px",
+              fontSize: "12px",
+              color: "var(--text-tertiary)",
+              textAlign: "center",
+            }}
+          >
+            Showing all {filteredResources.length} resources
+          </div>
+        )}
 
         {isLoading && (
           <div className="tickets-empty-state" style={{ paddingTop: "16px" }}>

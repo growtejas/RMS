@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Users,
   Target,
@@ -762,6 +763,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
   onAssignEmployee,
   onViewRequisition,
 }) => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [employees, setEmployees] = useState<EmployeeMatch[]>([]);
@@ -812,18 +814,11 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
   const [expandedRejections, setExpandedRejections] = useState<
     Record<number, boolean>
   >({});
-  // Backend-driven workflow state: stores allowed transitions per requisition
-  const [allowedTransitionsMap, setAllowedTransitionsMap] = useState<
-    Record<number, AllowedTransitionsResponse>
-  >({});
-  const [transitionsLoading, setTransitionsLoading] = useState<
-    Record<number, boolean>
-  >({});
-  const [currentPage, setCurrentPage] = useState(1);
+  const [visibleCount, setVisibleCount] = useState(20);
 
-  // Reset to first page when filters change
+  // Reset visible slice when filters/search change
   useEffect(() => {
-    setCurrentPage(1);
+    setVisibleCount(20);
   }, [
     activeFilter,
     searchQuery,
@@ -832,6 +827,13 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
     locationFilter,
     modeFilter,
   ]);
+  // Backend-driven workflow state: stores allowed transitions per requisition
+  const [allowedTransitionsMap, setAllowedTransitionsMap] = useState<
+    Record<number, AllowedTransitionsResponse>
+  >({});
+  const [transitionsLoading, setTransitionsLoading] = useState<
+    Record<number, boolean>
+  >({});
 
   // Fetch allowed transitions for a single requisition from backend
   const fetchAllowedTransitions = useCallback(async (reqId: number) => {
@@ -1076,16 +1078,6 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
         req.project.toLowerCase().includes(searchQuery.toLowerCase()) ||
         req.client.toLowerCase().includes(searchQuery.toLowerCase()),
     );
-
-  const PAGE_SIZE = 10;
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredRequisitions.length / PAGE_SIZE),
-  );
-  const paginatedRequisitions = filteredRequisitions.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE,
-  );
 
   const handleAssignEmployee = (itemId: string, empId: string) => {
     const employee = employees.find((emp) => emp.id === empId);
@@ -1841,7 +1833,9 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
 
                   {!isLoading &&
                     !error &&
-                    paginatedRequisitions.map((req) => {
+                    filteredRequisitions
+                      .slice(0, visibleCount)
+                      .map((req) => {
                       const agingDays = getAgingDays(req.dateCreated);
                       const completion = calculateCompletion(req.items);
                       const isAssignedToMe = req.assignedTA === currentUser;
@@ -1865,7 +1859,11 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                           }}
                           onClick={() => {
                             setSelectedRequisition(req);
-                            handleViewRequisition(req.id);
+                            if (onViewRequisition) {
+                              handleViewRequisition(req.id);
+                            } else {
+                              navigate(`/hr/requisitions/${req.reqId}`);
+                            }
                           }}
                         >
                           <td>
@@ -2141,75 +2139,28 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
               </table>
             </div>
 
-            {/* Pagination — 10 per page, red styling */}
-            {!isLoading && !error && filteredRequisitions.length > 0 && (
-              <nav
-                className="hr-requisition-pagination"
-                aria-label="Requisition list pagination"
-              >
-                <ul className="pagination">
-                  <li
-                    className={`page-item ${currentPage <= 1 ? "disabled" : ""}`}
+            {/* Load more + Quick Stats */}
+            {!isLoading &&
+              !error &&
+              filteredRequisitions.length > visibleCount && (
+                <div
+                  style={{
+                    marginTop: "16px",
+                    display: "flex",
+                    justifyContent: "center",
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="action-button"
+                    onClick={() =>
+                      setVisibleCount((prev) => prev + 20)
+                    }
                   >
-                    <a
-                      className="page-link"
-                      href="#"
-                      tabIndex={currentPage <= 1 ? -1 : 0}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        if (currentPage > 1) setCurrentPage((p) => p - 1);
-                      }}
-                      aria-disabled={currentPage <= 1}
-                    >
-                      Previous
-                    </a>
-                  </li>
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(
-                    (page) => (
-                      <li
-                        key={page}
-                        className={`page-item ${currentPage === page ? "active" : ""}`}
-                      >
-                        <a
-                          className="page-link"
-                          href="#"
-                          tabIndex={currentPage === page ? -1 : 0}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            setCurrentPage(page);
-                          }}
-                          aria-current={
-                            currentPage === page ? "page" : undefined
-                          }
-                        >
-                          {page}
-                          {currentPage === page && (
-                            <span className="sr-only">(current)</span>
-                          )}
-                        </a>
-                      </li>
-                    ),
-                  )}
-                  <li
-                    className={`page-item ${currentPage >= totalPages ? "disabled" : ""}`}
-                  >
-                    <a
-                      className="page-link"
-                      href="#"
-                      tabIndex={currentPage >= totalPages ? -1 : 0}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        if (currentPage < totalPages)
-                          setCurrentPage((p) => p + 1);
-                      }}
-                      aria-disabled={currentPage >= totalPages}
-                    >
-                      Next
-                    </a>
-                  </li>
-                </ul>
-              </nav>
-            )}
+                    Load more requisitions
+                  </button>
+                </div>
+              )}
 
             {/* Quick Stats */}
             <div
@@ -2224,18 +2175,9 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <div>
                   <strong>
-                    Showing{" "}
-                    {filteredRequisitions.length === 0
-                      ? 0
-                      : (currentPage - 1) * PAGE_SIZE + 1}
-                    –
-                    {Math.min(
-                      currentPage * PAGE_SIZE,
-                      filteredRequisitions.length,
-                    )}{" "}
-                    of {filteredRequisitions.length} requisitions
+                    Showing {filteredRequisitions.length} requisitions
                     {filteredRequisitions.length !== requisitions.length &&
-                      ` (${requisitions.length} total)`}
+                      ` (filtered from ${requisitions.length} total)`}
                   </strong>
                 </div>
                 <div>
@@ -2250,12 +2192,14 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                   </span>
                   <span style={{ color: "var(--text-tertiary)" }}>
                     ⏱ Avg aging:{" "}
-                    {Math.round(
-                      requisitions.reduce(
-                        (sum, req) => sum + getAgingDays(req.dateCreated),
-                        0,
-                      ) / requisitions.length,
-                    )}{" "}
+                    {requisitions.length > 0
+                      ? Math.round(
+                          requisitions.reduce(
+                            (sum, req) => sum + getAgingDays(req.dateCreated),
+                            0,
+                          ) / requisitions.length,
+                        )
+                      : 0}{" "}
                     days
                   </span>
                 </div>
@@ -2356,21 +2300,23 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
             }}
           >
             <p>
-              1. <strong>Assign yourself to unassigned requisitions</strong> (or
-              assign to specific TAs if admin)
+              1. <strong>Approvals</strong> — Use the &quot;Approvals&quot; filter to see
+              requisitions in Pending Budget or Pending HR. Approve (with budget
+              if needed) or Reject with a reason (min 10 characters).
             </p>
             <p>
-              2.{" "}
-              <strong>Click on a requisition to open matchmaking panel</strong>{" "}
-              - see all pending positions on the left
+              2. <strong>Assign TA</strong> — For approved (Active) requisitions,
+              assign yourself or a TA so recruitment can start. Unassigned
+              requisitions appear in the &quot;Unassigned&quot; filter.
             </p>
             <p>
-              3. <strong>Select a position and assign an employee</strong> -
-              suggested matches appear on the right
+              3. <strong>Matchmaking</strong> — Click a requisition row to open
+              the detail view. Select a position and assign an employee from
+              suggested matches; work through items until fulfilled or cancelled.
             </p>
             <p>
-              4. <strong>Work item by item</strong> - The requisition closes
-              automatically when all items are fulfilled or cancelled
+              4. <strong>Closure</strong> — A requisition moves to Fulfilled
+              automatically when all positions are fulfilled or cancelled.
             </p>
           </div>
         </div>

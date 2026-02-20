@@ -41,33 +41,33 @@ const OverviewTab: React.FC<OverviewTabProps> = ({
   ]);
 
   return (
-    <div className="master-data-manager">
-      <div className="manager-header">
-        <h3>Employee Overview</h3>
-        <p className="subtitle">
+    <div className="form-section active">
+      <div className="section-header">
+        <h2>
+          <span className="section-icon">0</span> Overview
+        </h2>
+        <p className="section-subtitle">
           High-level snapshot of employee profile and status.
         </p>
       </div>
-
-      <div className="admin-metrics">
-        <div className="stat-card">
-          <span className="stat-number">{employee.emp_status}</span>
-          <span className="stat-label">Current Status</span>
-        </div>
-
-        <div className="stat-card">
-          <span className="stat-number">{completionPct}%</span>
-          <span className="stat-label">Profile Complete</span>
-        </div>
-
-        <div className="stat-card">
-          <span className="stat-number">{departmentName ?? "—"}</span>
-          <span className="stat-label">Department</span>
-        </div>
-
-        <div className="stat-card">
-          <span className="stat-number">{employee.doj ?? "—"}</span>
-          <span className="stat-label">Date of Joining</span>
+      <div className="section-content">
+        <div className="admin-metrics">
+          <div className="stat-card">
+            <span className="stat-number">{employee.emp_status}</span>
+            <span className="stat-label">Current Status</span>
+          </div>
+          <div className="stat-card">
+            <span className="stat-number">{completionPct}%</span>
+            <span className="stat-label">Profile Complete</span>
+          </div>
+          <div className="stat-card">
+            <span className="stat-number">{departmentName ?? "—"}</span>
+            <span className="stat-label">Department</span>
+          </div>
+          <div className="stat-card">
+            <span className="stat-number">{employee.doj ?? "—"}</span>
+            <span className="stat-label">Date of Joining</span>
+          </div>
         </div>
       </div>
     </div>

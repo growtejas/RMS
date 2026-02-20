@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useMemo, useState } from "react";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/useAuth";
 import Header from "../Header";
 import OwnerHeader from "./OwnerHeader";
-import OwnerSidebar, { OwnerDashboardView } from "./OwnerSidebar";
+import OwnerSidebar from "./OwnerSidebar";
 import "../../styles/hr/hr-dashboard.css";
 import ExecutiveDashboard from "./ExecutiveDashboard";
 import ResourceUtilization from "./ResourceUtilization";
@@ -11,7 +11,7 @@ import RequisitionOverview from "./RequisitionOverview";
 import TAHrPerformance from "./TAHrPerformance";
 import AuditApprovals from "./AuditApprovals";
 
-const viewLabels: Record<OwnerDashboardView, string> = {
+const viewLabels: Record<string, string> = {
   "executive-dashboard": "Executive Dashboard",
   "resource-utilization": "Resource Utilization",
   "requisition-overview": "Requisition Overview",
@@ -22,68 +22,29 @@ const viewLabels: Record<OwnerDashboardView, string> = {
 const OwnerDashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [activeView, setActiveView] = useState<OwnerDashboardView>(
-    "executive-dashboard",
-  );
+  const location = useLocation();
+  const [activeView] = useState<string>("executive-dashboard");
   const [collapsed, setCollapsed] = useState(false);
 
-  const activeLabel = useMemo(() => viewLabels[activeView], [activeView]);
-
-  const goToView = (view: OwnerDashboardView) => {
-    window.history.pushState(
-      { ownerView: view },
-      "",
-      window.location.pathname + window.location.search,
-    );
-    setActiveView(view);
-  };
-
-  useEffect(() => {
-    if (window.history.state?.ownerView == null) {
-      window.history.replaceState(
-        { ownerView: activeView },
-        "",
-        window.location.pathname + window.location.search,
-      );
+  const activeLabel = useMemo(() => {
+    if (location.pathname.startsWith("/owner/resource-utilization")) {
+      return viewLabels["resource-utilization"];
     }
-  }, []);
-
-  useEffect(() => {
-    const handlePopState = () => {
-      const state = window.history.state as { ownerView?: OwnerDashboardView } | undefined;
-      setActiveView(state?.ownerView ?? "executive-dashboard");
-    };
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
-
-  const renderContent = () => {
-    switch (activeView) {
-      case "executive-dashboard":
-        return <ExecutiveDashboard />;
-      case "resource-utilization":
-        return <ResourceUtilization />;
-      case "requisition-overview":
-        return <RequisitionOverview />;
-      case "ta-hr-performance":
-        return <TAHrPerformance />;
-      case "audit-approvals":
-        return <AuditApprovals />;
-      default:
-        return (
-          <>
-            <h2 style={{ marginBottom: "12px" }}>{activeLabel}</h2>
-            <p>Owner view under construction.</p>
-          </>
-        );
+    if (location.pathname.startsWith("/owner/requisition-overview")) {
+      return viewLabels["requisition-overview"];
     }
-  };
+    if (location.pathname.startsWith("/owner/ta-hr-performance")) {
+      return viewLabels["ta-hr-performance"];
+    }
+    if (location.pathname.startsWith("/owner/audit-approvals")) {
+      return viewLabels["audit-approvals"];
+    }
+    return viewLabels["executive-dashboard"];
+  }, [location.pathname]);
 
   return (
     <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
       <OwnerSidebar
-        activeView={activeView}
-        onViewChange={goToView}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((prev) => !prev)}
       />
@@ -101,6 +62,21 @@ const OwnerDashboard: React.FC = () => {
           }}
         />
         <section className="admin-content-area">{renderContent()}</section>
+        <section className="admin-content-area">
+          {location.pathname === "/owner" ? (
+            <ExecutiveDashboard />
+          ) : location.pathname === "/owner/resource-utilization" ? (
+            <ResourceUtilization />
+          ) : location.pathname === "/owner/requisition-overview" ? (
+            <RequisitionOverview />
+          ) : location.pathname === "/owner/ta-hr-performance" ? (
+            <TAHrPerformance />
+          ) : location.pathname === "/owner/audit-approvals" ? (
+            <AuditApprovals />
+          ) : (
+            <Outlet />
+          )}
+        </section>
       </div>
     </div>
   );
