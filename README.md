@@ -10,27 +10,26 @@ A full-stack web application that manages the lifecycle of hiring requests (requ
 
 The Resource Fulfillment System (RFS) centralizes resource requests, approvals, and fulfillment in one place. Managers raise requisitions; HR approves and assigns Talent Acquisition; TAs manage positions, candidates, and allocations; and the system prevents over-allocation and keeps a full audit trail.
 
-- **Modular monolith** — single deployable backend with clear domain boundaries  
-- **Role-based workflows** — Manager → HR → TA → Fulfillment with configurable transitions  
-- **Multi-position requisitions** — each requisition can have multiple items (roles/skills)  
-- **ATS-lite** — candidate intake from career page with resume upload and pipeline stages  
+- **Modular monolith** — single deployable backend with clear domain boundaries
+- **Role-based workflows** — Manager → HR → TA → Fulfillment with configurable transitions
+- **Multi-position requisitions** — each requisition can have multiple items (roles/skills)
 
 ---
 
 ## Key Features
 
-| Area | Capabilities |
-|------|----------------|
-| **Requisitions** | Raise, approve (budget + HR), assign TA, track items, auto-close when all positions are fulfilled or cancelled |
-| **Workflow** | Draft → Pending Budget → Pending HR → Active → Fulfilled; reject/cancel paths; status history |
-| **Items** | Multiple positions per requisition; skill, level, JD; item-level TA assignment; status per item (Pending, Sourcing, Shortlisted, Interviewing, Offered, Fulfilled, Cancelled) |
-| **Employees** | Onboarding, core profile, contacts, skills, education, deployment/availability, restricted financial data |
-| **Skills** | Central skill catalog; link employees and requisition items to skills with proficiency and years |
-| **Allocation** | Assign employees to requisition items; guardrails to prevent over-allocation |
-| **Candidates** | Create candidates, attach to items, upload resumes, move through pipeline stages |
-| **Access** | RBAC (Manager, HR, TA, Admin); JWT auth; role-scoped APIs and UI; URL-based nested routes per role |
-| **Audit** | Structured audit log (write operations only); export; status and workflow history |
-| **UI** | Load-more pagination on requisition lists, audit log, and alerts; multi-step Create Employee form; Employee Profile aligned with create flow; Quick Stats & Quick Actions on requisition detail (HR & TA) |
+| Area             | Capabilities                                                                                                                                                                                              |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Requisitions** | Raise, approve (budget + HR), assign TA, track items, auto-close when all positions are fulfilled or cancelled                                                                                            |
+| **Workflow**     | Draft → Pending Budget → Pending HR → Active → Fulfilled; reject/cancel paths; status history                                                                                                             |
+| **Items**        | Multiple positions per requisition; skill, level, JD; item-level TA assignment; status per item (Pending, Sourcing, Shortlisted, Interviewing, Offered, Fulfilled, Cancelled)                             |
+| **Employees**    | Onboarding, core profile, contacts, skills, education, deployment/availability, restricted financial data                                                                                                 |
+| **Skills**       | Central skill catalog; link employees and requisition items to skills with proficiency and years                                                                                                          |
+| **Allocation**   | Assign employees to requisition items; guardrails to prevent over-allocation                                                                                                                              |
+| **Candidates**   | Create candidates, attach to items, upload resumes, move through pipeline stages                                                                                                                          |
+| **Access**       | RBAC (Manager, HR, TA, Admin); JWT auth; role-scoped APIs and UI; URL-based nested routes per role                                                                                                        |
+| **Audit**        | Structured audit log (write operations only); export; status and workflow history                                                                                                                         |
+| **UI**           | Load-more pagination on requisition lists, audit log, and alerts; multi-step Create Employee form; Employee Profile aligned with create flow; Quick Stats & Quick Actions on requisition detail (HR & TA) |
 
 ---
 
@@ -55,24 +54,24 @@ The Resource Fulfillment System (RFS) centralizes resource requests, approvals, 
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Frontend:** Single-page app with route-based dashboards per role (Manager, HR, TA, Admin).  
-- **Backend:** REST APIs under `/api/*`; workflow and status rules enforced in service layer; CORS and JWT for browser clients.  
+- **Frontend:** Single-page app with route-based dashboards per role (Manager, HR, TA, Admin).
+- **Backend:** REST APIs under `/api/*`; workflow and status rules enforced in service layer; CORS and JWT for browser clients.
 - **Database:** PostgreSQL with Alembic migrations; indexes and constraints for workflow and audit.
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|------------|
-| **Backend** | Python 3.11+, FastAPI |
-| **Frontend** | React 19, TypeScript, Vite |
-| **Database** | PostgreSQL |
-| **ORM** | SQLAlchemy 2.x |
-| **Migrations** | Alembic |
-| **Auth** | JWT (python-jose), bcrypt (passlib) |
-| **Styling** | CSS, Tailwind CSS |
-| **HTTP client** | Axios |
+| Layer           | Technology                          |
+| --------------- | ----------------------------------- |
+| **Backend**     | Python 3.11+, FastAPI               |
+| **Frontend**    | React 19, TypeScript, Vite          |
+| **Database**    | PostgreSQL                          |
+| **ORM**         | SQLAlchemy 2.x                      |
+| **Migrations**  | Alembic                             |
+| **Auth**        | JWT (python-jose), bcrypt (passlib) |
+| **Styling**     | CSS, Tailwind CSS                   |
+| **HTTP client** | Axios                               |
 
 ---
 
@@ -80,8 +79,8 @@ The Resource Fulfillment System (RFS) centralizes resource requests, approvals, 
 
 ### Prerequisites
 
-- **Python 3.11+** (backend)  
-- **Node.js 18+** and npm (frontend)  
+- **Python 3.11+** (backend)
+- **Node.js 18+** and npm (frontend)
 - **PostgreSQL** (running and reachable)
 
 ### Backend
@@ -125,8 +124,8 @@ App: **http://localhost:5173**
 
 From project root:
 
-- **Windows (PowerShell):** `.\install-dependencies.ps1`  
-- **Linux/macOS (Bash):** `./install-dependencies.sh`  
+- **Windows (PowerShell):** `.\install-dependencies.ps1`
+- **Linux/macOS (Bash):** `./install-dependencies.sh`
 
 These install backend (pip) and frontend (npm) dependencies only; you still need to configure `.env`, run Alembic, and start both servers.
 
@@ -168,19 +167,19 @@ VITE_API_BASE_URL=http://localhost:8000/api
 
 ### Workflow (high level)
 
-1. **Manager** — Creates a requisition (project, client, required-by date, priority) and adds one or more **items** (role/skill, level, education). Submits for approval.  
-2. **HR / Admin** — Approves budget (if applicable) and then HR approval. Requisition moves to **Active**.  
-3. **HR** — Assigns a **Talent Acquisition (TA)** user to the requisition (or to specific items).  
-4. **TA** — Works each item: sources candidates, uploads resumes, moves candidates through stages (Shortlisted, Interviewing, Offered). When a candidate is hired, assigns an **employee** to the item and marks the item **Fulfilled**.  
+1. **Manager** — Creates a requisition (project, client, required-by date, priority) and adds one or more **items** (role/skill, level, education). Submits for approval.
+2. **HR / Admin** — Approves budget (if applicable) and then HR approval. Requisition moves to **Active**.
+3. **HR** — Assigns a **Talent Acquisition (TA)** user to the requisition (or to specific items).
+4. **TA** — Works each item: sources candidates, uploads resumes, moves candidates through stages (Shortlisted, Interviewing, Offered). When a candidate is hired, assigns an **employee** to the item and marks the item **Fulfilled**.
 5. **System** — When all items are Fulfilled or Cancelled, the requisition is marked **Fulfilled** and the workflow is complete.
 
 Reject and cancel paths exist at appropriate stages; status and history are stored for audit.
 
 ### Roles
 
-- **Manager** — Raise requisitions, view own requisitions and status, manager dashboard with metrics (Active, Fulfilled, Avg Fulfillment Days).  
-- **HR** — Approve requisitions, assign TAs, manage employees (onboarding, profiles, skills, contacts, education), HR dashboard, HR Workflow Guide.  
-- **TA** — View assigned requisitions and items, manage candidates, assign employees to items, TA dashboard with SLA and alerts, Quick Stats & Quick Actions on requisition detail.  
+- **Manager** — Raise requisitions, view own requisitions and status, manager dashboard with metrics (Active, Fulfilled, Avg Fulfillment Days).
+- **HR** — Approve requisitions, assign TAs, manage employees (onboarding, profiles, skills, contacts, education), HR dashboard, HR Workflow Guide.
+- **TA** — View assigned requisitions and items, manage candidates, assign employees to items, TA dashboard with SLA and alerts, Quick Stats & Quick Actions on requisition detail.
 - **Admin** — User management, master data, audit log (write-only), admin dashboard.
 
 ---
@@ -217,12 +216,12 @@ RBM_Resource_Module/
 
 ## Future Enhancements
 
-- Notifications (in-app or email) for approvals, assignments, and SLA alerts  
-- Advanced reporting and analytics (time-to-fill, TA workload, bottleneck analysis)  
-- Optional SSO / LDAP integration  
-- Bulk import for employees and requisitions  
-- Richer career-page and applicant experience  
-- Configurable SLA and workflow rules per tenant or org  
+- Notifications (in-app or email) for approvals, assignments, and SLA alerts
+- Advanced reporting and analytics (time-to-fill, TA workload, bottleneck analysis)
+- Optional SSO / LDAP integration
+- Bulk import for employees and requisitions
+- Richer career-page and applicant experience
+- Configurable SLA and workflow rules per tenant or org
 
 ---
 
@@ -230,12 +229,12 @@ RBM_Resource_Module/
 
 _Screenshots can be added here to showcase Manager, HR, TA, and Admin dashboards, requisition detail, and audit log._
 
-| Dashboard / Screen | Description |
-|--------------------|-------------|
-| Manager dashboard  | Metrics, raise requisition, my requisitions |
-| HR dashboard       | Pending approvals, requisitions, employee list |
-| TA dashboard       | Assignments, SLA, requisitions, resource pool |
-| Admin              | Users, master data, audit log |
+| Dashboard / Screen | Description                                              |
+| ------------------ | -------------------------------------------------------- |
+| Manager dashboard  | Metrics, raise requisition, my requisitions              |
+| HR dashboard       | Pending approvals, requisitions, employee list           |
+| TA dashboard       | Assignments, SLA, requisitions, resource pool            |
+| Admin              | Users, master data, audit log                            |
 | Requisition detail | Items, candidates, timeline, Quick Stats / Quick Actions |
 
 ---
