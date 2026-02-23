@@ -1083,6 +1083,10 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     };
   });
 
+  const openPositions = ticket.items.filter(
+    (item) =>
+      item.itemStatus !== "Fulfilled" && item.itemStatus !== "Cancelled",
+  ).length;
   const completionStats = {
     totalItems: ticket.items.length,
     fulfilled: ticket.items.filter((item) => item.itemStatus === "Fulfilled")
@@ -1091,6 +1095,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       .length,
     cancelled: ticket.items.filter((item) => item.itemStatus === "Cancelled")
       .length,
+    openPositions,
     progress:
       ticket.items.length > 0
         ? Math.round(
@@ -1763,7 +1768,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
           <div
             style={{ display: "flex", flexDirection: "column", gap: "24px" }}
           >
-            {/* Quick Stats */}
+            {/* Quick Stats - aligned with HR */}
             <div className="audit-log-viewer">
               <div className="viewer-header">
                 <h2>Quick Stats</h2>
@@ -1778,6 +1783,49 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   marginTop: "16px",
                 }}
               >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    Days Open
+                  </span>
+                  <span style={{ fontWeight: 600 }}>
+                    {ticket.daysOpen} day{ticket.daysOpen !== 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    Completion
+                  </span>
+                  <span style={{ color: "var(--success)", fontWeight: 600 }}>
+                    {completionStats.progress}%
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    Open Positions
+                  </span>
+                  <span style={{ fontWeight: 600 }}>
+                    {completionStats.openPositions} of{" "}
+                    {completionStats.totalItems}
+                  </span>
+                </div>
                 <div
                   style={{
                     display: "flex",
@@ -1802,44 +1850,15 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                     {(() => {
                       const remainingHours =
                         ticket.slaHours - ticket.daysOpen * 24;
-                      if (remainingHours <= 0)
-                        return "Breached";
+                      if (remainingHours <= 0) return "Breached";
                       return `${remainingHours}h remaining`;
                     })()}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <span style={{ color: "var(--text-secondary)" }}>
-                    Match Rate
-                  </span>
-                  <span style={{ color: "var(--success)", fontWeight: 600 }}>
-                    {completionStats.progress}%
-                  </span>
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <span style={{ color: "var(--text-secondary)" }}>
-                    Bench Availability
-                  </span>
-                  <span style={{ color: "var(--success)", fontWeight: 600 }}>
-                    {completionStats.pending} open positions
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Quick Actions */}
+            {/* Quick Actions - wired like HR */}
             <div className="audit-log-viewer">
               <div className="viewer-header">
                 <h2>Quick Actions</h2>
@@ -1854,36 +1873,36 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   marginTop: "16px",
                 }}
               >
-                {/* <button
+                <button
+                  type="button"
                   className="action-button"
                   style={{ justifyContent: "flex-start", textAlign: "left" }}
-                  onClick={() => setActiveTab("employees")}
+                  onClick={() => setActiveTab("candidates")}
                 >
                   <Users size={16} />
-                  View Available Employees
-                </button> */}
-                {/* <button
+                  View Candidates
+                </button>
+                <button
+                  type="button"
                   className="action-button"
                   style={{ justifyContent: "flex-start", textAlign: "left" }}
                   onClick={() => setActiveTab("items")}
                 >
                   <Briefcase size={16} />
                   Manage Requisition Items
-                </button> */}
+                </button>
                 <button
+                  type="button"
                   className="action-button"
                   style={{ justifyContent: "flex-start", textAlign: "left" }}
+                  onClick={() => {
+                    setActiveTab("timeline");
+                    setIsEditing(true);
+                  }}
                 >
                   <MessageSquare size={16} />
                   Add Internal Note
                 </button>
-                {/* <button
-                  className="action-button primary"
-                  style={{ justifyContent: "center" }}
-                >
-                  <ExternalLink size={16} />
-                  Generate Onboarding Plan
-                </button> */}
               </div>
             </div>
           </div>

@@ -1646,7 +1646,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
         </div>
       </div>
 
-      {/* Quick Stats */}
+      {/* Quick Stats - use visibleRequisitions to match table */}
       <div
         style={{
           marginTop: "24px",
@@ -1670,7 +1670,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
             Total Unassigned
           </div>
           <div style={{ fontSize: "20px", fontWeight: 700 }}>
-            {requisitions.filter((r) => !r.assignedTAId).length}
+            {visibleRequisitions.filter((r) => !r.assignedTAId).length}
           </div>
         </div>
         <div>
@@ -1686,12 +1686,9 @@ const Requisitions: React.FC<RequisitionsProps> = ({
           <div
             style={{ fontSize: "20px", fontWeight: 700, color: "var(--error)" }}
           >
-            {
-              // F-002 FIX: Use "Fulfilled" instead of "Closed"
-              requisitions.filter(
-                (r) => r.priority === "High" && r.overallStatus !== "Fulfilled",
-              ).length
-            }
+            {visibleRequisitions.filter(
+              (r) => r.priority === "High" && r.overallStatus !== "Fulfilled",
+            ).length}
           </div>
         </div>
         <div>
@@ -1705,7 +1702,10 @@ const Requisitions: React.FC<RequisitionsProps> = ({
             Total Positions
           </div>
           <div style={{ fontSize: "20px", fontWeight: 700 }}>
-            {requisitions.reduce((sum, req) => sum + req.items.length, 0)}
+            {visibleRequisitions.reduce(
+              (sum, req) => sum + req.items.length,
+              0,
+            )}
           </div>
         </div>
         <div>
@@ -1725,7 +1725,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
               color: "var(--warning)",
             }}
           >
-            {requisitions.reduce(
+            {visibleRequisitions.reduce(
               (sum, req) =>
                 sum +
                 req.items.filter((item) => item.itemStatus === "Pending")
