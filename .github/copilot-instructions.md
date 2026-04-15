@@ -2,8 +2,8 @@
 
 ## Big picture
 
-- Two apps: FastAPI backend in backend/ and React + Vite frontend in rbm-rfm-frontend/.
-- Backend exposes REST under /api; frontend talks to it via Axios in rbm-rfm-frontend/src/api/client.ts.
+- One app in active use: Next.js (`rms-next/`) which serves both UI routes and `/api/*` endpoints.
+- A legacy FastAPI backend still exists in `backend/` for reference during cutover, but the goal is to run standalone on Next.
 - Auth uses JWT: token stored in localStorage as authToken and injected by the Axios request interceptor.
 
 ## Backend conventions (FastAPI + SQLAlchemy)
@@ -17,18 +17,17 @@
 - Enum-like fields typically use `CheckConstraint` (see employee status in models).
 - Known cleanup: backend/api/requisitions.py contains duplicate imports; consolidate when editing.
 
-## Frontend conventions (React + Vite)
+## Frontend conventions (Next.js App Router)
 
-- Entry points: rbm-rfm-frontend/src/main.tsx and App.tsx; routing in rbm-rfm-frontend/src/routes.
-- API calls go through the shared Axios client in rbm-rfm-frontend/src/api/client.ts (base URL via VITE_API_BASE_URL).
-- Auth state is managed in contexts/ (see AuthContext pattern referenced in TECH_STACK_AND_ARCHITECTURE.md).
-- Styles are plain CSS under rbm-rfm-frontend/src/styles/.
+- UI lives under `rms-next/src/app/**` and `rms-next/src/components/**`.
+- API routes live under `rms-next/src/app/api/**` and are consumed from the browser via same-origin `/api` (see `rms-next/src/lib/api/client.ts`).
+- Auth state is managed in `rms-next/src/contexts/**` (token in localStorage; interceptor adds `Authorization: Bearer ...`).
+- Styles are plain CSS under `rms-next/src/styles/**`.
 
 ## Workflows & scripts (from repo config)
 
-- Root package.json provides npm run dev/build to run frontend commands in rbm-rfm-frontend/.
+- Root package.json provides npm run dev/build to run Next commands in `rms-next/`.
 - Database migrations live in backend/alembic; use Alembic from backend/ (revision/upgrade head).
-- FastAPI CORS is configured in backend/main.py for localhost:5173/3000.
 
 ## Cross-component integration points
 

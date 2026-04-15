@@ -1,1 +1,54 @@
-node_modules
+# --- Dependencies & build ---
+node_modules/
+**/node_modules/
+dist/
+dist-ssr/
+build/
+*.tsbuildinfo
+
+# --- Environment & secrets (never commit) ---
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.eggs/
+
+# --- Local runtime / uploads (dev artifacts) ---
+rms-next/uploads/
+rms-next/storage/
+
+# --- Bundled tooling (install Node from nodejs.org or your OS package manager) ---
+SoftwareFiles/
+
+# --- OS & editors ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# --- Logs & misc ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Stray screenshots / dumps at repo root ---
+mintty*.png

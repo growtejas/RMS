@@ -2,38 +2,26 @@
 
 ## 🏗️ **Project Overview**
 
-**RBM (Resource Business Management) Resource Fulfillment Module** is a full-stack web application for managing employee lifecycle, organizational structure, requisitions, and audit logging. It consists of a React/TypeScript frontend and FastAPI backend with PostgreSQL database.
+**RBM (Resource Business Management) Resource Fulfillment Module** is a full-stack web application for managing employee lifecycle, organizational structure, requisitions, and audit logging.
+
+Current architecture: **Next.js (UI + `/api/*`) + PostgreSQL**.
 
 ---
 
 ## 🛠️ **Technology Stack**
 
-### **Frontend**
+### **App (UI + API)**
 
-- **Framework**: React 19 with TypeScript
-- **Build Tool**: Vite (fast HMR, optimized production builds)
-- **Routing**: React Router v7.12.0 (client-side routing, protected routes)
+- **Framework**: Next.js 14 (App Router), React 18, TypeScript
+- **Routing**: Next.js App Router (server + client routing)
 - **HTTP Client**: Axios (with request/response interceptors for auth)
 - **State Management**: React Context API + Custom Hooks (AuthContext for global auth state)
 - **Code Quality**: ESLint + Prettier
 - **Styling**: CSS (modular, responsive design)
 
-### **Backend**
-
-- **Framework**: FastAPI (modern, async-ready, auto-generated API docs)
-- **Language**: Python 3.13+
-- **Database**: PostgreSQL
-- **ORM**: SQLAlchemy 2.0 (declarative models, relationship management)
-- **Database Migrations**: Alembic (version control for schema)
-- **Validation**: Pydantic (request/response validation, type hints)
-- **Authentication**: JWT (JSON Web Tokens) with HS256 algorithm
-- **Password Hashing**: Passlib with pbkdf2_sha256
-- **CORS**: FastAPI CORSMiddleware (allows frontend-backend communication)
-
 ### **DevOps & Tools**
 
-- **Python Virtual Environment**: `.venv`
-- **Package Managers**: npm (frontend), pip (backend)
+- **Package Managers**: npm
 - **Environment Variables**: `.env` files (DB credentials, API URLs)
 - **Version Control**: Git
 
@@ -43,61 +31,22 @@
 
 ```
 RBM_Resource_Module/
-├── rbm-rfm-frontend/              # React TypeScript SPA
+├── rms-next/                      # Next.js app (UI + /api routes)
 │   ├── src/
-│   │   ├── api/                   # API client setup (Axios)
-│   │   ├── components/            # Reusable UI components
-│   │   │   ├── Header.tsx         # Header with user info & logout
-│   │   │   ├── ProtectedRoute.tsx # Route protection wrapper
-│   │   │   └── ...
-│   │   ├── contexts/              # Global state (AuthContext)
-│   │   ├── pages/                 # Page components (Login, Dashboard)
-│   │   ├── routes/                # Router configuration
-│   │   ├── styles/                # CSS files
-│   │   │   ├── variables.css      # CSS variables (colors, spacing, typography)
-│   │   │   ├── Login.css          # Login page styles
-│   │   │   ├── Header.css         # Header component styles
-│   │   │   └── ThemeSwitcher.css  # Theme switcher styles
-│   │   ├── App.tsx                # Root component
-│   │   └── main.tsx               # Entry point
-│   ├── .env                       # Environment variables
-│   ├── package.json               # Dependencies & scripts
-│   └── vite.config.ts             # Vite configuration
-│
-├── backend/                        # FastAPI application
-│   ├── main.py                    # FastAPI app setup & router registration
-│   ├── database.py                # SQLAlchemy engine config
-│   ├── alembic/                   # Database migrations
-│   │   ├── env.py
-│   │   └── versions/              # Migration files
-│   ├── api/                       # API endpoint routers
-│   │   ├── auth.py                # Authentication endpoints
-│   │   ├── employees.py           # Employee CRUD endpoints
-│   │   ├── requisitions.py        # Requisition endpoints
-│   │   └── ... (other domain routers)
-│   ├── db/
-│   │   ├── models/                # SQLAlchemy ORM models
-│   │   │   ├── auth.py            # User, Role, UserRole models
-│   │   │   ├── employee.py        # Employee model
-│   │   │   └── ... (other models)
-│   │   └── session.py             # Database session management
-│   ├── schemas/                   # Pydantic request/response schemas
-│   │   ├── auth.py                # LoginRequest, TokenResponse
-│   │   ├── employee.py            # Employee schemas
-│   │   └── ... (other schemas)
-│   ├── utils/
-│   │   ├── security.py            # Password hashing functions
-│   │   ├── jwt.py                 # JWT token creation
-│   │   └── dependencies.py        # Dependency injection
-│   ├── .env                       # Database credentials
-│   └── requirements.txt           # Python dependencies
+│   │   ├── app/                   # App Router pages + API routes
+│   │   ├── components/            # UI components
+│   │   ├── contexts/              # Auth + global state
+│   │   ├── lib/                   # DB, services, repositories, validators
+│   │   └── styles/                # CSS
+│   ├── .env.example               # Copy to .env.local
+│   └── package.json
 │
 └── package.json                   # Root workspace config
 ```
 
 ---
 
-## 🔐 **Authentication Flow**
+## 🔐 **Authentication Flow (Current)**
 
 ### **1. Login Request** (Frontend → Backend)
 
@@ -109,25 +58,15 @@ POST /api/auth/login
 }
 ```
 
-### **2. Backend Processing**
+### **2. Server Processing (Next.js API routes)**
 
-```python
-# Backend receives login request
-1. Find user by username in database
-2. Verify password using bcrypt
-3. Check if user is active
-4. Query user's roles from UserRole table
-5. Create JWT token with: sub (user_id), username, roles
-6. Return: { access_token, token_type, user_id, username, roles }
-```
+The server (Next.js `/api/*`) verifies credentials, loads roles, issues **access + refresh tokens**, and sets them as **`httpOnly` cookies**.
 
 ### **3. Frontend Storage & State**
 
 ```typescript
-// Store token in localStorage
-localStorage.setItem("authToken", token)
-
-// Store user data in React Context
+// No localStorage tokens.
+// AuthContext holds user info in memory, bootstrapped from `/api/auth/me`.
 {
   user_id: 1,
   username: "admin",
@@ -144,12 +83,9 @@ localStorage.setItem("authToken", token)
 - If no: redirect to /login or /unauthorized
 ```
 
-### **5. Automatic Token Injection**
+### **5. Session transport**
 
-```typescript
-// Axios interceptor adds token to all requests
-Authorization: Bearer<jwt_token>;
-```
+Auth uses **cookie-based session**. Mutating requests include a CSRF header (`x-csrf-token`).
 
 ---
 
@@ -182,30 +118,17 @@ AuthContext (global)
 └── clearError(): void
 ```
 
-### **Backend Architecture**
+### **Server Architecture**
 
 **Router Structure:**
 
-```
-FastAPI App
-├── CORS Middleware (allows localhost:5173)
-├── Router: /api/auth → login endpoint
-├── Router: /api/users → user CRUD endpoints
-├── Router: /api/employees → employee CRUD endpoints
-├── Router: /api/requisitions → requisition endpoints
-└── Router: /api/* (15+ more domain routers)
-```
+Next.js App Router API routes under `rms-next/src/app/api/**` implement the API surface.
 
-**Data Layer:**
+**Data Layer (Single source of truth):**
 
 ```
-Database (PostgreSQL)
-├── Users table (authentication)
-├── Roles table (role definitions)
-├── UserRole table (many-to-many mapping)
-├── Employees table (core entity)
-├── Requisitions table (business logic)
-└── ... (20+ more tables)
+PostgreSQL + Drizzle ORM.
+Migrations are generated and applied via **Drizzle Kit**.
 ```
 
 **Request Pipeline:**
@@ -410,29 +333,27 @@ PUT    /api/employees/{emp_id}           # Update employee
 
 ## 🎯 **Development Workflow**
 
-### **Start Backend:**
+### **Start App:**
 
 ```bash
-cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-python -m uvicorn main:app --reload --port 8000
-```
-
-### **Start Frontend:**
-
-```bash
-cd rbm-rfm-frontend
+cd rms-next
 npm install
 npm run dev
 ```
 
 ### **Access Application:**
 
-- Frontend: `http://localhost:5173`
-- Backend API: `http://localhost:8000`
-- API Docs: `http://localhost:8000/docs`
+- App: `http://localhost:3000`
+
+### **Database migrations (Drizzle)**
+
+```bash
+cd rms-next
+# Generate migration files from `src/lib/db/schema.ts`
+npm run db:generate
+# Apply migrations to the database
+npm run db:migrate
+```
 
 ---
 

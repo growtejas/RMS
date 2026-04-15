@@ -1,0 +1,308 @@
+================================================================================
+  RFM (Resource Fulfillment Module) — CURRENT SYSTEM FLOW — DEEP DIVE
+================================================================================
+
+Purpose
+-------
+This document describes how the application works today as implemented under
+`rms-next/` (Next.js 14 App Router). It is written for someone who wants to
+trace a request from the browser to the database and back, and to understand
+security, data, and frontend wiring.
+
+Last aligned to codebase patterns: cookie auth, CSRF middleware, Drizzle ORM,
+PostgreSQL, API routes under `/api/*`.
+
+
+================================================================================
+1. BIG PICTURE — WHAT KIND OF SYSTEM THIS IS
+================================================================================
+
+Architecture label
+------------------
+- **Modular monolith (single deployable)**: one Next.js application serves:
+  - **UI** (React client components + server components where used)
+  - **HTTP API** (Route Handlers under `src/app/api/**`)
+  - **BFF pattern** (Browser talks to same-origin `/api`, not a separate host)
+
+There is **no separate FastAPI/Python server in this tree** for the live app;
+the “backend” is Next.js Route Handlers + services + repositories + Drizzle.
+
+Data store
+----------
+- **PostgreSQL** accessed via **Drizzle ORM** (`drizzle-orm` + `postgres` driver).
+- Connection pool is created once per Node process and reused in dev (HMR-safe)
+  via `globalThis` in `src/lib/db/index.ts`.
+
+Primary directories (mental map)
+--------------------------------
+- `rms-next/src/app/` — Routes (pages) + `api/` Route Handlers
+- `rms-next/src/components/`    — React UI
+- `rms-next/src/contexts/`      — Client auth state (`AuthContext`)
+- `rms-next/src/lib/api/`       — Axios client, cached GET helper, error helpers
+- `rms-next/src/lib/auth/`      — JWT, cookies, API guard (`requireBearerUser`)
+- `rms-next/src/lib/services/`  — Use-case orchestration (business-ish layer)
+- `rms-next/src/lib/repositories/` — SQL/Drizzle queries (data access)
+- `rms-next/src/lib/db/`        — Schema + `getDb()`
+- `rms-next/src/middleware.ts`  — Security headers, request id, CSRF gate
+
+
+================================================================================
+2. A SINGLE HTTP REQUEST — END-TO-END LIFECYCLE
+================================================================================
+
+Example: authenticated GET /api/skills
+--------------------------------------
+
+Step A — Browser issues XHR/fetch
+---------------------------------
+- Most UI code uses **`apiClient`** (`src/lib/api/client.ts`), an Axios instance
+  with `baseURL` set to the current origin + `/api` (browser) so calls are
+  same-origin (e.g. `GET /skills` resolves to `http://localhost:3000/api/skills`).
+- `withCredentials: true` so **cookies** are sent on cross-site-safe same-origin
+  requests.
+- For unsafe methods (POST/PUT/PATCH/DELETE), Axios adds **`x-csrf-token`**
+  from the readable `rfm_csrf` cookie (double-submit pattern).
+
+Step B — Edge middleware (`src/middleware.ts`)
+------------------------------------------------
+Runs for almost all paths except static Next assets (see `config.matcher`).
+
+On every matched request, middleware:
+1. Builds or forwards **`x-request-id`** (correlation id) on the response.
+2. Applies **security headers** (CSP, nosniff, frame denial, referrer policy,
+   permissions policy; HSTS in production).
+3. For **unsafe** requests to `/api/*` (except login/refresh), enforces **CSRF**:
+   - Requires same-origin `Origin` when present.
+   - Requires cookie `rfm_csrf` === header `x-csrf-token`.
+
+If CSRF fails → **403 JSON** with a generic detail string.
+
+Step C — Route Handler (`src/app/api/skills/route.ts`)
+------------------------------------------------------
+- Declares `runtime = "nodejs"` and `dynamic = "force-dynamic"` so DB and secrets
+  work predictably (not edge).
+- **GET** handler pattern:
+  1. `const user = await requireBearerUser(request)`
+     - If this returns a `NextResponse`, that is an auth error (401/403/etc).
+  2. `requireAnyRole(user, "HR", "Admin", ...)` for coarse RBAC.
+  3. Calls a **service** function, e.g. `getSkillsCatalog()`.
+  4. Returns `NextResponse.json(data)`.
+  5. Errors go through `referenceWriteCatch` for consistent JSON + logging.
+
+Step D — Service layer (`src/lib/services/*`)
+----------------------------------------------
+- Encapsulates “what we’re trying to do” (load catalog, create skill, etc.).
+- May call one or more repository functions, enforce invariants, map DTOs.
+- Keeps Route Handlers thin (HTTP in/out only).
+
+Step E — Repository layer (`src/lib/repositories/*`)
+----------------------------------------------------
+- Contains Drizzle queries: `db.select()`, `db.insert()`, transactions, etc.
+- Should not know about HTTP; returns plain data structures.
+
+Step F — Database (`getDb()` → Drizzle → PostgreSQL)
+----------------------------------------------------
+- `getDb()` throws if `DATABASE_URL` is missing.
+- Pool `max: 10` on the underlying `postgres` client (tunable).
+
+
+================================================================================
+3. AUTHENTICATION & SESSION MODEL (CURRENT)
+================================================================================
+
+Tokens
+------
+- **Access token** and **refresh token** are **JWTs** (library: `jose`), created
+  in the auth service after password verification.
+- Tokens are stored in **httpOnly cookies** (not `localStorage`):
+  - Access cookie (name defined in `src/lib/auth/cookies.ts`, e.g. `rfm_access`)
+  - Refresh cookie scoped to refresh path where configured
+
+Login flow (`POST /api/auth/login`)
+-------------------------------------
+1. Validates JSON body (`loginBodySchema`).
+2. `loginWithPassword` checks credentials against DB (bcrypt, etc. in service).
+3. On success, response JSON includes user fields + **`csrf_token`** for clients
+   that need to display/debug it; the real CSRF value is also set as **`rfm_csrf`**
+   cookie (readable by JS so Axios can mirror it into `x-csrf-token`).
+4. Sets access + refresh + CSRF cookies on the response.
+
+Session bootstrap in the browser (`AuthContext`)
+------------------------------------------------
+File: `src/contexts/AuthContext.tsx` (client component).
+
+On mount:
+1. Calls **`fetchMe()`** (typically `GET /api/auth/me`) using the cookie session.
+2. If **401**, attempts **`refreshAccessToken()`** once (cookie-based refresh).
+3. Tracks **`isHydrating`** so protected pages can avoid flashing wrong UI.
+
+Login uses **`fetch()`** to `/api/auth/login` (same-origin) — login is exempt
+from CSRF in middleware, by design.
+
+API authorization on the server (`requireBearerUser`)
+-----------------------------------------------------
+File: `src/lib/auth/api-guard.ts`.
+
+Resolution order for the access JWT:
+1. **httpOnly access cookie** (preferred)
+2. Else `Authorization: Bearer ...` (legacy/alternate)
+
+Then:
+- Verifies JWT signature/expiry.
+- Loads user + roles from DB via **`findUserWithRolesById`** (single query).
+
+Returns either an **`ApiUser`** object or a **`NextResponse`** error.
+
+Logout
+------
+- `POST /api/auth/logout` clears auth cookies (client should call via API helper).
+
+
+================================================================================
+4. AUTHORIZATION (RBAC) — WHAT IS REAL VS STUB
+================================================================================
+
+What is actively enforced today
+-------------------------------
+- **Per-route role checks** via `requireAnyRole(user, ...)` in many Route
+  Handlers (example: `GET /api/skills` allows several roles; `POST /api/skills`
+  restricts to HR/Admin/Owner).
+
+What is still a stub
+--------------------
+- `src/lib/rbac/with-permission.ts` is largely **placeholder** (session helpers
+  return null; `assertPermission` is not the primary enforcement mechanism yet).
+- Do not assume fine-grained permissions (`candidates:view`, scopes) are
+  enforced until Route Handlers are migrated to a real permission matrix.
+
+
+================================================================================
+5. FRONTEND APPLICATION SHAPE
+================================================================================
+
+Root layout
+-----------
+`src/app/layout.tsx`:
+- Loads fonts + global CSS.
+- Wraps the tree with `<Providers>`.
+
+Providers (`src/components/providers.tsx`)
+------------------------------------------
+- **TanStack Query** (`QueryClientProvider`) with defaults:
+  - `staleTime: 30s`, `refetchOnWindowFocus: false`, `retry: 1`
+  - This reduces “surprise” refetches but **does not** stop components that
+    manually poll or use multiple `useEffect` loaders.
+
+- **`AuthProvider`**: global auth state + hydration gate.
+
+Data fetching patterns
+----------------------
+1. **Axios `apiClient`** for most CRUD calls to `/api/...`.
+2. **`cachedApiGet`** (`src/lib/api/cached-api-get.ts`):
+   - Short TTL in-memory cache + **in-flight dedupe** for identical GET keys.
+   - URLs are normalized (trailing slash stripped for relative paths) so
+     `"/skills"` and `"/skills/"` share one cache key.
+
+URL normalization
+-----------------
+- `apiClient` request interceptor strips trailing slashes on relative URLs to
+  avoid Next.js **308 redirects** (`/api/skills/` → `/api/skills`).
+
+
+================================================================================
+6. CROSS-CUTTING CONCERNS
+================================================================================
+
+Request correlation
+-------------------
+- Middleware sets/propagates **`x-request-id`**.
+- Error helpers can log with that id (see `reference-write-errors` + logger).
+
+Errors
+------
+- `referenceWriteCatch` centralizes JSON error responses; production responses avoid leaking raw exception strings; dev may include more detail.
+
+Internal observability endpoints
+--------------------------------
+- Workflow metrics/health may require **`METRICS_BEARER_TOKEN`** in production
+  (see `src/lib/internal/metrics-auth.ts`).
+
+Content Security Policy (CSP)
+-----------------------------
+- Set in middleware. Current tradeoff: allows **`unsafe-inline`** scripts for
+  Next.js compatibility; stricter nonce-based CSP would be a future hardening step.
+
+
+================================================================================
+7. DATA MODEL & MIGRATIONS
+================================================================================
+
+Schema
+------
+- `src/lib/db/schema.ts` is the Drizzle schema (large; mirrors legacy domain).
+
+Migrations
+----------
+- Drizzle Kit is the intended **single source of truth** for migrations.
+- Typical commands (see `rms-next/package.json`): `db:generate`, `db:migrate`,
+  `db:push`, `db:check`.
+
+
+================================================================================
+8. DOMAIN FLOWS YOU WILL SEE IN THE UI (HIGH LEVEL)
+================================================================================
+
+Requisitions & workflow
+-----------------------
+- Requisition lists, detail pages, and workflow actions call Route Handlers under
+  `/api/requisitions/**` and `/api/requisition-items/**` (plus workflow routes).
+- Write paths often use services that run **transactions** for atomic updates (budget audit, item upserts, etc.) — exact rules live in
+  `src/lib/services/requisitions-write-service.ts` and related repositories.
+
+Reference master data
+---------------------
+- Skills, departments, locations, company roles: `/api/skills`, `/api/departments`,
+  etc., following the “parse → guard → service → repo” pattern.
+
+File uploads
+----------
+- Resume/JD endpoints stream to storage where implemented (avoid buffering whole files in memory).
+
+
+================================================================================
+9. DEVELOPMENT VS PRODUCTION — BEHAVIOR YOU SHOULD EXPECT
+================================================================================
+
+Multiple dev servers / ports
+----------------------------
+- If two `next dev` instances run, one may bind to **3001** while the browser still points at **3000**. That looks like “wrong code” or duplicate calls.
+- Run **one** dev server; verify the port in the terminal banner.
+
+StrictMode
+----------
+- `next.config.mjs` may set `reactStrictMode: false` to reduce dev-only double
+  effects. Production behavior is governed by the built bundle, not StrictMode
+  doubling.
+
+Hot reload / `.next` corruption
+-------------------------------
+- If you see `Cannot find module './NNNN.js'`, stop dev, run `npm run clean`,
+  restart `npm run dev` (or `npm run dev:clean`).
+
+
+================================================================================
+10. HOW TO LEARN THE CODEBASE EFFICIENTLY (SUGGESTED READING ORDER)
+================================================================================
+
+1. `rms-next/src/middleware.ts` — security + CSRF + request id
+2. `rms-next/src/lib/api/client.ts` — how the browser talks to `/api`
+3. `rms-next/src/lib/auth/api-guard.ts` — how APIs authenticate
+4. Pick one Route Handler: `rms-next/src/app/api/skills/route.ts`
+5. Follow imports into `src/lib/services/*` then `src/lib/repositories/*`
+6. `rms-next/src/lib/db/index.ts` + `schema.ts` — persistence layer
+7. `rms-next/src/contexts/AuthContext.tsx` — client session lifecycle
+
+
+================================================================================
+END OF DOCUMENT
+================================================================================

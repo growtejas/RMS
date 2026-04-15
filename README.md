@@ -37,16 +37,10 @@ The Resource Fulfillment System (RFS) centralizes resource requests, approvals, 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         React SPA (Vite + TypeScript)                     │
-│  Manager │ HR │ TA │ Admin dashboards, requisitions, employees, audit    │
+│                   Next.js (App Router) + TypeScript                      │
+│  Manager │ HR │ TA │ Admin dashboards + API routes under /api            │
 └─────────────────────────────────┬───────────────────────────────────────┘
-                                  │ REST + JWT
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      FastAPI (Modular Monolith)                          │
-│  /api/requisitions │ /api/employees │ /api/skills │ /api/dashboard │ ...  │
-└─────────────────────────────────┬───────────────────────────────────────┘
-                                  │ SQLAlchemy ORM
+                                  │ DB + JWT (server) / REST (browser → /api)
                                   ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                           PostgreSQL                                      │
@@ -54,9 +48,8 @@ The Resource Fulfillment System (RFS) centralizes resource requests, approvals, 
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Frontend:** Single-page app with route-based dashboards per role (Manager, HR, TA, Admin).
-- **Backend:** REST APIs under `/api/*`; workflow and status rules enforced in service layer; CORS and JWT for browser clients.
-- **Database:** PostgreSQL with Alembic migrations; indexes and constraints for workflow and audit.
+- **App:** Next.js pages + API routes under `/api/*`; workflow and status rules enforced server-side; JWT auth; RBAC in both API and UI.
+- **Database:** PostgreSQL.
 
 ---
 
@@ -64,12 +57,10 @@ The Resource Fulfillment System (RFS) centralizes resource requests, approvals, 
 
 | Layer           | Technology                          |
 | --------------- | ----------------------------------- |
-| **Backend**     | Python 3.11+, FastAPI               |
-| **Frontend**    | React 19, TypeScript, Vite          |
+| **App**         | Next.js 14 (App Router), React 18, TypeScript |
 | **Database**    | PostgreSQL                          |
-| **ORM**         | SQLAlchemy 2.x                      |
-| **Migrations**  | Alembic                             |
-| **Auth**        | JWT (python-jose), bcrypt (passlib) |
+| **ORM**         | Drizzle ORM                         |
+| **Auth**        | JWT, bcrypt                         |
 | **Styling**     | CSS, Tailwind CSS                   |
 | **HTTP client** | Axios                               |
 
@@ -79,46 +70,25 @@ The Resource Fulfillment System (RFS) centralizes resource requests, approvals, 
 
 ### Prerequisites
 
-- **Python 3.11+** (backend)
-- **Node.js 18+** and npm (frontend)
+- **Node.js 18+** and npm
 - **PostgreSQL** (running and reachable)
 
-### Backend
+### App (Next.js)
 
 ```bash
-cd backend
-python -m venv venv
-# Windows:
-venv\Scripts\activate
-# Linux/macOS:
-# source venv/bin/activate
-pip install -r requirements.txt
-```
-
-Create a `.env` in `backend/` (see [Environment Variables](#environment-variables)). Then run migrations and start the API:
-
-```bash
-# From backend/
-alembic upgrade head
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-API docs: **http://localhost:8000/docs**
-
-### Frontend
-
-```bash
-cd rbm-rfm-frontend
+cd rms-next
 npm install
 ```
 
-Copy `.env.example` to `.env` and set `VITE_API_BASE_URL` (e.g. `http://localhost:8000/api`). Then:
+Copy `rms-next/.env.example` to `rms-next/.env.local` and set:
+- `DATABASE_URL=...`
+- `JWT_SECRET_KEY=...`
 
 ```bash
 npm run dev
 ```
 
-App: **http://localhost:5173**
+App: **http://localhost:3000**
 
 ### One-shot dependency install (optional)
 
@@ -127,38 +97,33 @@ From project root:
 - **Windows (PowerShell):** `.\install-dependencies.ps1`
 - **Linux/macOS (Bash):** `./install-dependencies.sh`
 
-These install backend (pip) and frontend (npm) dependencies only; you still need to configure `.env`, run Alembic, and start both servers.
+These install Node dependencies only; you still need to configure `rms-next/.env.local` and have a PostgreSQL schema available.
+
+### Database migrations (Drizzle)
+
+From `rms-next/`:
+
+```bash
+# Generate migration files from `src/lib/db/schema.ts`
+npm run db:generate
+# Apply migrations to your database
+npm run db:migrate
+```
 
 ---
 
 ## Environment Variables
 
-### Backend (`backend/.env`)
+### App (`rms-next/.env.local`)
 
 ```env
-# Database (required)
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=your_db_name
-DB_USER=your_db_user
-DB_PASSWORD=your_db_password
-
-# Optional
-MANAGER_SLA_DAYS=30
-STORAGE_TYPE=local
-STORAGE_LOCAL_DIR=storage/jd
-JD_UPLOAD_DIR=uploads/jd
-RESUME_UPLOAD_DIR=uploads/resumes
-# For S3:
-# STORAGE_TYPE=s3
-# STORAGE_S3_BUCKET=your-bucket
-# STORAGE_S3_PREFIX=jd
-```
-
-### Frontend (`rbm-rfm-frontend/.env`)
-
-```env
-VITE_API_BASE_URL=http://localhost:8000/api
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:3000/api
+DATABASE_URL=postgresql://USER:PASSWORD@127.0.0.1:5432/rfm
+JWT_SECRET_KEY=your-secret
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+REFRESH_TOKEN_EXPIRE_DAYS=14
+METRICS_BEARER_TOKEN=your-scraper-token
 ```
 
 ---
@@ -188,25 +153,15 @@ Reject and cancel paths exist at appropriate stages; status and history are stor
 
 ```
 RBM_Resource_Module/
-├── backend/
-│   ├── api/              # FastAPI route modules (requisitions, employees, skills, dashboard, etc.)
-│   ├── db/               # SQLAlchemy models, engine, session
-│   ├── services/         # Business logic (workflow, requisition engine, storage); services/requisition for workflow matrix
-│   ├── schemas/          # Pydantic request/response models
-│   ├── utils/            # Helpers (dependencies, auth, storage)
-│   ├── alembic/          # Database migrations
-│   ├── main.py           # App entry, CORS, router registration
-│   └── requirements.txt
-├── rbm-rfm-frontend/
+├── rms-next/
 │   ├── src/
-│   │   ├── components/   # React components (admin, hr, ta, manager, shared)
-│   │   ├── routes/       # App router and route config
-│   │   ├── api/          # API client and service calls
-│   │   ├── contexts/    # Auth and app context
-│   │   ├── types/        # TypeScript types and workflow enums
-│   │   └── styles/       # Global and module CSS
-│   ├── package.json
-│   └── vite.config.ts
+│   │   ├── app/          # UI routes + /api routes
+│   │   ├── components/   # UI components
+│   │   ├── contexts/     # Auth context
+│   │   ├── lib/          # DB/services/repositories/validators
+│   │   └── styles/       # CSS
+│   ├── .env.example
+│   └── package.json
 ├── install-dependencies.ps1
 ├── install-dependencies.sh
 └── README.md
