@@ -10,7 +10,33 @@ import {
   date,
   numeric,
   index,
+  uniqueIndex,
+  uuid,
+  jsonb,
+  pgEnum,
 } from "drizzle-orm/pg-core";
+
+export const subscriptionPlanEnum = pgEnum("subscription_plan", [
+  "free",
+  "pro",
+  "enterprise",
+]);
+
+/** Multi-tenant root entity for ATS expansion. */
+export const organizations = pgTable("organizations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 120 }).notNull(),
+  slug: varchar("slug", { length: 100 }).notNull().unique(),
+  logoUrl: text("logo_url"),
+  domain: varchar("domain", { length: 120 }),
+  settings: jsonb("settings"),
+  googleOauthTokens: jsonb("google_oauth_tokens"),
+  subscriptionPlan: subscriptionPlanEnum("subscription_plan")
+    .notNull()
+    .default("free"),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+});
 
 /** Mirrors `backend/db/models/auth.py` + Alembic `users` / `roles` / `user_roles`. */
 export const users = pgTable("users", {
@@ -219,6 +245,7 @@ export const candidates = pgTable(
     fullName: varchar("full_name", { length: 150 }).notNull(),
     email: varchar("email", { length: 255 }).notNull(),
     phone: varchar("phone", { length: 30 }),
+    currentCompany: varchar("current_company", { length: 200 }),
     resumePath: text("resume_path"),
     currentStage: varchar("current_stage", { length: 20 })
       .notNull()
@@ -236,6 +263,200 @@ export const candidates = pgTable(
       t.createdAt,
     ),
     index("idx_candidates_req_createdat").on(t.requisitionId, t.createdAt),
+  ],
+);
+
+/** Phase 4 core ATS record: one application per candidate for a job line. */
+export const applications = pgTable(
+  "applications",
+  {
+    applicationId: serial("application_id").primaryKey(),
+    candidateId: integer("candidate_id")
+      .notNull()
+      .references(() => candidates.candidateId, { onDelete: "cascade" }),
+    requisitionItemId: integer("requisition_item_id")
+      .notNull()
+      .references(() => requisitionItems.itemId, { onDelete: "cascade" }),
+    requisitionId: integer("requisition_id")
+      .notNull()
+      .references(() => requisitions.reqId, { onDelete: "cascade" }),
+    currentStage: varchar("current_stage", { length: 20 }).notNull().default("Sourced"),
+    source: varchar("source", { length: 50 }).notNull().default("manual"),
+    createdBy: integer("created_by").references(() => users.userId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("uq_applications_candidate").on(t.candidateId),
+    index("idx_applications_item_stage_createdat").on(
+      t.requisitionItemId,
+      t.currentStage,
+      t.createdAt,
+    ),
+    index("idx_applications_req_createdat").on(t.requisitionId, t.createdAt),
+  ],
+);
+
+/** Immutable stage movement log for applications. */
+export const applicationStageHistory = pgTable(
+  "application_stage_history",
+  {
+    historyId: serial("history_id").primaryKey(),
+    applicationId: integer("application_id")
+      .notNull()
+      .references(() => applications.applicationId, { onDelete: "cascade" }),
+    candidateId: integer("candidate_id")
+      .notNull()
+      .references(() => candidates.candidateId, { onDelete: "cascade" }),
+    fromStage: varchar("from_stage", { length: 20 }),
+    toStage: varchar("to_stage", { length: 20 }).notNull(),
+    changedBy: integer("changed_by").references(() => users.userId, {
+      onDelete: "set null",
+    }),
+    reason: text("reason"),
+    metadata: jsonb("metadata"),
+    changedAt: timestamp("changed_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_application_stage_history_app_changedat").on(t.applicationId, t.changedAt),
+    index("idx_application_stage_history_candidate_changedat").on(t.candidateId, t.changedAt),
+  ],
+);
+
+/** Phase 5 ranking snapshots for fast reads and deterministic auditability. */
+export const rankingSnapshots = pgTable(
+  "ranking_snapshots",
+  {
+    snapshotId: serial("snapshot_id").primaryKey(),
+    requisitionItemId: integer("requisition_item_id")
+      .notNull()
+      .references(() => requisitionItems.itemId, { onDelete: "cascade" }),
+    requisitionId: integer("requisition_id")
+      .notNull()
+      .references(() => requisitions.reqId, { onDelete: "cascade" }),
+    rankingVersion: varchar("ranking_version", { length: 40 }).notNull(),
+    keywordWeight: numeric("keyword_weight", { precision: 5, scale: 4 })
+      .notNull()
+      .default("0.5500"),
+    semanticWeight: numeric("semantic_weight", { precision: 5, scale: 4 })
+      .notNull()
+      .default("0.0000"),
+    businessWeight: numeric("business_weight", { precision: 5, scale: 4 })
+      .notNull()
+      .default("0.4500"),
+    payload: jsonb("payload").notNull(),
+    generatedAt: timestamp("generated_at", { mode: "date" }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_ranking_snapshots_item_generatedat").on(t.requisitionItemId, t.generatedAt),
+    index("idx_ranking_snapshots_req_generatedat").on(t.requisitionId, t.generatedAt),
+  ],
+);
+
+/** Candidate embedding cache for semantic ranking. */
+export const candidateEmbeddings = pgTable(
+  "candidate_embeddings",
+  {
+    candidateEmbeddingId: serial("candidate_embedding_id").primaryKey(),
+    candidateId: integer("candidate_id")
+      .notNull()
+      .references(() => candidates.candidateId, { onDelete: "cascade" }),
+    requisitionItemId: integer("requisition_item_id")
+      .notNull()
+      .references(() => requisitionItems.itemId, { onDelete: "cascade" }),
+    requisitionId: integer("requisition_id")
+      .notNull()
+      .references(() => requisitions.reqId, { onDelete: "cascade" }),
+    provider: varchar("provider", { length: 50 }).notNull().default("local-hash"),
+    model: varchar("model", { length: 80 }).notNull().default("hash-v1"),
+    embeddingDim: integer("embedding_dim").notNull(),
+    embedding: jsonb("embedding").notNull(),
+    sourceText: text("source_text").notNull(),
+    sourceHash: varchar("source_hash", { length: 64 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("uq_candidate_embeddings_candidate").on(t.candidateId),
+    index("idx_candidate_embeddings_item").on(t.requisitionItemId),
+    index("idx_candidate_embeddings_req").on(t.requisitionId),
+  ],
+);
+
+/** Requisition-item embedding cache for semantic ranking. */
+export const requisitionItemEmbeddings = pgTable(
+  "requisition_item_embeddings",
+  {
+    requisitionItemEmbeddingId: serial("requisition_item_embedding_id").primaryKey(),
+    requisitionItemId: integer("requisition_item_id")
+      .notNull()
+      .references(() => requisitionItems.itemId, { onDelete: "cascade" }),
+    requisitionId: integer("requisition_id")
+      .notNull()
+      .references(() => requisitions.reqId, { onDelete: "cascade" }),
+    provider: varchar("provider", { length: 50 }).notNull().default("local-hash"),
+    model: varchar("model", { length: 80 }).notNull().default("hash-v1"),
+    embeddingDim: integer("embedding_dim").notNull(),
+    embedding: jsonb("embedding").notNull(),
+    sourceText: text("source_text").notNull(),
+    sourceHash: varchar("source_hash", { length: 64 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("uq_requisition_item_embeddings_item").on(t.requisitionItemId),
+    index("idx_requisition_item_embeddings_req").on(t.requisitionId),
+  ],
+);
+
+/** ATS ingestion event ledger (webhook-first, no direct candidate writes). */
+export const inboundEvents = pgTable(
+  "inbound_events",
+  {
+    inboundEventId: serial("inbound_event_id").primaryKey(),
+    source: varchar("source", { length: 50 }).notNull(),
+    externalId: varchar("external_id", { length: 255 }).notNull(),
+    payload: jsonb("payload").notNull(),
+    status: varchar("status", { length: 20 }).notNull().default("received"),
+    retryCount: integer("retry_count").notNull().default(0),
+    maxRetries: integer("max_retries").notNull().default(5),
+    lastError: text("last_error"),
+    receivedAt: timestamp("received_at", { mode: "date" }).notNull().defaultNow(),
+    processedAt: timestamp("processed_at", { mode: "date" }),
+    dedupeReview: jsonb("dedupe_review"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("uq_inbound_events_source_external").on(t.source, t.externalId),
+    index("idx_inbound_events_status_receivedat").on(t.status, t.receivedAt),
+  ],
+);
+
+/** Resume parsing artifacts captured during ingestion pipeline processing. */
+export const resumeParseArtifacts = pgTable(
+  "resume_parse_artifacts",
+  {
+    resumeParseArtifactId: serial("resume_parse_artifact_id").primaryKey(),
+    inboundEventId: integer("inbound_event_id")
+      .notNull()
+      .references(() => inboundEvents.inboundEventId, { onDelete: "cascade" }),
+    parserProvider: varchar("parser_provider", { length: 50 }).notNull(),
+    parserVersion: varchar("parser_version", { length: 50 }).notNull(),
+    status: varchar("status", { length: 20 }).notNull().default("processed"),
+    sourceResumeRef: text("source_resume_ref"),
+    rawText: text("raw_text"),
+    parsedData: jsonb("parsed_data").notNull(),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_resume_parse_artifacts_eventid").on(t.inboundEventId),
+    index("idx_resume_parse_artifacts_status").on(t.status),
   ],
 );
 

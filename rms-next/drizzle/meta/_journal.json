@@ -8,6 +8,55 @@
       "when": 1776168034742,
       "tag": "0000_lonely_quasar",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1776246146887,
+      "tag": "0001_previous_madame_web",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776255441050,
+      "tag": "0002_handy_retro_girl",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1776315969145,
+      "tag": "0003_phase3_dedupe_soft_match",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1776317326383,
+      "tag": "0004_phase4_applications_core",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1776335443865,
+      "tag": "0005_phase5_ranking_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1776335955439,
+      "tag": "0006_phase5_ranking_semantic_weight",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1776337496395,
+      "tag": "0007_phase5_embeddings_cache",
+      "breakpoints": true
     }
   ]
 }

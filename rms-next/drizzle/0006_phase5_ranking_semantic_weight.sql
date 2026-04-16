@@ -1,0 +1,1 @@
+ALTER TABLE "ranking_snapshots" ADD COLUMN "semantic_weight" numeric(5, 4) DEFAULT '0.0000' NOT NULL;

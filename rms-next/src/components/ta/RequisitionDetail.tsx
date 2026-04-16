@@ -63,12 +63,17 @@ import {
   cancelItem as cancelItemApi,
 } from "@/lib/api/workflowApi";
 import {
-  fetchCandidates,
+  fetchApplicationsPipeline,
+  fetchCandidatesFromApplications,
+  fetchRequisitionItemRanking,
   createCandidate,
+  recomputeRequisitionItemRanking,
   uploadResume,
   getCandidateActionErrorMessage,
+  type ApplicationsPipelineResponse,
   type Candidate,
   type CandidateCreate,
+  type RequisitionItemRankingResponse,
 } from "@/lib/api/candidateApi";
 import CandidateDetailModal from "@/components/shared/CandidateDetailModal";
 import "../../styles/hr/hr-dashboard.css";
@@ -347,6 +352,20 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [candidateItemFilter, setCandidateItemFilter] = useState<
     number | "all"
   >("all");
+  const [pipelineCompact, setPipelineCompact] =
+    useState<ApplicationsPipelineResponse | null>(null);
+  const [pipelineFull, setPipelineFull] =
+    useState<ApplicationsPipelineResponse | null>(null);
+  const [pipelineLoading, setPipelineLoading] = useState(false);
+  const [pipelineFullLoading, setPipelineFullLoading] = useState(false);
+  const [expandedPipelineStage, setExpandedPipelineStage] = useState<
+    string | null
+  >(null);
+  const [rankingData, setRankingData] =
+    useState<RequisitionItemRankingResponse | null>(null);
+  const [rankingLoading, setRankingLoading] = useState(false);
+  const [rankingRefreshing, setRankingRefreshing] = useState(false);
+  const [rankingError, setRankingError] = useState<string | null>(null);
 
   const candidatesByItemId = useMemo(() => {
     const m = new Map<number, Candidate[]>();
@@ -359,6 +378,34 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     }
     return m;
   }, [candidates]);
+
+  const pipelineCountByStage = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const row of pipelineCompact?.stages ?? []) {
+      out[row.stage] = row.count;
+    }
+    return out;
+  }, [pipelineCompact]);
+
+  const expandedStageApplications = useMemo(() => {
+    if (!expandedPipelineStage) {
+      return [];
+    }
+    const stageRow = (pipelineFull?.stages ?? []).find(
+      (s) => s.stage === expandedPipelineStage && "applications" in s,
+    );
+    if (!stageRow || !("applications" in stageRow)) {
+      return [];
+    }
+    return stageRow.applications;
+  }, [expandedPipelineStage, pipelineFull]);
+
+  const rankingItemId = useMemo(() => {
+    if (candidateItemFilter !== "all") {
+      return candidateItemFilter;
+    }
+    return ticket?.items?.[0]?.numericItemId ?? null;
+  }, [candidateItemFilter, ticket?.items]);
 
   const parseReqId = (value?: string | null) => {
     if (!value) return null;
@@ -622,7 +669,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     if (!reqId) return;
     setCandidatesLoading(true);
     try {
-      const data = await fetchCandidates(reqId);
+      const data = await fetchCandidatesFromApplications({
+        requisition_id: reqId,
+      });
       setCandidates(data);
     } catch {
       setCandidates([]);
@@ -630,6 +679,72 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       setCandidatesLoading(false);
     }
   }, [effectiveTicketId]);
+
+  const loadPipelineCompact = useCallback(async () => {
+    const reqId = parseReqId(effectiveTicketId);
+    if (!reqId) return;
+    setPipelineLoading(true);
+    try {
+      const data = await fetchApplicationsPipeline({
+        requisition_id: candidateItemFilter === "all" ? reqId : undefined,
+        requisition_item_id:
+          candidateItemFilter === "all" ? undefined : candidateItemFilter,
+        compact: true,
+      });
+      setPipelineCompact(data);
+    } catch {
+      setPipelineCompact(null);
+    } finally {
+      setPipelineLoading(false);
+    }
+  }, [effectiveTicketId, candidateItemFilter]);
+
+  const loadPipelineFull = useCallback(async () => {
+    const reqId = parseReqId(effectiveTicketId);
+    if (!reqId) return;
+    setPipelineFullLoading(true);
+    try {
+      const data = await fetchApplicationsPipeline({
+        requisition_id: candidateItemFilter === "all" ? reqId : undefined,
+        requisition_item_id:
+          candidateItemFilter === "all" ? undefined : candidateItemFilter,
+      });
+      setPipelineFull(data);
+    } catch {
+      setPipelineFull(null);
+    } finally {
+      setPipelineFullLoading(false);
+    }
+  }, [effectiveTicketId, candidateItemFilter]);
+
+  const loadRanking = useCallback(
+    async (forceRecompute = false) => {
+      if (!rankingItemId) {
+        setRankingData(null);
+        setRankingError(null);
+        return;
+      }
+      if (forceRecompute) {
+        setRankingRefreshing(true);
+      } else {
+        setRankingLoading(true);
+      }
+      setRankingError(null);
+      try {
+        const data = forceRecompute
+          ? await recomputeRequisitionItemRanking(rankingItemId)
+          : await fetchRequisitionItemRanking(rankingItemId);
+        setRankingData(data);
+      } catch {
+        setRankingData(null);
+        setRankingError("Unable to load ranking for this position.");
+      } finally {
+        setRankingLoading(false);
+        setRankingRefreshing(false);
+      }
+    },
+    [rankingItemId],
+  );
 
   const refetchRequisition = useCallback(async () => {
     const reqId = parseReqId(effectiveTicketId);
@@ -652,7 +767,30 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
 
   useEffect(() => {
     loadCandidates();
-  }, [loadCandidates]);
+    loadPipelineCompact();
+  }, [loadCandidates, loadPipelineCompact]);
+
+  useEffect(() => {
+    if (!expandedPipelineStage) {
+      return;
+    }
+    if (pipelineFull) {
+      return;
+    }
+    void loadPipelineFull();
+  }, [expandedPipelineStage, pipelineFull, loadPipelineFull]);
+
+  useEffect(() => {
+    setExpandedPipelineStage(null);
+    setPipelineFull(null);
+  }, [candidateItemFilter]);
+
+  useEffect(() => {
+    if (activeTab !== "candidates") {
+      return;
+    }
+    void loadRanking(false);
+  }, [activeTab, loadRanking]);
 
   // Load JD PDF for viewer when modal opens (item-level endpoint)
   useEffect(() => {
@@ -730,6 +868,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       setShowAddCandidate(false);
       setAddCandidateItemId(null);
       await loadCandidates();
+      await loadPipelineCompact();
+      await loadRanking(true);
+      setPipelineFull(null);
     } catch (err: any) {
       setTransitionError(
         getCandidateActionErrorMessage(err, "Failed to add candidate"),
@@ -2971,6 +3112,367 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
             )}
           </div>
 
+          {/* Phase 4 board columns (compact counters + full-stage expand) */}
+          <div
+            style={{
+              marginBottom: "20px",
+              padding: "14px",
+              borderRadius: "12px",
+              border: "1px solid var(--border-subtle)",
+              backgroundColor: "var(--bg-secondary)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: "10px",
+              }}
+            >
+              <div style={{ fontSize: "13px", fontWeight: 600 }}>
+                Applications Pipeline Board
+              </div>
+              <button
+                className="action-button"
+                onClick={() => {
+                  void loadPipelineCompact();
+                  if (expandedPipelineStage) {
+                    setPipelineFull(null);
+                    void loadPipelineFull();
+                  }
+                }}
+                style={{ fontSize: "11px", padding: "4px 10px" }}
+              >
+                <RefreshCw size={12} style={{ marginRight: "4px" }} />
+                Refresh
+              </button>
+            </div>
+
+            {pipelineLoading ? (
+              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                Loading compact counters...
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                {[
+                  "Sourced",
+                  "Shortlisted",
+                  "Interviewing",
+                  "Offered",
+                  "Hired",
+                  "Rejected",
+                ].map((stage) => {
+                  const isExpanded = expandedPipelineStage === stage;
+                  return (
+                    <button
+                      key={stage}
+                      onClick={() =>
+                        setExpandedPipelineStage((prev) =>
+                          prev === stage ? null : stage,
+                        )
+                      }
+                      style={{
+                        border: isExpanded
+                          ? "2px solid var(--primary-accent)"
+                          : "1px solid var(--border-subtle)",
+                        borderRadius: "10px",
+                        padding: "8px 12px",
+                        background: isExpanded
+                          ? "rgba(59,130,246,0.08)"
+                          : "var(--bg-primary)",
+                        cursor: "pointer",
+                        minWidth: "132px",
+                        textAlign: "left",
+                      }}
+                    >
+                      <div style={{ fontSize: "12px", fontWeight: 600 }}>{stage}</div>
+                      <div
+                        style={{
+                          fontSize: "18px",
+                          fontWeight: 700,
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        {pipelineCountByStage[stage] ?? 0}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {expandedPipelineStage && (
+              <div style={{ marginTop: "12px" }}>
+                <div
+                  style={{
+                    fontSize: "12px",
+                    color: "var(--text-tertiary)",
+                    marginBottom: "8px",
+                  }}
+                >
+                  Expanded stage: {expandedPipelineStage}
+                </div>
+                {pipelineFullLoading ? (
+                  <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                    Loading full stage details...
+                  </div>
+                ) : expandedStageApplications.length === 0 ? (
+                  <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                    No applications in this stage.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {expandedStageApplications.map((app) => (
+                      <div
+                        key={app.application_id}
+                        onClick={() =>
+                          setSelectedCandidate({
+                            candidate_id: app.candidate_id,
+                            application_id: app.application_id,
+                            requisition_item_id: app.requisition_item_id,
+                            requisition_id: app.requisition_id,
+                            full_name: app.candidate.full_name,
+                            email: app.candidate.email,
+                            phone: app.candidate.phone,
+                            resume_path: null,
+                            current_stage: app.current_stage,
+                            added_by: app.created_by,
+                            source: app.source,
+                            created_at: app.created_at,
+                            updated_at: app.updated_at,
+                            stage_history: app.stage_history ?? [],
+                            interviews: [],
+                          })
+                        }
+                        style={{
+                          padding: "10px 12px",
+                          borderRadius: "8px",
+                          border: "1px solid var(--border-subtle)",
+                          backgroundColor: "var(--bg-primary)",
+                          cursor: "pointer",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: "13px", fontWeight: 600 }}>
+                            {app.candidate.full_name}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              color: "var(--text-secondary)",
+                            }}
+                          >
+                            {app.candidate.email}
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            color: "var(--text-tertiary)",
+                          }}
+                        >
+                          App #{app.application_id}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Phase 5 ranking visibility panel */}
+          <div
+            style={{
+              marginBottom: "20px",
+              padding: "14px",
+              borderRadius: "12px",
+              border: "1px solid var(--border-subtle)",
+              backgroundColor: "var(--bg-secondary)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "10px",
+                flexWrap: "wrap",
+                marginBottom: "10px",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 600 }}>
+                  Ranking & Semantic Fit
+                </div>
+                <div style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
+                  Keyword + semantic/vector + business scoring
+                </div>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <select
+                  value={rankingItemId ?? ""}
+                  onChange={(e) =>
+                    setCandidateItemFilter(
+                      e.target.value === "" ? "all" : Number(e.target.value),
+                    )
+                  }
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border-subtle)",
+                    fontSize: "12px",
+                    backgroundColor: "var(--bg-primary)",
+                    color: "var(--text-primary)",
+                  }}
+                >
+                  {ticket.items.map((item) => (
+                    <option key={item.numericItemId} value={item.numericItemId}>
+                      Item #{item.numericItemId} - {item.skill}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="action-button"
+                  onClick={() => void loadRanking(false)}
+                  style={{ fontSize: "11px", padding: "4px 10px" }}
+                >
+                  <RefreshCw size={12} style={{ marginRight: "4px" }} />
+                  Refresh
+                </button>
+                <button
+                  className="action-button primary"
+                  onClick={() => void loadRanking(true)}
+                  style={{ fontSize: "11px", padding: "4px 10px" }}
+                >
+                  {rankingRefreshing ? "Recomputing..." : "Recompute"}
+                </button>
+              </div>
+            </div>
+
+            {rankingLoading ? (
+              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                Loading ranking...
+              </div>
+            ) : rankingError ? (
+              <div style={{ fontSize: "12px", color: "var(--error)" }}>{rankingError}</div>
+            ) : !rankingData ? (
+              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                Ranking not available for this position yet.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "8px",
+                    flexWrap: "wrap",
+                    fontSize: "11px",
+                    color: "var(--text-secondary)",
+                  }}
+                >
+                  <span>Version: {rankingData.ranking_version}</span>
+                  <span>Total: {rankingData.total_candidates}</span>
+                  <span>
+                    Weights K/S/B: {rankingData.weights.keyword} /{" "}
+                    {rankingData.weights.semantic} / {rankingData.weights.business}
+                  </span>
+                  <span>
+                    Generated: {new Date(rankingData.generated_at).toLocaleString()}
+                  </span>
+                </div>
+
+                {rankingData.ranked_candidates.length === 0 ? (
+                  <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                    No ranked candidates available.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {rankingData.ranked_candidates.slice(0, 8).map((rc, idx) => (
+                      <div
+                        key={rc.candidate_id}
+                        onClick={() => {
+                          const existing = candidates.find(
+                            (c) => c.candidate_id === rc.candidate_id,
+                          );
+                          if (existing) {
+                            setSelectedCandidate(existing);
+                          }
+                        }}
+                        style={{
+                          border: "1px solid var(--border-subtle)",
+                          borderRadius: "8px",
+                          padding: "10px 12px",
+                          backgroundColor: "var(--bg-primary)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "8px",
+                            marginBottom: "4px",
+                          }}
+                        >
+                          <div style={{ fontSize: "13px", fontWeight: 600 }}>
+                            #{idx + 1} {rc.full_name}
+                          </div>
+                          <div style={{ fontSize: "13px", fontWeight: 700 }}>
+                            {rc.score.final_score.toFixed(2)}
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            color: "var(--text-secondary)",
+                            marginBottom: "4px",
+                          }}
+                        >
+                          {rc.email} • Stage {rc.current_stage}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            color: "var(--text-secondary)",
+                            display: "flex",
+                            gap: "10px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <span>K: {rc.score.keyword_score.toFixed(2)}</span>
+                          <span>S: {rc.score.semantic_score.toFixed(2)}</span>
+                          <span>B: {rc.score.business_score.toFixed(2)}</span>
+                        </div>
+                        <div
+                          style={{
+                            marginTop: "6px",
+                            fontSize: "11px",
+                            color: "var(--text-tertiary)",
+                          }}
+                        >
+                          {rc.explain.reasons.slice(0, 2).join(" • ")}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Filters: Item and Stage */}
           <div
             style={{
@@ -3484,6 +3986,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 c.candidate_id === updated.candidate_id ? updated : c,
               ),
             );
+            void loadPipelineCompact();
+            void loadRanking(true);
+            setPipelineFull(null);
             if (updated.current_stage === "Hired") {
               refetchRequisition();
             }

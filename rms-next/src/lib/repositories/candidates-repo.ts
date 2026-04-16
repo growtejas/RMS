@@ -1,7 +1,7 @@
-import { and, asc, count, desc, eq, inArray, ne, notInArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { auditLog, candidates, interviews } from "@/lib/db/schema";
+import { auditLog, candidates, interviews, requisitionItems, requisitions } from "@/lib/db/schema";
 
 export type CandidateRow = typeof candidates.$inferSelect;
 export type InterviewRow = typeof interviews.$inferSelect;
@@ -104,12 +104,98 @@ export async function countInterviewsForCandidate(
   return Number(row?.c ?? 0);
 }
 
+/** Requisition header `raised_by` is used as `added_by` for system / inbound creates. */
+export async function selectRequisitionItemMetaByItemId(
+  itemId: number,
+): Promise<{ reqId: number; raisedBy: number } | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({
+      reqId: requisitionItems.reqId,
+      raisedBy: requisitions.raisedBy,
+    })
+    .from(requisitionItems)
+    .innerJoin(requisitions, eq(requisitionItems.reqId, requisitions.reqId))
+    .where(eq(requisitionItems.itemId, itemId))
+    .limit(1);
+  return row ?? null;
+}
+
+/** Phase 3 soft dedupe: same job line, digit-stripped phone match, optional different-email filter. */
+export async function selectCandidateIdsSameItemPhoneDigits(params: {
+  requisitionItemId: number;
+  phoneDigits: string;
+  excludeEmailLower: string | null;
+}): Promise<number[]> {
+  const db = getDb();
+  const digitExpr = sql`regexp_replace(coalesce(${candidates.phone}, ''), '[^0-9]+', '', 'g')`;
+  const conds = [
+    eq(candidates.requisitionItemId, params.requisitionItemId),
+    sql`${digitExpr} = ${params.phoneDigits}`,
+  ];
+  if (params.excludeEmailLower) {
+    conds.push(sql`lower(${candidates.email}) <> ${params.excludeEmailLower}`);
+  }
+  const rows = await db
+    .select({ candidateId: candidates.candidateId })
+    .from(candidates)
+    .where(and(...conds));
+  return rows.map((r) => r.candidateId);
+}
+
+export async function selectCandidateIdsSameItemNameAndCompany(params: {
+  requisitionItemId: number;
+  normalizedFullNameKey: string;
+  normalizedCompanyKey: string;
+  excludeEmailLower: string | null;
+}): Promise<number[]> {
+  const db = getDb();
+  const nameExpr = sql`lower(regexp_replace(trim(${candidates.fullName}), '[[:space:]]+', ' ', 'g'))`;
+  const companyExpr = sql`lower(trim(coalesce(${candidates.currentCompany}, '')))`;
+  const conds = [
+    eq(candidates.requisitionItemId, params.requisitionItemId),
+    sql`${nameExpr} = ${params.normalizedFullNameKey}`,
+    sql`${companyExpr} = ${params.normalizedCompanyKey}`,
+  ];
+  if (params.excludeEmailLower) {
+    conds.push(sql`lower(${candidates.email}) <> ${params.excludeEmailLower}`);
+  }
+  const rows = await db
+    .select({ candidateId: candidates.candidateId })
+    .from(candidates)
+    .where(and(...conds));
+  return rows.map((r) => r.candidateId);
+}
+
+export async function selectCandidateIdsSameItemNameNoCompany(params: {
+  requisitionItemId: number;
+  normalizedFullNameKey: string;
+  excludeEmailLower: string | null;
+}): Promise<number[]> {
+  const db = getDb();
+  const nameExpr = sql`lower(regexp_replace(trim(${candidates.fullName}), '[[:space:]]+', ' ', 'g'))`;
+  const conds = [
+    eq(candidates.requisitionItemId, params.requisitionItemId),
+    sql`${nameExpr} = ${params.normalizedFullNameKey}`,
+    sql`trim(coalesce(${candidates.currentCompany}, '')) = ''`,
+  ];
+  if (params.excludeEmailLower) {
+    conds.push(sql`lower(${candidates.email}) <> ${params.excludeEmailLower}`);
+  }
+  const rows = await db
+    .select({ candidateId: candidates.candidateId })
+    .from(candidates)
+    .where(and(...conds));
+  return rows.map((r) => r.candidateId);
+}
+
 export async function insertCandidateRow(values: {
   requisitionItemId: number;
   requisitionId: number;
   fullName: string;
   email: string;
   phone: string | null;
+  currentCompany?: string | null;
   resumePath: string | null;
   addedBy: number;
 }): Promise<CandidateRow> {
@@ -122,6 +208,7 @@ export async function insertCandidateRow(values: {
       fullName: values.fullName,
       email: values.email,
       phone: values.phone,
+      currentCompany: values.currentCompany ?? null,
       resumePath: values.resumePath,
       currentStage: "Sourced",
       addedBy: values.addedBy,
@@ -155,6 +242,7 @@ export async function updateCandidateRow(
     fullName: string;
     email: string;
     phone: string | null;
+    currentCompany: string | null;
     resumePath: string | null;
     currentStage: string;
   }>,
@@ -169,6 +257,9 @@ export async function updateCandidateRow(
   }
   if (patch.phone !== undefined) {
     set.phone = patch.phone;
+  }
+  if (patch.currentCompany !== undefined) {
+    set.currentCompany = patch.currentCompany;
   }
   if (patch.resumePath !== undefined) {
     set.resumePath = patch.resumePath;

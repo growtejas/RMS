@@ -27,10 +27,10 @@ import type { Candidate, Interview } from "@/lib/api/candidateApi";
 import {
   createInterview,
   updateInterview,
-  updateCandidateStage,
   deleteInterview,
-  getCandidate,
+  getCandidateWithApplication,
   getCandidateActionErrorMessage,
+  updateCandidateStageCompatible,
 } from "@/lib/api/candidateApi";
 import { apiClient } from "@/lib/api/client";
 
@@ -133,7 +133,10 @@ export default function CandidateDetailModal({
   // Refresh candidate data
   const refresh = async () => {
     try {
-      const updated = await getCandidate(candidate.candidate_id);
+      const updated = await getCandidateWithApplication(
+        candidate.candidate_id,
+        candidate.application_id,
+      );
       setCandidate(updated);
       onUpdate(updated);
     } catch {
@@ -146,7 +149,7 @@ export default function CandidateDetailModal({
     setError(null);
     setTransitioning(true);
     try {
-      const updated = await updateCandidateStage(candidate.candidate_id, {
+      const updated = await updateCandidateStageCompatible(candidate, {
         new_stage: newStage as Candidate["current_stage"],
       });
       setCandidate(updated);
@@ -434,6 +437,66 @@ export default function CandidateDetailModal({
                 </div>
               </div>
             )}
+
+          {/* ---- Application Stage History (Phase 4) ---- */}
+          {candidate.stage_history && candidate.stage_history.length > 0 && (
+            <div style={{ marginBottom: "20px" }}>
+              <div
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  color: "var(--text-tertiary)",
+                  marginBottom: "8px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.5px",
+                }}
+              >
+                Stage History
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: "10px",
+                  padding: "10px",
+                  backgroundColor: "var(--bg-secondary)",
+                }}
+              >
+                {[...candidate.stage_history]
+                  .sort((a, b) => {
+                    const at = a.changed_at ? new Date(a.changed_at).getTime() : 0;
+                    const bt = b.changed_at ? new Date(b.changed_at).getTime() : 0;
+                    return at - bt;
+                  })
+                  .map((entry) => (
+                    <div
+                      key={entry.history_id}
+                      style={{
+                        fontSize: "12px",
+                        color: "var(--text-secondary)",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: "8px",
+                        borderBottom: "1px dashed var(--border-subtle)",
+                        paddingBottom: "6px",
+                      }}
+                    >
+                      <span>
+                        {(entry.from_stage ?? "Start") + " -> " + entry.to_stage}
+                        {entry.reason ? ` (${entry.reason})` : ""}
+                      </span>
+                      <span style={{ color: "var(--text-tertiary)" }}>
+                        {entry.changed_at
+                          ? new Date(entry.changed_at).toLocaleString()
+                          : "—"}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
 
           {/* ---- Resume Section ---- */}
           <div style={{ marginBottom: "24px" }}>

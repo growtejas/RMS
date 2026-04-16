@@ -8,7 +8,15 @@ export async function findUserByUsername(
 ): Promise<UserRow | null> {
   const db = getDb();
   const rows = await db
-    .select()
+    .select({
+      userId: users.userId,
+      username: users.username,
+      passwordHash: users.passwordHash,
+      isActive: users.isActive,
+      createdAt: users.createdAt,
+      lastLogin: users.lastLogin,
+      employeeId: users.employeeId,
+    })
     .from(users)
     .where(eq(users.username, username))
     .limit(1);
@@ -18,7 +26,15 @@ export async function findUserByUsername(
 export async function findUserById(userId: number): Promise<UserRow | null> {
   const db = getDb();
   const rows = await db
-    .select()
+    .select({
+      userId: users.userId,
+      username: users.username,
+      passwordHash: users.passwordHash,
+      isActive: users.isActive,
+      createdAt: users.createdAt,
+      lastLogin: users.lastLogin,
+      employeeId: users.employeeId,
+    })
     .from(users)
     .where(eq(users.userId, userId))
     .limit(1);

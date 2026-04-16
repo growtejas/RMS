@@ -13,16 +13,22 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:check": "npm run db:generate && git diff --exit-code",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "worker:process-event": "tsx src/lib/queue/workers/process-event-worker.ts",
+    "verify:phase4-contract": "tsx src/scripts/verify-phase4-contract.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.99.0",
     "axios": "^1.15.0",
     "bcryptjs": "^3.0.3",
+    "bullmq": "^5.74.1",
     "drizzle-orm": "^0.45.2",
+    "ioredis": "^5.10.1",
     "jose": "^6.2.2",
     "lucide-react": "^1.8.0",
+    "mammoth": "^1.12.0",
     "next": "14.2.18",
+    "pdf-parse": "^1.1.1",
     "pdfkit": "^0.18.0",
     "postgres": "^3.4.9",
     "react": "^18",
@@ -40,6 +46,7 @@
     "eslint-config-next": "14.2.18",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

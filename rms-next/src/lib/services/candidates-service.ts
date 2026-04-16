@@ -14,6 +14,8 @@ import { isWorkflowException } from "@/lib/workflow/workflow-exceptions";
 import type { AppDb } from "@/lib/workflow/workflow-db";
 
 import { createEmployeeFromCandidateDb } from "@/lib/services/onboarding-candidate-service";
+import { ensureApplicationForCandidateTx } from "@/lib/services/application-sync-service";
+import { ensureCandidateEmbedding } from "@/lib/services/embeddings-service";
 
 const VALID_STAGE_TRANSITIONS: Record<string, string[]> = {
   Sourced: ["Shortlisted", "Rejected"],
@@ -54,6 +56,18 @@ function candidateToJson(row: repo.CandidateRow, ivs: repo.InterviewRow[]) {
     updated_at: row.updatedAt?.toISOString() ?? null,
     interviews: ivs.map(interviewToJson),
   };
+}
+
+function buildCandidateEmbeddingSourceText(input: {
+  fullName: string;
+  email: string;
+  phone?: string | null;
+  resumePath?: string | null;
+}): string {
+  const emailLocal = input.email.split("@")[0] ?? input.email;
+  return [input.fullName, emailLocal, input.phone, input.resumePath]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function wfToHttp(e: unknown): HttpError {
@@ -232,6 +246,31 @@ export async function createCandidateJson(
       newValue: `Candidate ${payload.full_name} added for item ${payload.requisition_item_id}`,
       performedAt: new Date(),
     });
+
+    await ensureApplicationForCandidateTx({
+      tx,
+      candidateId: row.candidateId,
+      requisitionItemId: row.requisitionItemId,
+      requisitionId: row.requisitionId,
+      candidateStage: row.currentStage,
+      source: "manual",
+      performedBy: user.userId,
+      reason: "Application created from candidate create API",
+      metadata: {
+        source: "api/candidates",
+      },
+    });
+    await ensureCandidateEmbedding({
+      candidateId: row.candidateId,
+      requisitionItemId: row.requisitionItemId,
+      requisitionId: row.requisitionId,
+      sourceText: buildCandidateEmbeddingSourceText({
+        fullName: row.fullName,
+        email: row.email,
+        phone: row.phone,
+        resumePath: row.resumePath,
+      }),
+    });
     return candidateToJson(row, []);
   });
 }
@@ -256,6 +295,17 @@ export async function patchCandidateJson(
   if (!row) {
     throw new HttpError(404, "Candidate not found");
   }
+  await ensureCandidateEmbedding({
+    candidateId: row.candidateId,
+    requisitionItemId: row.requisitionItemId,
+    requisitionId: row.requisitionId,
+    sourceText: buildCandidateEmbeddingSourceText({
+      fullName: row.fullName,
+      email: row.email,
+      phone: row.phone,
+      resumePath: row.resumePath,
+    }),
+  });
   const ivs = await repo.selectInterviewsForCandidate(candidateId);
   return candidateToJson(row, ivs);
 }
@@ -288,6 +338,7 @@ export async function patchCandidateStageJson(
   newStage: string,
   user: ApiUser,
   roles: string[],
+  reason?: string,
 ) {
   await assertTaOwnershipForCandidate(candidateId, user);
 
@@ -429,6 +480,20 @@ export async function patchCandidateStageJson(
       oldValue: oldStage,
       newValue: newStage,
       performedAt: new Date(),
+    });
+
+    await ensureApplicationForCandidateTx({
+      tx,
+      candidateId: cand.candidateId,
+      requisitionItemId: cand.requisitionItemId,
+      requisitionId: cand.requisitionId,
+      candidateStage: newStage,
+      source: "candidate_stage_api",
+      performedBy: user.userId,
+      reason: reason?.trim() || "Candidate stage updated via API",
+      metadata: {
+        source: "api/candidates/[candidateId]/stage",
+      },
     });
 
     const [updated] = await tx

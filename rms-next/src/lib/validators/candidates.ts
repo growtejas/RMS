@@ -28,6 +28,8 @@ export const candidateStageBody = z.object({
   reason: z.string().max(500).optional(),
 });
 
+export const applicationStageBody = candidateStageBody;
+
 export const interviewCreateBody = z.object({
   candidate_id: z.number().int(),
   round_number: z.number().int().min(1),
