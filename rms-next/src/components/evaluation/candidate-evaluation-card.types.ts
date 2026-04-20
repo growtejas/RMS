@@ -24,6 +24,8 @@ export type CandidateEvaluationCardModel = {
     score: number | null;
     strengthLabel: AiStrengthLabel | null;
     summaryLines: string[];
+    /** Full AI summary (unclipped). */
+    summaryFull?: string;
     unavailableMessage?: string;
   };
   risks: string[];

@@ -31,6 +31,7 @@ import {
   getCandidateWithApplication,
   getCandidateActionErrorMessage,
   updateCandidateStageCompatible,
+  runAiEvaluationForRequisitionItem,
   fetchRequisitionItemRanking,
 } from "@/lib/api/candidateApi";
 import { apiClient } from "@/lib/api/client";
@@ -155,9 +156,12 @@ export default function CandidateDetailModal({
   const [evaluationRank, setEvaluationRank] = useState<number | null>(null);
   const [evaluationNotInSnapshot, setEvaluationNotInSnapshot] = useState(false);
   const [evaluationRefreshKey, setEvaluationRefreshKey] = useState(0);
+  const [aiEvalWorking, setAiEvalWorking] = useState(false);
 
   /** Bumped when opening / hydrating or when user mutates candidate so stale fetches cannot overwrite. */
   const candidateHydrateGenRef = useRef(0);
+  /** Avoid spamming auto-eval on every refresh/open. */
+  const aiEvalAutoAttemptedRef = useRef<string | null>(null);
 
   const normalizedRoles = userRoles.map((r) => r.toLowerCase());
   const canEdit = normalizedRoles.some((r) =>
@@ -214,24 +218,83 @@ export default function CandidateDetailModal({
     setEvaluationRank(null);
     setEvaluationNotInSnapshot(false);
     try {
-      const data = await fetchRequisitionItemRanking(itemId, { aiEval: true });
-      const idx = data.ranked_candidates.findIndex(
-        (r) => r.candidate_id === candidate.candidate_id,
-      );
-      if (idx < 0) {
-        setEvaluationNotInSnapshot(true);
-        return;
-      }
-      const row = data.ranked_candidates[idx]!;
       const ctx: EvaluationCardContext = {
-        requiredExperienceYears:
-          evaluationContext?.requiredExperienceYears ?? null,
-        requiredSkillsCount:
-          evaluationContext?.requiredSkillsCount ??
-          data.meta?.required_skills_count,
+        requiredExperienceYears: evaluationContext?.requiredExperienceYears ?? null,
+        requiredSkillsCount: evaluationContext?.requiredSkillsCount ?? undefined,
       };
-      setEvaluationRank(idx + 1);
-      setEvaluationModel(mapRankedCandidateToEvaluationCard(row, ctx));
+
+      const loadFromRanking = async () => {
+        const data = await fetchRequisitionItemRanking(itemId, { aiEval: true });
+        const idx = data.ranked_candidates.findIndex(
+        (r) => r.candidate_id === candidate.candidate_id,
+        );
+        if (idx < 0) {
+          setEvaluationNotInSnapshot(true);
+          return { row: null as null | (typeof data.ranked_candidates)[number], meta: data.meta };
+        }
+        const row = data.ranked_candidates[idx]!;
+        const requiredSkillsCount =
+          ctx.requiredSkillsCount ?? data.meta?.required_skills_count;
+        const nextCtx: EvaluationCardContext = {
+          ...ctx,
+          requiredSkillsCount,
+        };
+        setEvaluationRank(idx + 1);
+        setEvaluationModel(mapRankedCandidateToEvaluationCard(row, nextCtx));
+        return { row, meta: data.meta };
+      };
+
+      const { row } = await loadFromRanking();
+
+      // Lazy AI evaluation: if no cached score, compute+store once and reload.
+      // Only in ATS evaluate workspace and only for users who can edit.
+      const key = `${itemId}:${candidate.candidate_id}`;
+      const missingAiScore =
+        row != null &&
+        !(
+          row.explain.ai_score != null &&
+          Number.isFinite(row.explain.ai_score as unknown as number)
+        );
+      if (
+        missingAiScore &&
+        isEvaluateWorkspace &&
+        canEdit &&
+        !aiEvalWorking &&
+        aiEvalAutoAttemptedRef.current !== key
+      ) {
+        aiEvalAutoAttemptedRef.current = key;
+        setAiEvalWorking(true);
+        try {
+          const res = await runAiEvaluationForRequisitionItem(itemId, {
+            candidate_ids: [candidate.candidate_id],
+            force: false,
+          });
+          const rr = res.results.find((r) => r.candidate_id === candidate.candidate_id);
+          if (rr?.status === "llm_failed") {
+            const reason = rr.llm_failure_reason ?? "llm_failed";
+            const http = rr.llm_http_status != null ? ` (HTTP ${rr.llm_http_status})` : "";
+            setEvaluationError(`AI evaluation failed: ${reason}${http}`);
+            // Allow retry later
+            aiEvalAutoAttemptedRef.current = null;
+            return;
+          }
+          if (rr?.status === "disabled") {
+            setEvaluationError("AI evaluation is disabled on this environment.");
+            aiEvalAutoAttemptedRef.current = null;
+            return;
+          }
+          await loadFromRanking();
+        } catch (err: unknown) {
+          // Don't hard-fail the whole evaluation panel — just show why AI isn't available.
+          setEvaluationError(
+            getCandidateActionErrorMessage(err, "AI evaluation failed"),
+          );
+          // Allow retry (manual button or next open) if it failed.
+          aiEvalAutoAttemptedRef.current = null;
+        } finally {
+          setAiEvalWorking(false);
+        }
+      }
     } catch (err: unknown) {
       setEvaluationError(
         getCandidateActionErrorMessage(
@@ -245,8 +308,10 @@ export default function CandidateDetailModal({
   }, [
     candidate.candidate_id,
     candidate.requisition_item_id,
+    canEdit,
     evaluationContext?.requiredExperienceYears,
     evaluationContext?.requiredSkillsCount,
+    isEvaluateWorkspace,
     evaluationRefreshKey,
   ]);
 
@@ -285,6 +350,38 @@ export default function CandidateDetailModal({
       setError(
         getCandidateActionErrorMessage(err, "Could not reject candidate"),
       );
+    }
+  };
+
+  const handleRunAiEvalForCandidate = async () => {
+    if (!candidate.requisition_item_id || !candidate.candidate_id) return;
+    setError(null);
+    setAiEvalWorking(true);
+    try {
+      const res = await runAiEvaluationForRequisitionItem(candidate.requisition_item_id, {
+        candidate_ids: [candidate.candidate_id],
+        force: false,
+      });
+      const row = res.results.find((r) => r.candidate_id === candidate.candidate_id);
+      if (row?.status === "llm_failed") {
+        const reason = row.llm_failure_reason ?? "llm_failed";
+        const http = row.llm_http_status != null ? ` (HTTP ${row.llm_http_status})` : "";
+        setError(`AI evaluation failed: ${reason}${http}`);
+        return;
+      }
+      if (row?.status === "disabled") {
+        setError("AI evaluation is disabled on this environment.");
+        return;
+      }
+      if (row?.status === "not_found") {
+        setError("AI evaluation could not find this candidate in the ranking snapshot yet.");
+        return;
+      }
+      setEvaluationRefreshKey((k) => k + 1);
+    } catch (err: unknown) {
+      setError(getCandidateActionErrorMessage(err, "AI evaluation failed"));
+    } finally {
+      setAiEvalWorking(false);
     }
   };
 
@@ -648,6 +745,32 @@ export default function CandidateDetailModal({
                     }}
                   >
                     Rank #{evaluationRank} for this position
+                  </div>
+                ) : null}
+                {canEdit &&
+                evaluationModel.ai.score == null &&
+                candidate.requisition_item_id ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      alignItems: "center",
+                      marginBottom: 10,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                      AI score not calculated for this candidate yet.
+                    </div>
+                    <button
+                      type="button"
+                      className="action-button"
+                      disabled={aiEvalWorking}
+                      onClick={() => void handleRunAiEvalForCandidate()}
+                      style={{ fontSize: 11, padding: "6px 12px" }}
+                    >
+                      {aiEvalWorking ? "AI evaluating..." : "Run AI evaluation"}
+                    </button>
                   </div>
                 ) : null}
                 <CandidateEvaluationCard

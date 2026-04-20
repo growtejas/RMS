@@ -1,0 +1,678 @@
+# RMS ATS — Ranking System Analysis & Improvement Plan
+
+---
+
+## 1. Objective
+
+Analyze the current ATS ranking response, identify issues affecting accuracy and reliability, and define clear solutions.
+
+---
+
+## 2. Current System Overview
+
+The system uses a hybrid ranking model:
+
+Final Score =
+(Keyword + Semantic + Business) × 0.65
++
+ATS_V1 × 0.35
+
+---
+
+### Observed Components:
+
+* keyword_score
+* semantic_score
+* business_score
+* ats_v1_score
+* explainability (reasons, matched_terms, missing_terms)
+
+---
+
+## 3. Observations from Current Response
+
+---
+
+### 3.1 Identical Scores Across Multiple Candidates
+
+Observation:
+
+* Multiple candidates have same final_score (51.34)
+
+---
+
+### Impact:
+
+* No differentiation between candidates
+* Ranking becomes ineffective
+
+---
+
+### Root Cause:
+
+* Same resume uploaded (test scenario)
+* ATS_V1 producing identical fallback values
+* No tie-breaking mechanism
+
+---
+
+---
+
+### 3.2 Skill Matching Failure
+
+Observation:
+
+* matched_skills = 0
+* required_skills = 1
+
+But keyword engine shows multiple relevant matches (React, JavaScript, etc.)
+
+---
+
+### Impact:
+
+* ATS_V1 underestimates candidate quality
+* Skill relevance is not properly captured
+
+---
+
+### Root Cause:
+
+* No skill normalization (e.g., "react.js" vs "react")
+* Disconnect between keyword engine and structured skill matching
+
+---
+
+---
+
+### 3.3 Noisy Keyword Matching
+
+Observation:
+
+missing_terms includes irrelevant terms:
+
+* "position"
+* "requiring"
+* "primary"
+* "secondary"
+
+---
+
+### Impact:
+
+* Keyword scoring includes irrelevant data
+* Reduces ranking accuracy
+* Confuses explainability output
+
+---
+
+### Root Cause:
+
+* No stopword filtering
+* No term classification (skill vs noise)
+
+---
+
+---
+
+### 3.4 Business Score Not Differentiating
+
+Observation:
+
+* business_score = same for all candidates
+
+---
+
+### Impact:
+
+* ATS_V1 not contributing to ranking
+* Business logic ineffective
+
+---
+
+### Root Cause:
+
+* Missing candidate data (experience, notice)
+* Default fallback values applied uniformly
+
+---
+
+---
+
+### 3.5 Over-Reliance on Keyword Score
+
+Observation:
+
+* High keyword_score even when skills not matched structurally
+
+---
+
+### Impact:
+
+* Candidates ranked based on text presence, not actual skill fit
+
+---
+
+### Root Cause:
+
+* Keyword engine treats all terms equally
+* No weighting for must-have skills
+
+---
+
+---
+
+### 3.6 Partial Data Across Candidates
+
+Observation:
+
+* partial_data = true for all candidates
+
+---
+
+### Impact:
+
+* Scores are less reliable
+* ATS_V1 defaults reduce differentiation
+
+---
+
+### Root Cause:
+
+* Resume parsing not extracting:
+
+  * experience
+  * notice period
+  * structured skills
+
+---
+
+---
+
+## 4. Identified Problems Summary
+
+| Problem             | Impact                     | Severity |
+| ------------------- | -------------------------- | -------- |
+| Identical scores    | No ranking differentiation | High     |
+| Skill mismatch      | Incorrect evaluation       | High     |
+| Noisy keywords      | Low accuracy               | Medium   |
+| Weak business score | No real-world filtering    | High     |
+| Partial data        | Unreliable scoring         | High     |
+| No tie-breakers     | Ranking instability        | Medium   |
+
+---
+
+## 5. Solution Plan
+
+---
+
+### 5.1 Improve Resume Parsing (Highest Priority)
+
+Enhance extraction of:
+
+* experience
+* notice period
+* skills
+
+---
+
+### 5.2 Implement Skill Normalization
+
+Create mapping:
+
+* "react.js" → "react"
+* "nodejs" → "node"
+
+---
+
+### 5.3 Add Keyword Filtering
+
+Introduce:
+
+* stopword removal
+* skill-based term classification
+
+---
+
+### 5.4 Introduce Weighted Keyword Scoring
+
+* prioritize must-have skills
+* reduce impact of generic terms
+
+---
+
+### 5.5 Strengthen ATS_V1 Logic
+
+* enforce experience differentiation
+* apply notice period penalties
+* improve seniority matching
+
+---
+
+### 5.6 Add Data Quality Penalty
+
+If candidate has incomplete data:
+
+Apply:
+
+final_score ×= 0.85
+
+---
+
+### 5.7 Implement Tie-Breaking Logic
+
+When scores are equal:
+
+1. Higher skill match
+2. Lower notice period
+3. Recent application
+
+---
+
+### 5.8 Improve Explainability Output
+
+Replace:
+
+missing_terms → missing_skills
+
+Remove noise terms
+
+---
+
+---
+
+## 6. Expected Outcome After Fixes
+
+---
+
+### Before:
+
+* Same scores for multiple candidates
+* Weak differentiation
+* Noisy explanations
+
+---
+
+### After:
+
+* Clear score separation
+* Accurate skill evaluation
+* Clean explainability
+* Strong business filtering
+
+---
+
+Example:
+
+Candidate A → 72
+Candidate B → 64
+Candidate C → 49
+
+---
+
+---
+
+## 7. Implementation Priority
+
+---
+
+### Phase 1 (Critical)
+
+* Resume parsing improvement
+* Skill normalization
+* Data extraction fixes
+
+---
+
+### Phase 2
+
+* Keyword filtering
+* Weighted scoring
+
+---
+
+### Phase 3
+
+* ATS_V1 refinement
+* Tie-breakers
+
+---
+
+---
+
+## 8. Final Conclusion
+
+The current system architecture is strong, but effectiveness is limited by:
+
+* poor data quality
+* lack of normalization
+* weak differentiation logic
+
+By fixing data extraction and scoring rules, the system will evolve into a reliable and scalable ranking engine.
+
+---
+
+## Final Statement
+
+The issue is not with the ranking model itself, but with:
+
+* data quality
+* term classification
+* scoring discipline
+
+Fixing these will significantly improve system performance and recruiter trust.
+
+
+# RMS ATS — ATS V1 (Business Logic) Document
+
+---
+
+## 1. Objective
+
+Define a structured, rule-based scoring system (ATS V1) to evaluate candidates based on business-relevant factors.
+
+This system complements keyword and semantic ranking by focusing on:
+
+* Experience suitability
+* Joining availability
+* Education relevance
+* Seniority alignment
+
+---
+
+## 2. Scope
+
+ATS V1 does NOT handle:
+
+* Skill matching (handled by keyword engine)
+* Semantic similarity (handled by embedding layer)
+
+ATS V1 focuses only on **business logic evaluation**.
+
+---
+
+## 3. Final ATS V1 Formula
+
+Score (0–100):
+
+ATS_V1 =
+0.4 × Experience Score
+
+* 0.25 × Notice Period Score
+* 0.15 × Education Score
+* 0.2 × Seniority Fit Score
+
+---
+
+## 4. Score Normalization
+
+Each component must return:
+
+0 ≤ score ≤ 1
+
+Final ATS_V1 score:
+
+ATS_V1 × 100
+
+---
+
+## 5. Component Definitions
+
+---
+
+### 5.1 Experience Score (40%)
+
+#### Formula:
+
+expScore = min(candidateExp / requiredExp, 1)
+
+---
+
+#### Rules:
+
+* Cap at 1.0
+* Prevent over-advantage
+
+---
+
+#### Overqualification Handling:
+
+If candidateExp > 2 × requiredExp:
+expScore = 0.7
+
+---
+
+#### Edge Cases:
+
+* requiredExp = 0 → expScore = 1
+* missing candidateExp → expScore = 0.5 (default)
+
+---
+
+---
+
+### 5.2 Notice Period Score (25%)
+
+#### Mapping:
+
+Immediate → 1.0
+< 15 days → 0.9
+30 days → 0.6
+60 days → 0.3
+
+> 90 days → 0.1
+
+---
+
+#### Rules:
+
+* Lower notice = higher score
+* Must significantly impact ranking
+
+---
+
+#### Edge Cases:
+
+* Missing notice → noticeScore = 0.5
+
+---
+
+---
+
+### 5.3 Education Score (15%)
+
+#### Approach:
+
+Keep simple and non-biased.
+
+---
+
+#### Mapping:
+
+Relevant degree → 1.0
+Partially relevant → 0.7
+Unrelated → 0.4
+No degree → 0.2
+
+---
+
+#### Alternate Rule (Simplified):
+
+If education matches requirement → 1
+Else → 0.5
+
+---
+
+#### Edge Cases:
+
+* Missing education → educationScore = 0.5
+
+---
+
+---
+
+### 5.4 Seniority Fit Score (20%)
+
+---
+
+#### Define Job Levels:
+
+JUNIOR: 0–2 years
+MID: 2–5 years
+SENIOR: 5+ years
+
+---
+
+#### Candidate Level:
+
+Derived from experience
+
+---
+
+#### Scoring:
+
+Exact match → 1.0
+One level difference → 0.7
+Mismatch → 0.3
+
+---
+
+#### Example:
+
+Job: JUNIOR
+Candidate: SENIOR → 0.3
+
+---
+
+---
+
+## 6. Fresher Handling
+
+If job is marked as "Fresher":
+
+* Candidates with 0–1 year experience → expScore = 1
+* Ignore overqualification penalty
+
+---
+
+---
+
+## 7. Penalty Layer
+
+---
+
+### Partial Data Penalty
+
+If multiple fields missing:
+
+ATS_V1 ×= 0.85
+
+---
+
+---
+
+### Extreme Mismatch Penalty
+
+If strong seniority mismatch:
+
+ATS_V1 ×= 0.7
+
+---
+
+---
+
+## 8. Output Format
+
+Each score must include breakdown:
+
+{
+"ats_v1_score": 68,
+"breakdown": {
+"experience": 0.8,
+"notice": 0.6,
+"education": 1,
+"seniority": 0.7
+},
+"flags": ["partial_data"]
+}
+
+---
+
+## 9. Data Requirements
+
+Required inputs:
+
+* candidate.experience
+* candidate.notice_period
+* candidate.education
+* job.required_experience
+* job.level
+
+---
+
+---
+
+## 10. Edge Case Handling
+
+| Case                    | Handling                |
+| ----------------------- | ----------------------- |
+| Missing experience      | Default 0.5             |
+| Missing notice          | Default 0.5             |
+| Missing education       | Default 0.5             |
+| Overqualified candidate | Penalize                |
+| Fresher job             | Adjust experience logic |
+| Seniority mismatch      | Reduce score            |
+
+---
+
+---
+
+## 11. Implementation Rules
+
+* Must be computed in backend only
+* Must be stored (no runtime calculation)
+* Must be version-controlled
+* Must be consistent across TA and HR
+
+---
+
+---
+
+## 12. Integration with Hybrid Ranking
+
+Final System:
+
+Final Score =
+Hybrid Score (Keyword + Semantic)
++
+ATS_V1 Score
+
+---
+
+ATS V1 acts as:
+→ Business validation layer
+
+---
+
+---
+
+## 13. Final Principle
+
+ATS V1 must be:
+
+* Simple
+* Predictable
+* Explainable
+* Stable
+
+Avoid adding unnecessary complexity.
+
+---
+
+## Conclusion
+
+ATS V1 ensures that candidate ranking reflects real-world hiring constraints, not just keyword or semantic similarity.
+
+It transforms the system into a reliable decision-support tool for recruiters.
+
+

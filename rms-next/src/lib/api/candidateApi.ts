@@ -464,7 +464,24 @@ export async function runAiEvaluationForRequisitionItem(
   },
 ): Promise<{
   requisition_item_id: number;
-  results: unknown[];
+  results: Array<
+    | { candidate_id: number; status: "ok"; ai_score: number; input_hash?: string }
+    | {
+        candidate_id: number;
+        status: "skipped_cache";
+        ai_score: number;
+        input_hash?: string;
+      }
+    | { candidate_id: number; status: "disabled" }
+    | { candidate_id: number; status: "not_found" }
+    | {
+        candidate_id: number;
+        status: "llm_failed";
+        input_hash?: string;
+        llm_failure_reason?: string;
+        llm_http_status?: number;
+      }
+  >;
   meta?: Record<string, unknown>;
 }> {
   const { data } = await apiClient.post(
@@ -474,7 +491,24 @@ export async function runAiEvaluationForRequisitionItem(
   );
   return data as {
     requisition_item_id: number;
-    results: unknown[];
+    results: Array<
+      | { candidate_id: number; status: "ok"; ai_score: number; input_hash?: string }
+      | {
+          candidate_id: number;
+          status: "skipped_cache";
+          ai_score: number;
+          input_hash?: string;
+        }
+      | { candidate_id: number; status: "disabled" }
+      | { candidate_id: number; status: "not_found" }
+      | {
+          candidate_id: number;
+          status: "llm_failed";
+          input_hash?: string;
+          llm_failure_reason?: string;
+          llm_http_status?: number;
+        }
+    >;
     meta?: Record<string, unknown>;
   };
 }

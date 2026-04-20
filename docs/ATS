@@ -1,0 +1,404 @@
+# RMS ATS — Candidate Ranking System Plan
+
+---
+
+## 1. Objective
+
+Design a scalable, consistent, and explainable candidate ranking system that:
+
+* Prioritizes best-fit candidates
+* Handles incomplete and inconsistent data
+* Remains stable under real-world conditions
+* Supports future enhancements (AI / semantic matching)
+
+---
+
+## 2. Core Principles
+
+* Deterministic: Same input → same output
+* Explainable: Recruiters must understand why a candidate is ranked
+* Stable: Small changes should not cause large ranking shifts
+* Incremental: Start simple, evolve safely
+* Versioned: Ranking logic must be traceable
+
+---
+
+## 3. Ranking Formula (V1 - Production)
+
+Final Score (0–100):
+
+Score =
+0.4 × Skills Match
+
+* 0.3 × Experience Match
+* 0.2 × Notice Period
+* 0.1 × Bonus Factors
+
+---
+
+## 4. Component Definitions
+
+### 4.1 Skills Match (40%)
+
+Logic:
+
+* Match candidate skills with job required skills
+
+Formula:
+skillsScore = matchedSkills / totalRequiredSkills
+
+Rules:
+
+* Use normalized skill mapping
+* Only unique matches counted (avoid repetition bias)
+
+---
+
+### 4.2 Experience Match (30%)
+
+Logic:
+expScore = min(candidateExp / requiredExp, 1)
+
+Edge Rule:
+
+* If candidateExp > 2 × requiredExp → apply slight penalty (e.g., 0.8)
+
+---
+
+### 4.3 Notice Period (20%)
+
+Mapping:
+
+* Immediate → 1.0
+* < 15 days → 0.8
+* 30 days → 0.5
+* 60+ days → 0.2
+
+---
+
+### 4.4 Bonus Factors (10%)
+
+Examples:
+
+* Referral candidate
+* Past company quality
+* Previous interaction
+
+Range:
+0.0 – 0.1
+
+---
+
+## 5. Score Storage Strategy
+
+Scores must be persisted:
+
+Table: candidate_job_scores
+
+Fields:
+
+* candidate_id
+* job_id
+* score
+* breakdown (json)
+* ranking_version_id
+
+---
+
+## 6. Ranking Versioning
+
+Table: ranking_versions
+
+Fields:
+
+* id
+* job_id
+* version_number
+* config (weights, rules)
+* created_at
+* is_active
+
+---
+
+### Rules:
+
+* Every job has an active ranking version
+* Scores are tied to a specific version
+* New version created when:
+
+  * JD changes
+  * weights change
+  * manual recompute triggered
+
+---
+
+## 7. Ranking Execution Flow
+
+1. Candidate enters system
+2. Application created
+3. Fetch active ranking version
+4. Compute score
+5. Store in candidate_job_scores
+6. UI fetches sorted data
+
+---
+
+## 8. Recalculation Triggers
+
+Recompute score when:
+
+* Candidate profile updated
+* Resume updated
+* Job description updated
+* Admin triggers recalculation
+
+---
+
+## 9. Edge Cases & Handling
+
+---
+
+### 9.1 Missing Candidate Data
+
+Problem:
+
+* Skills or experience missing
+
+Solution:
+
+* Assign partial score
+* Do not exclude candidate
+* Flag for recruiter review
+
+---
+
+### 9.2 Missing Job Requirements
+
+Problem:
+
+* No required skills defined
+
+Solution:
+
+* Block ranking OR
+* fallback to experience-based scoring
+
+---
+
+### 9.3 Skill Mismatch Due to Naming
+
+Problem:
+
+* "Node.js" vs "Node"
+
+Solution:
+
+* Skill normalization mapping
+* alias dictionary
+
+---
+
+### 9.4 Overqualified Candidates
+
+Problem:
+
+* Dominates ranking unfairly
+
+Solution:
+
+* Cap experience score
+* Apply penalty beyond threshold
+
+---
+
+### 9.5 Underqualified but High Skill Match
+
+Problem:
+
+* Low experience but high skills
+
+Solution:
+
+* Maintain weight balance
+* experience weight ensures control
+
+---
+
+### 9.6 All Candidates Have Similar Scores
+
+Problem:
+
+* No ranking differentiation
+
+Solution:
+
+* Add tie-breakers:
+
+  * application date
+  * activity recency
+  * bonus factors
+
+---
+
+### 9.7 New Candidate After Ranking
+
+Problem:
+
+* Not included in ranking
+
+Solution:
+
+* Score using active version immediately
+
+---
+
+### 9.8 Candidate Updates Resume
+
+Problem:
+
+* Score outdated
+
+Solution:
+
+* Recompute score for that candidate only
+
+---
+
+### 9.9 Job Description Updated
+
+Problem:
+
+* Old ranking invalid
+
+Solution:
+
+* Create new ranking version
+* Recompute all scores
+
+---
+
+### 9.10 Keyword Stuffing
+
+Problem:
+
+* Candidate repeats skills to manipulate score
+
+Solution:
+
+* Count unique skills only
+
+---
+
+### 9.11 Fake Experience
+
+Problem:
+
+* Inflated experience
+
+Solution:
+
+* Cap score
+* Validate in interview stage
+
+---
+
+### 9.12 Notice Period Missing
+
+Problem:
+
+* Cannot compute score
+
+Solution:
+
+* Assign default (e.g., 0.5)
+* mark as unknown
+
+---
+
+## 10. Performance Strategy
+
+* Precompute scores (no runtime calculation)
+* Index:
+  INDEX(job_id, score DESC)
+* Paginate results (limit 20–50)
+* Avoid full dataset scans
+
+---
+
+## 11. Consistency Strategy
+
+* Always use stored scores
+* Never compute ranking on frontend
+* Ensure TA and HR view same version
+
+---
+
+## 12. Explainability
+
+Store breakdown:
+
+{
+skills: 0.66,
+experience: 1,
+notice: 0.5,
+bonus: 0.05
+}
+
+UI must show:
+
+"Why this candidate?"
+
+* Matches X/Y skills
+* Experience fits role
+* Notice period acceptable
+
+---
+
+## 13. Future Enhancements (Phase 2)
+
+* Semantic matching (embeddings)
+* Keyword search (FTS / BM25)
+* AI evaluation layer
+
+Updated formula:
+
+Final =
+0.3 Business
+
+* 0.3 Keyword
+* 0.3 Semantic
+* 0.1 AI
+
+---
+
+## 14. Risks & Mitigation
+
+| Risk                  | Mitigation            |
+| --------------------- | --------------------- |
+| Poor data quality     | normalization         |
+| Ranking inconsistency | versioning            |
+| System slowdown       | precompute + indexing |
+| Lack of trust         | explainable scoring   |
+| manipulation          | validation + caps     |
+
+---
+
+## 15. Final Principle
+
+A ranking system must:
+
+* be predictable
+* be explainable
+* handle imperfect data
+* scale without recomputation
+
+---
+
+## Conclusion
+
+This ranking system transforms the ATS from:
+
+Manual candidate browsing
+→ Intelligent candidate prioritization
+
+while maintaining control, transparency, and scalability.

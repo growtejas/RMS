@@ -130,7 +130,6 @@ function splitSummaryLines(raw: string | undefined, maxLines: number): string[] 
   for (const p of parts) {
     let line = p.trim();
     if (/^(may|could potentially|might)\s/i.test(line)) continue;
-    if (line.length > 160) line = `${line.slice(0, 157)}…`;
     out.push(line);
     if (out.length >= maxLines) break;
   }
@@ -227,9 +226,11 @@ export function mapRankedCandidateToEvaluationCard(
       ? Number(row.explain.ai_score)
       : null;
   const hasAi = aiScore != null;
-  let summaryLines = hasAi
-    ? splitSummaryLines(row.explain.ai_summary, 3)
-    : [];
+  const summaryFullRaw =
+    typeof row.explain.ai_summary === "string" && row.explain.ai_summary.trim()
+      ? row.explain.ai_summary.trim()
+      : null;
+  let summaryLines = hasAi ? splitSummaryLines(summaryFullRaw ?? undefined, 3) : [];
   if (hasAi && summaryLines.length === 0) {
     summaryLines = ["No written summary is stored for this evaluation."];
   }
@@ -266,6 +267,7 @@ export function mapRankedCandidateToEvaluationCard(
       summaryLines: hasAi
         ? summaryLines
         : ["AI evaluation not available yet for this candidate."],
+      ...(hasAi && summaryFullRaw ? { summaryFull: summaryFullRaw } : {}),
       unavailableMessage: hasAi ? undefined : "AI evaluation not available yet.",
     },
     risks,

@@ -8,22 +8,23 @@ import {
   type JobEvaluationInput,
 } from "@/lib/services/ai-evaluation/ai-evaluation.schema";
 
-export type AiEvalLlmProvider = "openai" | "gemini";
+// AI evaluation supports Gemini or an OpenAI-compatible provider (e.g., Groq).
+export type AiEvalLlmProvider = "gemini" | "groq";
 
 export type AiEvalLlmFailureReason =
   | "disabled"
   | "no_api_key"
-  | "openai_http_401"
-  | "openai_http_403"
+  | "llm_http_401"
+  | "llm_http_403"
   | "llm_http_404"
-  | "openai_http_429"
+  | "llm_http_429"
   | "llm_quota_exceeded"
-  | "openai_http_other"
-  | "openai_empty_content"
-  | "openai_invalid_json"
-  | "openai_schema_rejected"
-  | "openai_timeout"
-  | "openai_network_error";
+  | "llm_http_other"
+  | "llm_empty_content"
+  | "llm_invalid_json"
+  | "llm_schema_rejected"
+  | "llm_timeout"
+  | "llm_network_error";
 
 export type AiEvalLlmResult =
   | { ok: true; output: AiEvaluationOutput; aiScore: number }
@@ -41,16 +42,12 @@ export function resolveAiEvalEnabled(): boolean {
 /** Active LLM backend for AI evaluation. */
 export function resolveAiEvalLlmProvider(): AiEvalLlmProvider {
   const explicit = process.env.AI_EVAL_LLM_PROVIDER?.trim().toLowerCase();
-  if (explicit === "gemini" || explicit === "google") return "gemini";
-  if (explicit === "openai") return "openai";
-  const gem = process.env.AI_EVAL_GEMINI_API_KEY?.trim();
-  const oai = process.env.AI_EVAL_OPENAI_API_KEY?.trim();
-  if (gem && !oai) return "gemini";
-  return "openai";
+  if (explicit === "groq") return "groq";
+  return "gemini";
 }
 
-export function resolveAiEvalOpenAiModel(): string {
-  return process.env.AI_EVAL_MODEL?.trim() || "gpt-4o-mini";
+export function resolveAiEvalGroqModel(): string {
+  return process.env.AI_EVAL_GROQ_MODEL?.trim() || "llama-3.1-8b-instant";
 }
 
 /** Strip `models/` if the id was copied from ListModels / docs. */
@@ -71,14 +68,14 @@ export function resolveAiEvalGeminiModel(): string {
 
 /** Model id stored in cache + input hash (provider-specific). */
 export function resolveAiEvalActiveModel(): string {
-  return resolveAiEvalLlmProvider() === "gemini"
-    ? resolveAiEvalGeminiModel()
-    : resolveAiEvalOpenAiModel();
+  return resolveAiEvalLlmProvider() === "groq"
+    ? resolveAiEvalGroqModel()
+    : resolveAiEvalGeminiModel();
 }
 
-/** @deprecated Prefer resolveAiEvalOpenAiModel or resolveAiEvalActiveModel */
+/** @deprecated Prefer resolveAiEvalActiveModel */
 export function resolveAiEvalModel(): string {
-  return resolveAiEvalOpenAiModel();
+  return resolveAiEvalActiveModel();
 }
 
 export function resolveAiEvalPromptVersion(): string {
@@ -209,11 +206,11 @@ function clipEvaluationPayload(
 }
 
 function httpFailureReason(status: number): AiEvalLlmFailureReason {
-  if (status === 401) return "openai_http_401";
-  if (status === 403) return "openai_http_403";
+  if (status === 401) return "llm_http_401";
+  if (status === 403) return "llm_http_403";
   if (status === 404) return "llm_http_404";
-  if (status === 429) return "openai_http_429";
-  return "openai_http_other";
+  if (status === 429) return "llm_http_429";
+  return "llm_http_other";
 }
 
 function isProviderQuotaExceededResponse(errorBody: string): boolean {
@@ -352,9 +349,9 @@ export async function runAiEvaluationLlm(input: {
 
   const provider = resolveAiEvalLlmProvider();
   const apiKey =
-    provider === "gemini"
-      ? process.env.AI_EVAL_GEMINI_API_KEY?.trim()
-      : process.env.AI_EVAL_OPENAI_API_KEY?.trim();
+    provider === "groq"
+      ? process.env.AI_EVAL_GROQ_API_KEY?.trim()
+      : process.env.AI_EVAL_GEMINI_API_KEY?.trim();
 
   if (!apiKey) {
     log("info", "ai_eval_skipped", {
@@ -368,10 +365,6 @@ export async function runAiEvaluationLlm(input: {
   const model = resolveAiEvalActiveModel();
   const maxChars = resolveAiEvalMaxUserChars();
   const userJson = clipEvaluationPayload(input.job, input.candidate, maxChars);
-
-  const baseUrl = (
-    process.env.AI_EVAL_OPENAI_BASE_URL?.trim() || "https://api.openai.com/v1"
-  ).replace(/\/$/, "");
 
   const system = `You evaluate a candidate against a job for an ATS. Return ONE JSON object only (no markdown) with exactly these keys:
 project_complexity (number 0-100): complexity/depth of projects implied by the candidate profile.
@@ -396,16 +389,19 @@ Rules: Do not invent employers, degrees, or skills not supported by the input. P
     const started = Date.now();
     try {
       const res =
-        provider === "gemini"
-          ? await postGeminiGenerateContent({
+        provider === "groq"
+          ? await postOpenAiChatOnce({
+              baseUrl: (
+                process.env.AI_EVAL_GROQ_BASE_URL?.trim() ||
+                "https://api.groq.com/openai/v1"
+              ).replace(/\/$/, ""),
               apiKey,
               model,
               system,
               user: userJson,
               signal: controller.signal,
             })
-          : await postOpenAiChatOnce({
-              baseUrl,
+          : await postGeminiGenerateContent({
               apiKey,
               model,
               system,
@@ -444,11 +440,11 @@ Rules: Do not invent employers, degrees, or skills not supported by the input. P
 
         if (res.status === 429) {
           if (resolveAiEval429FailFast()) {
-            return { ok: false, reason: "openai_http_429", http_status: 429 };
+            return { ok: false, reason: "llm_http_429", http_status: 429 };
           }
           count429++;
           if (count429 > resolveAiEval429MaxRetries()) {
-            return { ok: false, reason: "openai_http_429", http_status: 429 };
+            return { ok: false, reason: "llm_http_429", http_status: 429 };
           }
           const fromHeader = parseRetryAfterMs(res);
           const exp = Math.min(
@@ -467,12 +463,11 @@ Rules: Do not invent employers, degrees, or skills not supported by the input. P
         }
 
         if (isTransientOverloadHttpStatus(res.status)) {
-          if (resolveAiEval429FailFast()) {
-            return { ok: false, reason: "openai_http_other", http_status: res.status };
-          }
+          // Even when fail-fast is enabled for 429s, transient overloads (502/503/504)
+          // are worth retrying with backoff to make the UI reliably "eventually consistent".
           countOverload++;
           if (countOverload > resolveAiEval429MaxRetries()) {
-            return { ok: false, reason: "openai_http_other", http_status: res.status };
+            return { ok: false, reason: "llm_http_other", http_status: res.status };
           }
           const fromHeader = parseRetryAfterMs(res);
           const exp = Math.min(
@@ -523,11 +518,11 @@ Rules: Do not invent employers, degrees, or skills not supported by the input. P
           }
           if (gErr.httpLike === 429) {
             if (resolveAiEval429FailFast()) {
-              return { ok: false, reason: "openai_http_429", http_status: 429 };
+              return { ok: false, reason: "llm_http_429", http_status: 429 };
             }
             count429++;
             if (count429 > resolveAiEval429MaxRetries()) {
-              return { ok: false, reason: "openai_http_429", http_status: 429 };
+              return { ok: false, reason: "llm_http_429", http_status: 429 };
             }
             await sleep(Math.min(resolveAiEval429BackoffCapMs(), 2000 * Math.pow(2, count429 - 1)));
             continue;
@@ -536,12 +531,10 @@ Rules: Do not invent employers, degrees, or skills not supported by the input. P
             isTransientOverloadHttpStatus(gErr.httpLike) ||
             looksLikeGeminiUnavailableBody(gErr.text)
           ) {
-            if (resolveAiEval429FailFast()) {
-              return { ok: false, reason: "openai_http_other", http_status: gErr.httpLike };
-            }
+            // Same as the REST layer: retry transient overload even when 429 is fail-fast.
             countOverload++;
             if (countOverload > resolveAiEval429MaxRetries()) {
-              return { ok: false, reason: "openai_http_other", http_status: gErr.httpLike };
+              return { ok: false, reason: "llm_http_other", http_status: gErr.httpLike };
             }
             await sleep(
               Math.min(resolveAiEval429BackoffCapMs(), 2000 * Math.pow(2, countOverload - 1)),
@@ -565,7 +558,7 @@ Rules: Do not invent employers, degrees, or skills not supported by the input. P
           provider,
           duration_ms: Date.now() - started,
         });
-        return { ok: false, reason: "openai_empty_content" };
+        return { ok: false, reason: "llm_empty_content" };
       }
       let parsed: unknown;
       try {
@@ -576,7 +569,7 @@ Rules: Do not invent employers, degrees, or skills not supported by the input. P
           provider,
           duration_ms: Date.now() - started,
         });
-        return { ok: false, reason: "openai_invalid_json" };
+        return { ok: false, reason: "llm_invalid_json" };
       }
       const validated = aiEvaluationOutputSchema.safeParse(parsed);
       if (!validated.success) {
@@ -586,7 +579,7 @@ Rules: Do not invent employers, degrees, or skills not supported by the input. P
           duration_ms: Date.now() - started,
           issues: validated.error.issues.slice(0, 8),
         });
-        return { ok: false, reason: "openai_schema_rejected" };
+        return { ok: false, reason: "llm_schema_rejected" };
       }
       const output = validated.data;
       const aiScore = computeAiCompositeScore(output);
@@ -603,14 +596,14 @@ Rules: Do not invent employers, degrees, or skills not supported by the input. P
         abort: isAbort,
       });
       if (isAbort) {
-        return { ok: false, reason: "openai_timeout" };
+        return { ok: false, reason: "llm_timeout" };
       }
       if (!didNetworkRetry && isRetryableFetchError(e)) {
         didNetworkRetry = true;
         await sleep(400);
         continue;
       }
-      return { ok: false, reason: "openai_network_error" };
+      return { ok: false, reason: "llm_network_error" };
     }
   }
 
@@ -618,10 +611,10 @@ Rules: Do not invent employers, degrees, or skills not supported by the input. P
     ok: false,
     reason:
       count429 > 0
-        ? "openai_http_429"
+        ? "llm_http_429"
         : countOverload > 0
-          ? "openai_http_other"
-          : "openai_network_error",
+          ? "llm_http_other"
+          : "llm_network_error",
     http_status: count429 > 0 ? 429 : undefined,
   };
 }

@@ -16,6 +16,7 @@ export default function CandidateEvaluationCard({
   readOnly,
 }: CandidateEvaluationCardProps) {
   const [shortlistOpen, setShortlistOpen] = useState(false);
+  const [aiExpanded, setAiExpanded] = useState(false);
 
   const aiDisplay =
     model.ai.score != null
@@ -169,11 +170,30 @@ export default function CandidateEvaluationCard({
               lineHeight: 1.5,
             }}
           >
-            {model.ai.summaryLines.map((line, i) => (
+            {(aiExpanded && model.ai.summaryFull
+              ? model.ai.summaryFull.split(/\n+/).filter(Boolean)
+              : model.ai.summaryLines
+            ).map((line, i) => (
               <p key={i} style={{ margin: i === 0 ? "0 0 6px" : "0 0 6px" }}>
                 {line}
               </p>
             ))}
+
+            {model.ai.summaryFull &&
+            model.ai.summaryFull.trim() !== model.ai.summaryLines.join(" ").trim() ? (
+              <button
+                type="button"
+                className="action-button"
+                onClick={() => setAiExpanded((v) => !v)}
+                style={{
+                  fontSize: 11,
+                  padding: "4px 10px",
+                  marginTop: 4,
+                }}
+              >
+                {aiExpanded ? "Show less" : "Show more"}
+              </button>
+            ) : null}
           </div>
         </div>
 
