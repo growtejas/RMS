@@ -43,7 +43,7 @@ export async function GET(req: Request, { params }: Ctx) {
       return interviewId;
     }
 
-    const data = await getInterviewJson(interviewId);
+    const data = await getInterviewJson(interviewId, user.organizationId);
     return NextResponse.json(data);
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/interviews/[interviewId]]");

@@ -22,7 +22,13 @@ const Header: React.FC = () => {
         <div className="header-left">
           <div className="logo-container">
             <div className="logo-icon" aria-hidden="true">
-              <Image src="/rbm-logo.svg" alt="RBM" width={22} height={22} />
+              <Image
+                src="/rbm-logo.svg"
+                alt="RBM"
+                width={22}
+                height={22}
+                style={{ width: "auto", height: "auto" }}
+              />
             </div>
             <div className="logo-text">
               <h1 className="header-title">RBM Software</h1>

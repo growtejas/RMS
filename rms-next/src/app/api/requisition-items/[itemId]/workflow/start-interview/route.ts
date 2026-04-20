@@ -4,7 +4,7 @@ import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
 import { getDb } from "@/lib/db";
 import { RequisitionItemWorkflowEngine } from "@/lib/workflow/item-workflow-engine";
 import { workflowCatch, workflowTransitionJson } from "@/lib/workflow/workflow-http";
-import { asAppDb } from "@/lib/workflow/workflow-route-utils";
+import { asAppDb, requireItemInOrganization } from "@/lib/workflow/workflow-route-utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +34,8 @@ export async function POST(req: Request, { params }: Ctx) {
     if (itemId instanceof NextResponse) {
       return itemId;
     }
+
+    await requireItemInOrganization(itemId, user.organizationId);
 
     const db = getDb();
     let previousStatus = "";

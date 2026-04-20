@@ -25,6 +25,8 @@ export interface AccessTokenPayload {
   sub: string;
   username: string;
   roles: string[];
+  /** Tenant scope (organization UUID). */
+  orgId: string;
 }
 
 export async function createAccessToken(payload: AccessTokenPayload): Promise<string> {
@@ -35,6 +37,7 @@ export async function createAccessToken(payload: AccessTokenPayload): Promise<st
   return new SignJWT({
     username: payload.username,
     roles: payload.roles,
+    org_id: payload.orgId,
     typ: "access",
   })
     .setProtectedHeader({ alg })
@@ -62,6 +65,7 @@ export async function createRefreshToken(payload: AccessTokenPayload): Promise<s
   return new SignJWT({
     username: payload.username,
     roles: payload.roles,
+    org_id: payload.orgId,
     typ: "refresh",
   })
     .setProtectedHeader({ alg })

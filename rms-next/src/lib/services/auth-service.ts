@@ -7,6 +7,7 @@ import {
   listRoleNamesForUser,
   touchUserLastLogin,
 } from "@/lib/repositories/auth-user";
+import { resolveOrganizationIdForUser } from "@/lib/tenant/resolve-org";
 
 /** Same shape as FastAPI `TokenResponse` / `schemas.auth`. */
 export interface TokenResponse {
@@ -46,16 +47,19 @@ export async function loginWithPassword(
 
   const rawRoles = await listRoleNamesForUser(user.userId);
   const roleList = normalizeRoleList(rawRoles);
+  const orgId = await resolveOrganizationIdForUser(user.userId);
 
   const access_token = await createAccessToken({
     sub: String(user.userId),
     username: user.username,
     roles: roleList,
+    orgId,
   });
   const refresh_token = await createRefreshToken({
     sub: String(user.userId),
     username: user.username,
     roles: roleList,
+    orgId,
   });
 
   await touchUserLastLogin(user.userId);
@@ -92,16 +96,19 @@ export async function refreshForUserId(
 
   const rawRoles = await listRoleNamesForUser(user.userId);
   const roleList = normalizeRoleList(rawRoles);
+  const orgId = await resolveOrganizationIdForUser(user.userId);
 
   const access_token = await createAccessToken({
     sub: String(user.userId),
     username: user.username,
     roles: roleList,
+    orgId,
   });
   const refresh_token = await createRefreshToken({
     sub: String(user.userId),
     username: user.username,
     roles: roleList,
+    orgId,
   });
 
   return {

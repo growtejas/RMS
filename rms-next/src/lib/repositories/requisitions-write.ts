@@ -1,9 +1,10 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
 import { auditLog, requisitionItems, requisitions } from "@/lib/db/schema";
 
 export async function insertRequisitionHeader(values: {
+  organizationId: string;
   projectName: string | null;
   clientName: string | null;
   justification: string | null;
@@ -23,6 +24,7 @@ export async function insertRequisitionHeader(values: {
   const [row] = await db
     .insert(requisitions)
     .values({
+      organizationId: values.organizationId,
       projectName: values.projectName,
       clientName: values.clientName,
       justification: values.justification,
@@ -85,38 +87,85 @@ export async function insertItemRow(values: {
 
 export async function patchRequisitionFields(
   reqId: number,
+  organizationId: string,
   patch: Record<string, unknown>,
 ) {
   if (Object.keys(patch).length === 0) {
     return;
   }
   const db = getDb();
-  await db.update(requisitions).set(patch).where(eq(requisitions.reqId, reqId));
+  await db
+    .update(requisitions)
+    .set(patch)
+    .where(
+      and(eq(requisitions.reqId, reqId), eq(requisitions.organizationId, organizationId)),
+    );
 }
 
-export async function setHeaderJdKey(reqId: number, jdFileKey: string | null) {
+export async function setHeaderJdKey(
+  reqId: number,
+  organizationId: string,
+  jdFileKey: string | null,
+) {
   const db = getDb();
   await db
     .update(requisitions)
     .set({ jdFileKey })
-    .where(eq(requisitions.reqId, reqId));
+    .where(
+      and(eq(requisitions.reqId, reqId), eq(requisitions.organizationId, organizationId)),
+    );
 }
 
-export async function findItemById(itemId: number) {
+export async function findItemById(itemId: number, organizationId: string) {
   const db = getDb();
   const rows = await db
-    .select()
+    .select({ item: requisitionItems })
     .from(requisitionItems)
-    .where(eq(requisitionItems.itemId, itemId))
+    .innerJoin(requisitions, eq(requisitionItems.reqId, requisitions.reqId))
+    .where(
+      and(
+        eq(requisitionItems.itemId, itemId),
+        eq(requisitions.organizationId, organizationId),
+      ),
+    )
     .limit(1);
-  return rows[0] ?? null;
+  return rows[0]?.item ?? null;
 }
 
-export async function setItemJdKey(itemId: number, jdFileKey: string | null) {
+export async function setItemJdKey(
+  itemId: number,
+  organizationId: string,
+  jdFileKey: string | null,
+) {
   const db = getDb();
+  const item = await findItemById(itemId, organizationId);
+  if (!item) {
+    return;
+  }
   await db
     .update(requisitionItems)
     .set({ jdFileKey })
+    .where(eq(requisitionItems.itemId, itemId));
+}
+
+export async function updateItemPipelineRankingJd(
+  itemId: number,
+  organizationId: string,
+  patch: {
+    pipelineRankingUseRequisitionJd?: boolean;
+    pipelineJdText?: string | null;
+    pipelineJdFileKey?: string | null;
+    rankingRequiredSkills?: string[] | null;
+  },
+) {
+  const db = getDb();
+  const item = await findItemById(itemId, organizationId);
+  if (!item) {
+    return;
+  }
+  await db
+    .update(requisitionItems)
+    .set(patch)
     .where(eq(requisitionItems.itemId, itemId));
 }
 

@@ -34,7 +34,8 @@ function defaultApiBaseURL(): string | undefined {
 export const apiClient = axios.create({
   baseURL: defaultApiBaseURL(),
   withCredentials: true,
-  timeout: 25_000,
+  /** Ranking and some DB-heavy routes can exceed 25s on cold DB or large payloads. */
+  timeout: 120_000,
   headers: {
     "Content-Type": "application/json",
   },

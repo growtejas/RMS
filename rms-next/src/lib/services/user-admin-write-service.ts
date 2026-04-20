@@ -14,6 +14,7 @@ import {
 } from "@/lib/repositories/auth-user";
 import * as repo from "@/lib/repositories/user-admin-mutations";
 import { ensureAssignableRoles } from "@/lib/repositories/users-directory";
+import { resolveDefaultOrganizationId } from "@/lib/tenant/resolve-org";
 
 function sameRoleList(a: string[], b: string[]): boolean {
   const na = normalizeRoleList(a)
@@ -41,6 +42,12 @@ export async function createUserAccount(username: string, password: string) {
   }
   const passwordHash = hashPassword(password);
   const userId = await repo.createUserRow(uname, passwordHash);
+  const organizationId = await resolveDefaultOrganizationId();
+  await repo.addUserToOrganization({
+    userId,
+    organizationId,
+    isPrimary: true,
+  });
   return {
     message: "User created successfully" as const,
     user_id: userId,

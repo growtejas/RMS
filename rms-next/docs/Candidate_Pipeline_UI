@@ -1,0 +1,269 @@
+
+# 📄 UI Implementation Document – Candidate Pipeline
+
+---
+
+## 1. Overview
+
+This document defines how the Candidate Pipeline will be implemented at the UI level.
+
+The UI is designed to:
+
+* Clearly separate **candidate evaluation (ATS)** from **hiring execution (Pipeline)**
+* Provide a simple and fast decision-making experience for HR and TA
+* Avoid unnecessary technical complexity in the interface
+* Handle large candidate datasets efficiently
+
+---
+
+## 2. Navigation Structure
+
+The application will have a sidebar-based navigation system with the following sections:
+
+* Dashboard
+* Requisitions
+* Candidates (Global)
+
+
+All candidate pipeline actions will be performed inside the **Requisition Detail Page**.
+
+---
+
+## 3. Requisition List Page
+
+The Requisition List page displays all requisitions in the system.
+
+Each row includes:
+
+* Requisition ID
+* Job Title
+* Status (Pending, Approved, Closed)
+* Assigned TA
+
+Available actions:
+
+* View Requisition
+* Edit Requisition
+* Assign TA
+
+Selecting a requisition opens the **Requisition Detail Page**.
+
+---
+
+## 4. Requisition Detail Page
+
+This is the primary working screen for the candidate pipeline.
+
+The page is divided into three main tabs:
+
+* ATS View
+* Shortlisted
+* Interviews
+
+Each tab represents a different stage of the pipeline.
+
+---
+
+## 5. ATS View (Evaluation Layer)
+
+The ATS View is used for evaluating candidates.
+
+Only candidates who have applied to the selected requisition are shown.
+
+The layout is a Kanban-style board with five buckets:
+
+* BEST
+* VERY GOOD
+* GOOD
+* AVERAGE
+* NOT SUITABLE
+
+Each bucket contains candidate cards grouped by their evaluation score.
+
+---
+
+### Candidate Card (ATS View)
+
+Each candidate card displays:
+
+* Candidate Name
+* Final Score (optional label like “Very Good”)
+* Key highlights (skills, experience)
+* 1–2 risk indicators (missing skills, gaps)
+
+Available actions:
+
+* Shortlist
+* View Details
+
+---
+
+### Rules for ATS View
+
+* No interview-related actions are allowed
+* No stage movement is allowed
+* Only evaluation and shortlisting actions are permitted
+* Data is always fetched from the applications table
+
+---
+
+## 6. Candidate Detail View
+
+When a user clicks “View” on a candidate, a detail panel or page opens.
+
+This includes:
+
+* Basic information (name, email, phone)
+* Skills and experience
+* Resume preview or download
+* AI summary (if available)
+* Score breakdown (simplified, not raw technical values)
+
+This view is read-only for evaluation purposes.
+
+---
+
+## 7. Shortlisted Tab (Execution Layer)
+
+The Shortlisted tab contains candidates who have been shortlisted.
+
+Only candidates with stage = SHORTLISTED are shown.
+
+---
+
+### Layout
+
+A simple list or table of shortlisted candidates is displayed.
+
+Each row includes:
+
+* Candidate Name
+* Experience summary
+* Status
+
+---
+
+### Available Actions
+
+* Schedule Interview
+* Reject Candidate
+* Move to next stage
+
+---
+
+### Rules
+
+* ATS scores are not emphasized here
+* The focus is on actions, not evaluation
+* All actions are applied at the application level
+
+---
+
+## 8. Interview Tab
+
+The Interview tab is used to manage scheduled interviews.
+
+---
+
+### Layout
+
+A table-based view showing:
+
+* Candidate Name
+* Interview Date
+* Interview Type
+* Status (Scheduled, Completed, Cancelled)
+
+---
+
+### Available Actions
+
+* Schedule Interview
+* Reschedule Interview
+* Add Feedback
+* Move candidate to next stage
+
+---
+
+---
+
+## 9. Bulk Actions (Shortlisted Only)
+
+Bulk actions are available only in the Shortlisted section.
+
+These include:
+
+* Sending bulk emails
+* Moving multiple candidates to the next stage
+
+Users can select multiple candidates and apply actions at once.
+
+---
+
+## 10. Global Candidates Page
+
+This page displays all candidates stored in the system.
+
+Each row includes:
+
+* Candidate Name
+* Source (LinkedIn, Career Page, Manual, etc.)
+* Number of applications
+
+Available actions:
+
+* View candidate profile
+* Apply candidate to a requisition
+
+---
+
+## 11. UI Data Flow
+
+The UI must always follow this data flow:
+
+* Candidates are fetched via applications
+* ATS View uses applications filtered by requisition
+* Shortlisted View uses applications filtered by stage
+* No direct dependency on the global candidates table for pipeline views
+
+---
+
+## 12. User Interaction Flow
+
+The expected user flow is:
+
+1. User opens a requisition
+2. ATS View loads candidates grouped by buckets
+3. User evaluates candidates
+4. User shortlists selected candidates
+5. User switches to Shortlisted tab
+6. User schedules interviews
+7. User manages interview process
+8. Candidate moves to final outcome (Hired or Rejected)
+
+---
+
+## 13. UI Constraints and Guidelines
+
+* The interface must remain simple and readable
+* Candidate cards should not display excessive data
+* No raw technical scoring fields should be shown
+* All scoring should be translated into human-readable insights
+* ATS and Pipeline views must remain clearly separated
+
+---
+
+## 14. Summary
+
+The UI is divided into two primary layers:
+
+1. Evaluation Layer (ATS View)
+
+   * Used to compare and shortlist candidates
+   * Based on ranking and bucket classification
+
+2. Execution Layer (Shortlisted + Interview Tabs)
+
+   * Used to perform hiring actions
+   * Focused on scheduling, communication, and decisions
+

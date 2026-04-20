@@ -40,7 +40,7 @@ export async function GET(req: Request, { params }: Ctx) {
       return candidateId;
     }
 
-    const data = await getCandidateJson(candidateId);
+    const data = await getCandidateJson(candidateId, user.organizationId);
     return NextResponse.json(data);
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/candidates/[candidateId]]");

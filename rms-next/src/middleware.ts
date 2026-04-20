@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { tryParseAuthorizationAccessToken } from "@/lib/auth/auth-header";
 import { CSRF_COOKIE } from "@/lib/auth/cookies";
 import { newRequestId, REQUEST_ID_HEADER } from "@/lib/http/request-id";
 
@@ -32,6 +33,8 @@ function setSecurityHeaders(res: NextResponse) {
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
     "connect-src 'self'",
+    // Resume PDF preview uses <iframe src={blob:...}> after authenticated fetch.
+    "frame-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",
     "frame-ancestors 'none'",
@@ -54,6 +57,21 @@ function needsCsrf(req: NextRequest): boolean {
   return p.startsWith("/api/");
 }
 
+/** JWT in Authorization is not auto-sent on cross-site requests like cookies; skip double-submit CSRF for those calls. */
+function hasAuthorizationAccessToken(req: NextRequest): boolean {
+  return tryParseAuthorizationAccessToken(req.headers.get("authorization")) != null;
+}
+
+/**
+ * Local / staging convenience for curl, Postman, or SPA-on-other-port without CSRF wiring.
+ * Ignored when NODE_ENV=production so it cannot be left on by mistake in prod.
+ */
+function isCsrfDisabledForNonProd(): boolean {
+  if (process.env.NODE_ENV === "production") return false;
+  const v = process.env.API_CSRF_DISABLE?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 export function middleware(req: NextRequest) {
   const res = NextResponse.next();
   setSecurityHeaders(res);
@@ -62,10 +80,15 @@ export function middleware(req: NextRequest) {
   const reqId = incoming?.trim() ? incoming.trim() : newRequestId();
   res.headers.set(REQUEST_ID_HEADER, reqId);
 
-  if (needsCsrf(req)) {
+  if (needsCsrf(req) && !isCsrfDisabledForNonProd() && !hasAuthorizationAccessToken(req)) {
     if (!sameOrigin(req)) {
       const deny = NextResponse.json(
-        { detail: "CSRF blocked (origin)" },
+        isProd()
+          ? { detail: "CSRF blocked (origin)" }
+          : {
+              detail: "CSRF blocked (origin)",
+              hint: "Call the API from the same origin as the Next app, or send Authorization: Bearer <jwt>, or set API_CSRF_DISABLE=true in .env.local (dev only).",
+            },
         { status: 403 },
       );
       setSecurityHeaders(deny);
@@ -76,7 +99,12 @@ export function middleware(req: NextRequest) {
     const header = req.headers.get("x-csrf-token") ?? "";
     if (!cookie || !header || cookie !== header) {
       const deny = NextResponse.json(
-        { detail: "CSRF token missing or invalid" },
+        isProd()
+          ? { detail: "CSRF token missing or invalid" }
+          : {
+              detail: "CSRF token missing or invalid",
+              hint: "Send Authorization: Bearer <access_token>, or header x-csrf-token equal to the rfm_csrf cookie value after login. Local dev only: API_CSRF_DISABLE=true in .env.local.",
+            },
         { status: 403 },
       );
       setSecurityHeaders(deny);

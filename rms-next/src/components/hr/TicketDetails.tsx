@@ -48,13 +48,14 @@ import type {
 } from "@/types/workflow";
 import { useAuth } from "@/contexts/useAuth";
 import {
-  fetchCandidates,
+  fetchCandidatesFromApplications,
   createCandidate,
   uploadResume,
   getCandidateActionErrorMessage,
   type Candidate,
 } from "@/lib/api/candidateApi";
 import CandidateDetailModal from "@/components/shared/CandidateDetailModal";
+import type { EvaluationCardContext } from "@/components/evaluation/mapRankedCandidateToEvaluationCard";
 import { PlainPriorityText } from "@/components/common/PlainPriorityText";
 
 interface TicketDetailsProps {
@@ -653,7 +654,9 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
     if (!reqId) return;
     setCandidatesLoading(true);
     try {
-      const data = await fetchCandidates(reqId);
+      const data = await fetchCandidatesFromApplications({
+        requisition_id: reqId,
+      });
       setCandidates(data);
     } catch {
       setCandidates([]);
@@ -665,6 +668,19 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
   useEffect(() => {
     loadCandidates();
   }, [loadCandidates]);
+
+  const hrModalEvaluationContext = useMemo(():
+    | EvaluationCardContext
+    | undefined => {
+    if (!selectedCandidate || !ticket) return undefined;
+    const item = ticket.items.find(
+      (it) => it.numericItemId === selectedCandidate.requisition_item_id,
+    );
+    return {
+      requiredExperienceYears: item?.experience ?? null,
+      requiredSkillsCount: undefined,
+    };
+  }, [selectedCandidate, ticket]);
 
   // ---- Add candidate handler ----
   const handleAddCandidate = async (e: React.FormEvent) => {
@@ -2545,6 +2561,21 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
             )}
           </div>
 
+          {candidateError ? (
+            <div
+              style={{
+                fontSize: 12,
+                color: "var(--error)",
+                marginBottom: 12,
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "1px solid var(--error)",
+              }}
+            >
+              {candidateError}
+            </div>
+          ) : null}
+
           {/* Filters: Item and Stage */}
           <div
             style={{
@@ -2576,11 +2607,12 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                 value={
                   candidateItemFilter === "all" ? "all" : candidateItemFilter
                 }
-                onChange={(e) =>
+                onChange={(e) => {
+                  setCandidateError(null);
                   setCandidateItemFilter(
                     e.target.value === "all" ? "all" : Number(e.target.value),
-                  )
-                }
+                  );
+                }}
                 style={{
                   padding: "6px 12px",
                   borderRadius: "8px",
@@ -3067,6 +3099,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
             setSelectedCandidate(null);
           }}
           userRoles={user?.roles || []}
+          evaluationContext={hrModalEvaluationContext}
         />
       )}
 

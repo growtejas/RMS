@@ -1,6 +1,11 @@
 import type { ApiUser } from "@/lib/auth/api-guard";
+import { getDb } from "@/lib/db";
 import { HttpError } from "@/lib/http/http-error";
 import * as applicationsRepo from "@/lib/repositories/applications-repo";
+import * as candidatesRepo from "@/lib/repositories/candidates-repo";
+import * as rankingMetadataRepo from "@/lib/repositories/ranking-metadata-repo";
+import { ensureApplicationForCandidateTx } from "@/lib/services/application-sync-service";
+import { ATS_BUCKET_KEYS } from "@/lib/services/ats-buckets";
 import { patchCandidateStageJson } from "@/lib/services/candidates-service";
 
 const APPLICATION_STAGE_ORDER = [
@@ -34,31 +39,238 @@ function applicationToJson(row: applicationsRepo.ApplicationWithCandidateRow) {
     requisition_item_id: row.application.requisitionItemId,
     requisition_id: row.application.requisitionId,
     current_stage: row.application.currentStage,
+    ats_bucket: row.application.atsBucket ?? null,
     source: row.application.source,
     created_by: row.application.createdBy ?? null,
     created_at: row.application.createdAt?.toISOString() ?? null,
     updated_at: row.application.updatedAt?.toISOString() ?? null,
     candidate: {
       candidate_id: row.candidate.candidateId,
+      person_id: row.candidate.personId,
       full_name: row.candidate.fullName,
       email: row.candidate.email,
       phone: row.candidate.phone ?? null,
+      resume_path: row.candidate.resumePath ?? null,
     },
   };
 }
 
 export async function listApplicationsJson(params: {
+  organizationId: string;
   requisitionId?: number | null;
   requisitionItemId?: number | null;
   currentStage?: string | null;
   candidateId?: number | null;
+  limit?: number | null;
 }) {
   const rows = await applicationsRepo.selectApplicationsFiltered(params);
   return rows.map(applicationToJson);
 }
 
-export async function getApplicationJson(applicationId: number) {
-  const row = await applicationsRepo.selectApplicationById(applicationId);
+type ApplicationJson = ReturnType<typeof applicationToJson>;
+
+function enrichApplicationWithStoredRanking(
+  base: ApplicationJson,
+  rankingVersionId: number | null,
+  scoreByCandidate: Map<
+    number,
+    { score: string; breakdown: Record<string, unknown> }
+  >,
+): ApplicationJson & {
+  ranking: {
+    ranking_version_id: number;
+    final_score: number | null;
+    breakdown: Record<string, unknown>;
+  } | null;
+} {
+  if (rankingVersionId == null) {
+    return { ...base, ranking: null };
+  }
+  const s = scoreByCandidate.get(base.candidate_id);
+  if (!s) {
+    return { ...base, ranking: null };
+  }
+  const final = Number.parseFloat(s.score);
+  return {
+    ...base,
+    ranking: {
+      ranking_version_id: rankingVersionId,
+      final_score: Number.isFinite(final) ? final : null,
+      breakdown: s.breakdown,
+    },
+  };
+}
+
+/** Doc-style response: quality buckets (plus UNRANKED when no `ats_bucket`). Includes latest `candidate_job_scores` per candidate. */
+export async function listApplicationsGroupedByAtsBucketJson(params: {
+  organizationId: string;
+  requisitionItemId: number;
+  limitPerBucket?: number;
+}) {
+  if (params.requisitionItemId == null) {
+    throw new HttpError(422, "requisition_item_id is required");
+  }
+  const limit = Math.min(Math.max(params.limitPerBucket ?? 100, 1), 500);
+  const rows = await applicationsRepo.selectApplicationsFiltered({
+    organizationId: params.organizationId,
+    requisitionItemId: params.requisitionItemId,
+  });
+
+  const rankingVersionId =
+    await rankingMetadataRepo.selectLatestRankingVersionIdForRequisitionItem(
+      params.requisitionItemId,
+    );
+  const scoreRows =
+    rankingVersionId != null
+      ? await rankingMetadataRepo.selectCandidateJobScoresForRankingVersion(
+          rankingVersionId,
+        )
+      : [];
+  const scoreByCandidate = new Map(
+    scoreRows.map((r) => [
+      r.candidateId,
+      { score: r.score, breakdown: r.breakdown },
+    ]),
+  );
+
+  const bucketOrder = [...ATS_BUCKET_KEYS];
+  const buckets: Record<
+    string,
+    Array<
+      ApplicationJson & {
+        ranking: {
+          ranking_version_id: number;
+          final_score: number | null;
+          breakdown: Record<string, unknown>;
+        } | null;
+      }
+    >
+  > = {};
+  for (const b of bucketOrder) {
+    buckets[b] = [];
+  }
+  buckets.UNRANKED = [];
+  const truncated: Record<string, boolean> = {};
+
+  for (const row of rows) {
+    const raw = row.application.atsBucket;
+    const key =
+      raw != null && (bucketOrder as readonly string[]).includes(raw)
+        ? raw
+        : "UNRANKED";
+    const target = buckets[key]!;
+    if (target.length >= limit) {
+      truncated[key] = true;
+      continue;
+    }
+    const base = applicationToJson(row);
+    target.push(
+      enrichApplicationWithStoredRanking(base, rankingVersionId, scoreByCandidate),
+    );
+  }
+
+  return {
+    requisition_item_id: params.requisitionItemId,
+    BEST: buckets.BEST,
+    VERY_GOOD: buckets.VERY_GOOD,
+    GOOD: buckets.GOOD,
+    AVERAGE: buckets.AVERAGE,
+    NOT_SUITABLE: buckets.NOT_SUITABLE,
+    UNRANKED: buckets.UNRANKED,
+    meta: {
+      limit_per_bucket: limit,
+      truncated,
+      total: rows.length,
+      ranking_version_id: rankingVersionId,
+    },
+  };
+}
+
+/**
+ * Idempotent application ensure for a candidate (Phase 1: one application per `candidate_id`).
+ * Safe to call from `POST /api/applications` retries or backfill jobs — second call returns
+ * `{ created: false, application }`. See Candidate_Pipeline.txt §18.
+ */
+export async function ensureApplicationFromCandidateJson(params: {
+  candidateId: number;
+  requisitionItemId: number;
+  organizationId: string;
+  userId: number;
+}): Promise<{ created: boolean; application: Awaited<ReturnType<typeof getApplicationJson>> }> {
+  const cand = await candidatesRepo.selectCandidateById(
+    params.candidateId,
+    params.organizationId,
+  );
+  if (!cand) {
+    throw new HttpError(404, "Candidate not found");
+  }
+  if (cand.requisitionItemId !== params.requisitionItemId) {
+    throw new HttpError(
+      400,
+      "Candidate does not belong to this requisition item",
+    );
+  }
+
+  const existing = await applicationsRepo.selectApplicationByCandidateId(
+    params.candidateId,
+    params.organizationId,
+  );
+  if (existing) {
+    const application = await getApplicationJson(
+      existing.applicationId,
+      params.organizationId,
+    );
+    return { created: false, application };
+  }
+
+  const db = getDb();
+  await db.transaction(async (tx) => {
+    await ensureApplicationForCandidateTx({
+      tx,
+      organizationId: params.organizationId,
+      candidateId: params.candidateId,
+      requisitionItemId: cand.requisitionItemId,
+      requisitionId: cand.requisitionId,
+      candidateStage: cand.currentStage,
+      source: "api_ensure",
+      performedBy: params.userId,
+      reason: "POST /api/applications",
+    });
+  });
+
+  const after = await applicationsRepo.selectApplicationByCandidateId(
+    params.candidateId,
+    params.organizationId,
+  );
+  if (!after) {
+    throw new HttpError(500, "Application could not be created");
+  }
+  const application = await getApplicationJson(after.applicationId, params.organizationId);
+  return { created: true, application };
+}
+
+export async function shortlistApplicationJson(
+  applicationId: number,
+  user: ApiUser,
+  roles: string[],
+) {
+  return patchApplicationStageJson(
+    applicationId,
+    "Shortlisted",
+    undefined,
+    user,
+    roles,
+  );
+}
+
+export async function getApplicationJson(
+  applicationId: number,
+  organizationId: string,
+) {
+  const row = await applicationsRepo.selectApplicationById(
+    applicationId,
+    organizationId,
+  );
   if (!row) {
     throw new HttpError(404, "Application not found");
   }
@@ -76,21 +288,28 @@ export async function patchApplicationStageJson(
   user: ApiUser,
   roles: string[],
 ) {
-  const app = await applicationsRepo.selectApplicationById(applicationId);
+  const app = await applicationsRepo.selectApplicationById(
+    applicationId,
+    user.organizationId,
+  );
   if (!app) {
     throw new HttpError(404, "Application not found");
   }
 
   await patchCandidateStageJson(app.application.candidateId, newStage, user, roles, reason);
 
-  const after = await applicationsRepo.selectApplicationByCandidateId(app.application.candidateId);
+  const after = await applicationsRepo.selectApplicationByCandidateId(
+    app.application.candidateId,
+    user.organizationId,
+  );
   if (!after) {
     throw new HttpError(500, "Application not found after stage update");
   }
-  return getApplicationJson(after.applicationId);
+  return getApplicationJson(after.applicationId, user.organizationId);
 }
 
 export async function getApplicationsPipelineJson(params: {
+  organizationId: string;
   requisitionItemId?: number | null;
   requisitionId?: number | null;
   compact?: boolean;
@@ -100,6 +319,7 @@ export async function getApplicationsPipelineJson(params: {
   }
 
   const rows = await applicationsRepo.selectApplicationsFiltered({
+    organizationId: params.organizationId,
     requisitionItemId: params.requisitionItemId ?? null,
     requisitionId: params.requisitionId ?? null,
   });

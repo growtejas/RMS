@@ -1,0 +1,252 @@
+# 📄 Candidate Pipeline
+
+## 1. Overview
+
+The Candidate Pipeline defines how candidates enter the system, get evaluated, shortlisted, and finally processed for hiring within a requisition.
+
+This pipeline is designed to:
+
+- Handle candidates from multiple sources continuously
+- Maintain a global candidate database
+- Provide requisition-specific evaluation (ATS view)
+- Separate evaluation from execution (shortlisting vs hiring process)
+
+---
+
+## 2. Global Candidate Ingestion
+
+Candidates can enter the system from multiple sources:
+
+- Career Page (public applications)
+- LinkedIn
+- Naukri or other job platforms
+- Manual entry by HR/TA
+- Bulk upload
+
+When a candidate is received:
+
+1. The system checks for duplicates using:
+    - Email
+    - Resume content (if available)
+2. If the candidate does not exist:
+    - A new record is created in the global **candidates** table
+3. If the candidate already exists:
+    - The existing record is reused
+    - Source information may be updated or appended
+4. The system records:
+    - Candidate details (name, email, phone)
+    - Source (LinkedIn, Career Page, Manual, etc.)
+    - Resume and metadata
+    - Timestamp of entry
+
+## 3. Application Creation (Requisition Linking)
+
+After storing the candidate globally, the system creates an **application** linked to a specific requisition.
+
+Key points:
+
+- One candidate can apply to multiple requisitions
+- Each application is independent
+- All pipeline actions (stage, shortlist, etc.) are handled at the **application level**, not candidate level
+
+---
+
+## 4. Requisition-Level Candidate View (ATS)
+
+Each requisition displays only the candidates who applied to it.
+
+Example:
+
+- Global candidates: 5000
+- Candidates applied to REQ-5: 400
+
+The ATS view for REQ-5 will show only those 400 candidates.
+
+Important rule:
+
+- The system must always fetch candidates via the **applications table**
+- Direct querying of the global candidates table for ATS view is not allowed
+
+---
+
+## 5. Candidate Evaluation (Ranking)
+
+When a candidate is linked to a requisition:
+
+1. The system parses the resume and extracts structured data
+2. The ranking engine calculates scores using:
+    - Keyword matching
+    - Semantic matching
+    - Business signals
+    - ATS rule-based logic
+    - AI evaluation
+3. The final score is computed and stored
+4. The system assigns an **ATS bucket** based on the score
+
+All scores are:
+
+- Precomputed
+- Stored in the database
+- Not recalculated during UI rendering
+
+## 6. ATS Bucket Classification
+
+Candidates are grouped into buckets for easier evaluation:
+
+- BEST
+- VERY GOOD
+- GOOD
+- AVERAGE
+- NOT SUITABLE
+
+Buckets are derived from the final score and stored at the application level.
+
+Purpose:
+
+- Simplify comparison
+- Help HR/TA quickly identify strong candidates
+- Avoid manual filtering
+
+## 7. ATS View (Evaluation Layer)
+
+The ATS view is presented in a Kanban-style layout based on buckets.
+
+Characteristics:
+
+- Displays candidates grouped by quality (bucket)
+- Used only for evaluation and decision-making
+- Shows ranking insights and candidate summaries
+
+Restrictions:
+
+- No interview actions are performed here
+- No hiring actions are performed here
+
+## 8. Shortlisting (Decision Step)
+
+Shortlisting is the key transition from evaluation to execution.
+
+When HR/TA shortlists a candidate:
+
+- The application stage is updated to **SHORTLISTED**
+- The candidate is Visible to ATS bucket view
+- The candidate is moved to the shortlisted section
+
+Important:
+
+- Shortlisting is done per application (not per candidate globally)
+- A candidate can be shortlisted in one requisition and not in another
+
+## 9. Shortlisted Candidates Section (Execution Layer)
+
+This section contains only shortlisted candidates for a requisition.
+
+Purpose:
+
+- Provide a clean workspace for hiring actions
+- Remove noise from ATS evaluation data
+
+Available actions:
+
+- Schedule interviews
+- Send emails (individual or bulk)
+- Assign interview panels
+- Move candidates to next stages
+
+## 10. Interview and Hiring Flow
+
+Once a candidate is shortlisted:
+
+1. Interview is scheduled by HR/TA
+2. Interviewers are assigned
+3. Candidate attends interview
+4. Feedback is collected
+5. Candidate is moved to:
+    - Next round
+    - Rejected
+    - Offer stage
+
+Final outcomes:
+
+- HIRED
+- REJECTED
+
+## 11. Continuous Candidate Handling
+
+The system supports continuous candidate inflow.
+
+When new candidates arrive:
+
+- They are stored in the global database
+- Applications are created
+- Ranking is triggered automatically
+- Buckets are assigned
+- Candidates appear in the ATS view without affecting existing data
+
+## 12. Key Rules and Constraints
+
+- Candidates are stored globally; applications are requisition-specific
+- All stages and actions are handled at the application level
+- Scores are precomputed and stored; no runtime recalculation
+- Buckets are assigned in the backend, not in the frontend
+- ATS view is for evaluation only; pipeline is for execution
+- A candidate can exist in multiple requisitions independently
+
+## 13. Edge Case Handling
+
+- Duplicate candidates are merged based on email or resume
+- Duplicate applications for the same requisition should be prevented or handled explicitly
+- Candidates applying from multiple sources are unified under one profile
+- Missing candidate data should not block the pipeline; partial evaluation is allowed
+- New candidates should always be evaluated using the latest ranking logic
+
+## 14. Summary
+
+The Candidate Pipeline is structured into three clear layers:
+
+1. Data Layer
+    - Candidate storage and application linkage
+2. Evaluation Layer
+    - Ranking and bucket-based ATS view
+3. Execution Layer
+    - Shortlisting, interviews, and hiring
+
+This separation ensures the system remains scalable, understandable, and efficient for real-world hiring operations.
+
+## 15. RMS implementation (Phase 0 database)
+
+Product “application **stage**” maps to the DB column **`current_stage`** on `applications` (not a separate `stage` column). ATS buckets use **`ats_bucket`**; apply migrations on each environment (`npm run db:migrate` from `rms-next`). See [PHASE_0_DATABASE_CHECKLIST.md](./PHASE_0_DATABASE_CHECKLIST.md).
+
+## 16. RMS Phase 1 ingestion (scope)
+
+Today’s code uses **per–requisition-line** `candidates` rows and **one `applications` row per `candidate_id`**, not a global pool with many applications per person. Ingestion APIs and the adopted test matrix are documented in [PHASE_1_INGESTION_DECISION.md](./PHASE_1_INGESTION_DECISION.md). A **person** table (`candidate_persons`) and `candidates.person_id` are now in use (migration `0017`); see [PHASE_FUTURE_GLOBAL_POOL.md](./PHASE_FUTURE_GLOBAL_POOL.md). Each job line still has its own `candidates` + `applications` rows; the same email in an org reuses one person across lines.
+
+## 17. RMS Phase 2 ATS list (applications-only read)
+
+For the **requisition ATS roster**, clients MUST use the applications API so every row is an **application** joined to candidate fields (see §4).
+
+- **List by requisition:** `GET /api/applications?requisitionId=<reqId>` (camelCase) or `requisition_id=<reqId>` (snake_case). Returns applications with embedded `candidate` and `current_stage`; this is the Phase 2 **flat list** surface (no `group_by`).
+- **Do not** use `GET /api/candidates?requisition_id=` for new ATS screens; that path remains for legacy parity only and may emit a deprecation hint (see API route comments).
+
+Pipeline board, ranking, and ATS quality buckets use other query shapes (e.g. `GET /api/applications/pipeline`, `group_by=ats_bucket` on item scope) and belong to the evaluation layer (§7), not the default Phase 2 list. Continuous ingest → ranking behavior is summarized in [PIPELINE_INGEST_RANKING_MATRIX.md](./PIPELINE_INGEST_RANKING_MATRIX.md).
+
+## 18. RMS duplicate applications (Phase 1)
+
+Under the current schema, **`applications.candidate_id` is unique** (`uq_applications_candidate`): at most **one** application row exists per candidate row. `POST /api/applications` (**`ensureApplicationFromCandidateJson`**) is **idempotent**: if an application already exists for that `candidate_id`, the API returns `{ created: false, application }` and does not insert a second row.
+
+Per **line**, at most one `candidates` row per `(organization_id, requisition_item_id, person_id)` (`uq_candidates_org_item_person`). Further UX/API work for cross-line person views is tracked in [PHASE_FUTURE_GLOBAL_POOL.md](./PHASE_FUTURE_GLOBAL_POOL.md).
+
+Ingest and ranking alignment for all entry paths is tracked in [PIPELINE_INGEST_RANKING_MATRIX.md](./PIPELINE_INGEST_RANKING_MATRIX.md).
+
+## 19. TA UI (tabs, global roster)
+
+Product layout and tab rules for the requisition pipeline are described in [Candidate_Pipeline_UI](./Candidate_Pipeline_UI).
+
+### Manual smoke checklist
+
+1. Open a requisition as TA → **ATS View** shows the five quality buckets for the selected line; cards open the evaluation modal (no interview scheduling in that modal).
+2. Shortlist a candidate → they appear under **Shortlisted**; bulk **Move to Interviewing** updates selected rows.
+3. Schedule an interview from the Shortlisted modal → the round appears under **Interviews** for that requisition.
+4. Sidebar **Candidates (Global)** lists recent applications aggregated by person (cap 500) with links back to requisitions.
+
+Automated coverage: `tests/e2e/pipeline-ui-smoke.spec.ts` (lightweight navigation smoke).

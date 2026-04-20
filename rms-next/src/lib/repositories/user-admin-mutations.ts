@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import {
   auditLog,
   employees,
+  organizationMembers,
   roles,
   userEmployeeMap,
   userRoles,
@@ -82,6 +83,22 @@ export async function createUserRow(username: string, passwordHash: string) {
     throw new Error("User insert failed");
   }
   return row.userId;
+}
+
+export async function addUserToOrganization(params: {
+  userId: number;
+  organizationId: string;
+  isPrimary: boolean;
+}) {
+  const db = getDb();
+  await db
+    .insert(organizationMembers)
+    .values({
+      userId: params.userId,
+      organizationId: params.organizationId,
+      isPrimary: params.isPrimary,
+    })
+    .onConflictDoNothing();
 }
 
 export async function addUserRole(userId: number, roleId: number) {

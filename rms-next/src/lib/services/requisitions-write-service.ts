@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 
 import { HttpError } from "@/lib/http/http-error";
 import {
@@ -19,6 +19,7 @@ import {
   patchRequisitionFields,
   setHeaderJdKey,
   setItemJdKey,
+  updateItemPipelineRankingJd,
 } from "@/lib/repositories/requisitions-write";
 import { requisitionItemToJson } from "@/lib/services/requisitions-read-service";
 import {
@@ -115,6 +116,7 @@ function assertPdf(name: string, mime: string | null, size: number) {
 }
 
 export async function createRequisitionFromForm(params: {
+  organizationId: string;
   projectName: string | null;
   clientName: string | null;
   officeLocation: string | null;
@@ -148,6 +150,7 @@ export async function createRequisitionFromForm(params: {
   }
 
   const reqId = await insertRequisitionHeader({
+    organizationId: params.organizationId,
     projectName: params.projectName,
     clientName: params.clientName?.trim() || null,
     justification: params.justification,
@@ -195,10 +198,10 @@ export async function createRequisitionFromForm(params: {
     );
     const ts = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
     const key = await jdSaveBuffer(`${reqId}_${ts}.pdf`, params.jdFile.buffer);
-    await setHeaderJdKey(reqId, key);
+    await setHeaderJdKey(reqId, params.organizationId, key);
   }
 
-  const header = await selectRequisitionById(reqId);
+  const header = await selectRequisitionById(reqId, params.organizationId);
   if (!header) {
     throw new HttpError(500, "Requisition not found after create");
   }
@@ -207,9 +210,10 @@ export async function createRequisitionFromForm(params: {
 
 export async function patchRequisitionNonWorkflow(
   reqId: number,
+  organizationId: string,
   body: RequisitionPatchInput,
 ) {
-  const header = await selectRequisitionById(reqId);
+  const header = await selectRequisitionById(reqId, organizationId);
   if (!header) {
     throw new HttpError(404, "Requisition not found");
   }
@@ -261,16 +265,17 @@ export async function patchRequisitionNonWorkflow(
         : optDateTime(body.assigned_at);
   }
 
-  await patchRequisitionFields(reqId, patch);
+  await patchRequisitionFields(reqId, organizationId, patch);
   return { message: "Requisition updated" };
 }
 
 export async function putRequisitionManager(
   reqId: number,
+  organizationId: string,
   body: RequisitionManagerPutInput,
   userId: number,
 ) {
-  const header = await selectRequisitionById(reqId);
+  const header = await selectRequisitionById(reqId, organizationId);
   if (!header) {
     throw new HttpError(404, "Requisition not found");
   }
@@ -333,7 +338,12 @@ export async function putRequisitionManager(
       await tx
         .update(requisitions)
         .set(headerPatch)
-        .where(eq(requisitions.reqId, reqId));
+        .where(
+          and(
+            eq(requisitions.reqId, reqId),
+            eq(requisitions.organizationId, organizationId),
+          ),
+        );
     }
 
     if (body.items !== undefined) {
@@ -444,9 +454,10 @@ export async function putRequisitionManager(
 
 export async function createRequisitionItemNonWorkflow(
   reqId: number,
+  organizationId: string,
   item: RequisitionItemCreateInput,
 ) {
-  const header = await selectRequisitionById(reqId);
+  const header = await selectRequisitionById(reqId, organizationId);
   if (!header) {
     throw new HttpError(404, "Requisition not found");
   }
@@ -478,8 +489,11 @@ export async function createRequisitionItemNonWorkflow(
   return requisitionItemToJson(row);
 }
 
-export async function listRequisitionItemsJson(reqId: number) {
-  const rows = await selectItemsForReqId(reqId);
+export async function listRequisitionItemsJson(
+  reqId: number,
+  organizationId: string,
+) {
+  const rows = await selectItemsForReqId(reqId, organizationId);
   return rows.map(requisitionItemToJson);
 }
 
@@ -487,10 +501,15 @@ type UploadBody =
   | { buffer: Buffer; filename: string; mime: string | null }
   | { stream: Readable; size: number; filename: string; mime: string | null };
 
-export async function uploadRequisitionJd(reqId: number, file: UploadBody, userId: number) {
+export async function uploadRequisitionJd(
+  reqId: number,
+  organizationId: string,
+  file: UploadBody,
+  userId: number,
+) {
   const size = "buffer" in file ? file.buffer.length : file.size;
   assertPdf(file.filename, file.mime, size);
-  const header = await selectRequisitionById(reqId);
+  const header = await selectRequisitionById(reqId, organizationId);
   if (!header) {
     throw new HttpError(404, "Requisition not found");
   }
@@ -510,12 +529,16 @@ export async function uploadRequisitionJd(reqId: number, file: UploadBody, userI
     "buffer" in file
       ? await jdSaveBuffer(`${reqId}_${ts}.pdf`, file.buffer)
       : await jdSaveStream(`${reqId}_${ts}.pdf`, file.stream);
-  await setHeaderJdKey(reqId, key);
+  await setHeaderJdKey(reqId, organizationId, key);
   return { message: "JD uploaded", jd_file_key: key };
 }
 
-export async function deleteRequisitionJd(reqId: number, userId: number) {
-  const header = await selectRequisitionById(reqId);
+export async function deleteRequisitionJd(
+  reqId: number,
+  organizationId: string,
+  userId: number,
+) {
+  const header = await selectRequisitionById(reqId, organizationId);
   if (!header) {
     throw new HttpError(404, "Requisition not found");
   }
@@ -531,18 +554,23 @@ export async function deleteRequisitionJd(reqId: number, userId: number) {
   if (!jdIsRemoteUrl(header.jdFileKey)) {
     await jdDeleteFile(header.jdFileKey);
   }
-  await setHeaderJdKey(reqId, null);
+  await setHeaderJdKey(reqId, organizationId, null);
   return { message: "JD removed" };
 }
 
-export async function uploadItemJd(itemId: number, file: UploadBody, userId: number) {
+export async function uploadItemJd(
+  itemId: number,
+  organizationId: string,
+  file: UploadBody,
+  userId: number,
+) {
   const size = "buffer" in file ? file.buffer.length : file.size;
   assertPdf(file.filename, file.mime, size);
-  const item = await findItemById(itemId);
+  const item = await findItemById(itemId, organizationId);
   if (!item) {
     throw new HttpError(404, "Requisition item not found");
   }
-  const header = await selectRequisitionById(item.reqId);
+  const header = await selectRequisitionById(item.reqId, organizationId);
   if (!header) {
     throw new HttpError(404, "Requisition not found");
   }
@@ -560,16 +588,20 @@ export async function uploadItemJd(itemId: number, file: UploadBody, userId: num
     "buffer" in file
       ? await jdSaveBuffer(`item_${itemId}_${ts}.pdf`, file.buffer)
       : await jdSaveStream(`item_${itemId}_${ts}.pdf`, file.stream);
-  await setItemJdKey(itemId, key);
+  await setItemJdKey(itemId, organizationId, key);
   return { message: "JD uploaded", jd_file_key: key };
 }
 
-export async function deleteItemJd(itemId: number, userId: number) {
-  const item = await findItemById(itemId);
+export async function deleteItemJd(
+  itemId: number,
+  organizationId: string,
+  userId: number,
+) {
+  const item = await findItemById(itemId, organizationId);
   if (!item) {
     throw new HttpError(404, "Requisition item not found");
   }
-  const header = await selectRequisitionById(item.reqId);
+  const header = await selectRequisitionById(item.reqId, organizationId);
   if (!header) {
     throw new HttpError(404, "Requisition not found");
   }
@@ -585,6 +617,121 @@ export async function deleteItemJd(itemId: number, userId: number) {
   if (!jdIsRemoteUrl(item.jdFileKey)) {
     await jdDeleteFile(item.jdFileKey);
   }
-  await setItemJdKey(itemId, null);
+  await setItemJdKey(itemId, organizationId, null);
   return { message: "JD removed" };
+}
+
+function assertRequisitionActiveForPipelineJd(header: { overallStatus: string }) {
+  if (header.overallStatus === "Cancelled" || header.overallStatus === "Rejected") {
+    throw new HttpError(400, "Cannot update pipeline ranking JD for this requisition");
+  }
+}
+
+/** TA/HR: optional JD text + PDF used only for candidate ranking (not the manager item JD). */
+export async function patchPipelineRankingJdSettings(
+  itemId: number,
+  organizationId: string,
+  body: {
+    use_requisition_jd: boolean;
+    pipeline_jd_text?: string | null;
+    ranking_required_skills?: string[] | null;
+  },
+) {
+  const item = await findItemById(itemId, organizationId);
+  if (!item) {
+    throw new HttpError(404, "Requisition item not found");
+  }
+  const header = await selectRequisitionById(item.reqId, organizationId);
+  if (!header) {
+    throw new HttpError(404, "Requisition not found");
+  }
+  assertRequisitionActiveForPipelineJd(header);
+
+  const textPatch =
+    body.pipeline_jd_text === undefined
+      ? {}
+      : {
+          pipelineJdText:
+            body.pipeline_jd_text === null || body.pipeline_jd_text === ""
+              ? null
+              : body.pipeline_jd_text,
+        };
+
+  const skillsPatch =
+    body.ranking_required_skills === undefined
+      ? {}
+      : {
+          rankingRequiredSkills:
+            body.ranking_required_skills == null ||
+            body.ranking_required_skills.length === 0
+              ? null
+              : body.ranking_required_skills,
+        };
+
+  await updateItemPipelineRankingJd(itemId, organizationId, {
+    pipelineRankingUseRequisitionJd: body.use_requisition_jd,
+    ...textPatch,
+    ...skillsPatch,
+  });
+  const updated = await findItemById(itemId, organizationId);
+  if (!updated) {
+    throw new HttpError(500, "Requisition item not found after update");
+  }
+  return requisitionItemToJson(updated);
+}
+
+export async function uploadPipelineRankingJdPdf(
+  itemId: number,
+  organizationId: string,
+  file: UploadBody,
+) {
+  const size = "buffer" in file ? file.buffer.length : file.size;
+  assertPdf(file.filename, file.mime, size);
+  const item = await findItemById(itemId, organizationId);
+  if (!item) {
+    throw new HttpError(404, "Requisition item not found");
+  }
+  const header = await selectRequisitionById(item.reqId, organizationId);
+  if (!header) {
+    throw new HttpError(404, "Requisition not found");
+  }
+  assertRequisitionActiveForPipelineJd(header);
+  if (item.pipelineJdFileKey && !jdIsRemoteUrl(item.pipelineJdFileKey)) {
+    await jdDeleteFile(item.pipelineJdFileKey);
+  }
+  const ts = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+  const key =
+    "buffer" in file
+      ? await jdSaveBuffer(`pipeline_item_${itemId}_${ts}.pdf`, file.buffer)
+      : await jdSaveStream(`pipeline_item_${itemId}_${ts}.pdf`, file.stream);
+  await updateItemPipelineRankingJd(itemId, organizationId, {
+    pipelineJdFileKey: key,
+    pipelineRankingUseRequisitionJd: false,
+  });
+  return { pipeline_jd_file_key: key };
+}
+
+export async function deletePipelineRankingJdPdf(
+  itemId: number,
+  organizationId: string,
+) {
+  const item = await findItemById(itemId, organizationId);
+  if (!item) {
+    throw new HttpError(404, "Requisition item not found");
+  }
+  const header = await selectRequisitionById(item.reqId, organizationId);
+  if (!header) {
+    throw new HttpError(404, "Requisition not found");
+  }
+  assertRequisitionActiveForPipelineJd(header);
+  if (!item.pipelineJdFileKey) {
+    throw new HttpError(404, "No pipeline ranking JD file for this item");
+  }
+  if (!jdIsRemoteUrl(item.pipelineJdFileKey)) {
+    await jdDeleteFile(item.pipelineJdFileKey);
+  }
+  await updateItemPipelineRankingJd(itemId, organizationId, {
+    pipelineJdFileKey: null,
+  });
+  return { message: "Pipeline ranking JD file removed" as const };
 }

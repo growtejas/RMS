@@ -5,20 +5,27 @@ import { normalizeRoleList, rolesMatchAny } from "@/lib/auth/normalize-roles";
 import {
   findUserWithRolesById,
 } from "@/lib/repositories/auth-user";
+import { tryParseAuthorizationAccessToken } from "@/lib/auth/auth-header";
 import { ACCESS_COOKIE, getCookie } from "@/lib/auth/cookies";
+import {
+  resolveOrganizationIdForUser,
+  userBelongsToOrganization,
+} from "@/lib/tenant/resolve-org";
 
 export type ApiUser = {
   userId: number;
   username: string;
   roles: string[];
+  /** Active tenant for ATS-scoped queries. */
+  organizationId: string;
 };
 
 export async function requireBearerUser(
   req: Request,
 ): Promise<ApiUser | NextResponse> {
   const auth = req.headers.get("authorization") ?? "";
-  const m = /^Bearer\s+(.+)$/i.exec(auth);
-  const token = getCookie(req, ACCESS_COOKIE) ?? m?.[1] ?? null;
+  const token =
+    getCookie(req, ACCESS_COOKIE) ?? tryParseAuthorizationAccessToken(auth) ?? null;
   if (!token) {
     return NextResponse.json({ detail: "Could not validate credentials" }, { status: 401 });
   }
@@ -56,10 +63,21 @@ export async function requireBearerUser(
 
   const roles = normalizeRoleList(userWithRoles.roles);
 
+  const claimOrgRaw = (payload as { org_id?: unknown }).org_id;
+  const claimOrg =
+    typeof claimOrgRaw === "string" && claimOrgRaw.length > 0 ? claimOrgRaw : null;
+  let organizationId: string;
+  if (claimOrg && (await userBelongsToOrganization(userId, claimOrg))) {
+    organizationId = claimOrg;
+  } else {
+    organizationId = await resolveOrganizationIdForUser(userId);
+  }
+
   return {
     userId,
     username: userWithRoles.user.username,
     roles,
+    organizationId,
   };
 }
 

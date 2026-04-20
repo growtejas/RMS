@@ -151,10 +151,14 @@ export async function createLocation(
   city: string | null | undefined,
   country: string | null | undefined,
 ) {
+  const cityTrimmed = city?.trim() ?? "";
+  if (!cityTrimmed) {
+    throw new HttpError(400, "City is required");
+  }
   const row = await repo.createLocationWithAudit(
     userId,
-    city ?? null,
-    country ?? null,
+    cityTrimmed,
+    country?.trim() || null,
   );
   return {
     location_id: row.locationId,

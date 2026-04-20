@@ -63,19 +63,28 @@ import {
   cancelItem as cancelItemApi,
 } from "@/lib/api/workflowApi";
 import {
+  fetchApplicationsAtsBuckets,
   fetchApplicationsPipeline,
   fetchCandidatesFromApplications,
+  fetchInterviews,
   fetchRequisitionItemRanking,
   createCandidate,
   recomputeRequisitionItemRanking,
+  runAiEvaluationForRequisitionItem,
   uploadResume,
   getCandidateActionErrorMessage,
+  updateCandidateStageCompatible,
+  type ApplicationRecord,
+  type ApplicationsAtsBucketsResponse,
   type ApplicationsPipelineResponse,
   type Candidate,
   type CandidateCreate,
+  type Interview,
+  type RequisitionItemRankingCandidate,
   type RequisitionItemRankingResponse,
 } from "@/lib/api/candidateApi";
 import CandidateDetailModal from "@/components/shared/CandidateDetailModal";
+import type { EvaluationCardContext } from "@/components/evaluation/mapRankedCandidateToEvaluationCard";
 import "../../styles/hr/hr-dashboard.css";
 
 interface RequisitionDetailsProps {
@@ -106,6 +115,11 @@ interface RequisitionItem {
   approvedBudget?: number | null;
   currency?: string;
   jdFileKey?: string | null;
+  /** When true (default), ranking uses manager requisition JD (item + header PDF). */
+  pipelineRankingUseRequisitionJd?: boolean;
+  pipelineJdText?: string | null;
+  pipelineJdFileKey?: string | null;
+  rankingRequiredSkills?: string[] | null;
 }
 
 // Phase 4: Item status milestone order for visual tracking
@@ -193,6 +207,10 @@ interface BackendRequisitionItem {
   estimated_budget?: number | null;
   approved_budget?: number | null;
   currency?: string | null;
+  pipeline_ranking_use_requisition_jd?: boolean;
+  pipeline_jd_text?: string | null;
+  pipeline_jd_file_key?: string | null;
+  ranking_required_skills?: string[] | null;
 }
 
 interface BackendRequisition {
@@ -261,7 +279,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "overview" | "items" | "candidates" | "timeline"
+    "overview" | "items" | "ats" | "shortlisted" | "interviews" | "timeline"
   >("overview");
   const [selectedItemForAssignment, setSelectedItemForAssignment] = useState<
     string | null
@@ -345,6 +363,10 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [newCandidateName, setNewCandidateName] = useState("");
   const [newCandidateEmail, setNewCandidateEmail] = useState("");
   const [newCandidatePhone, setNewCandidatePhone] = useState("");
+  const [newCandidateExp, setNewCandidateExp] = useState("");
+  const [newCandidateNotice, setNewCandidateNotice] = useState("");
+  const [newCandidateReferral, setNewCandidateReferral] = useState(false);
+  const [newCandidateSkills, setNewCandidateSkills] = useState("");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [addingCandidate, setAddingCandidate] = useState(false);
   const [candidateStageFilter, setCandidateStageFilter] =
@@ -352,6 +374,15 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [candidateItemFilter, setCandidateItemFilter] = useState<
     number | "all"
   >("all");
+  const [modalPipelineWorkspace, setModalPipelineWorkspace] = useState<
+    "evaluate" | "execute"
+  >("execute");
+  const [atsBoardItemId, setAtsBoardItemId] = useState<number | null>(null);
+  const [atsBoardLoading, setAtsBoardLoading] = useState(false);
+  const [reqInterviews, setReqInterviews] = useState<Interview[]>([]);
+  const [reqInterviewsLoading, setReqInterviewsLoading] = useState(false);
+  const [shortlistBulkAppIds, setShortlistBulkAppIds] = useState<number[]>([]);
+  const [shortlistBulkWorking, setShortlistBulkWorking] = useState(false);
   const [pipelineCompact, setPipelineCompact] =
     useState<ApplicationsPipelineResponse | null>(null);
   const [pipelineFull, setPipelineFull] =
@@ -365,7 +396,22 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     useState<RequisitionItemRankingResponse | null>(null);
   const [rankingLoading, setRankingLoading] = useState(false);
   const [rankingRefreshing, setRankingRefreshing] = useState(false);
+  const [aiEvalWorking, setAiEvalWorking] = useState(false);
   const [rankingError, setRankingError] = useState<string | null>(null);
+  const [atsBucketsData, setAtsBucketsData] =
+    useState<ApplicationsAtsBucketsResponse | null>(null);
+  const [pipelineJdTextDraft, setPipelineJdTextDraft] = useState("");
+  const [useRequisitionJd, setUseRequisitionJd] = useState(true);
+  const [pipelineJdSaving, setPipelineJdSaving] = useState(false);
+  const [pipelineJdUploading, setPipelineJdUploading] = useState(false);
+  const [pipelineJdMessage, setPipelineJdMessage] = useState<string | null>(
+    null,
+  );
+  const pipelineJdFileInputRef = useRef<HTMLInputElement>(null);
+  const [rankingRequiredSkillsDraft, setRankingRequiredSkillsDraft] =
+    useState("");
+  /** Phase 2: hide pipeline board, ranking, buckets, and Kanban unless expanded. */
+  const [pipelineAdvancedOpen, setPipelineAdvancedOpen] = useState(false);
 
   const candidatesByItemId = useMemo(() => {
     const m = new Map<number, Candidate[]>();
@@ -378,6 +424,32 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     }
     return m;
   }, [candidates]);
+
+  const shortlistedCandidatesForTable = useMemo(() => {
+    return candidates.filter(
+      (c) =>
+        c.current_stage === "Shortlisted" &&
+        (candidateItemFilter === "all" ||
+          c.requisition_item_id === candidateItemFilter),
+    );
+  }, [candidates, candidateItemFilter]);
+
+  const interviewingCandidatesForTable = useMemo(() => {
+    return candidates.filter(
+      (c) =>
+        c.current_stage === "Interviewing" &&
+        (candidateItemFilter === "all" ||
+          c.requisition_item_id === candidateItemFilter),
+    );
+  }, [candidates, candidateItemFilter]);
+
+  const openCandidateModal = useCallback(
+    (c: Candidate, workspace: "evaluate" | "execute") => {
+      setModalPipelineWorkspace(workspace);
+      setSelectedCandidate(c);
+    },
+    [],
+  );
 
   const pipelineCountByStage = useMemo(() => {
     const out: Record<string, number> = {};
@@ -401,11 +473,101 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   }, [expandedPipelineStage, pipelineFull]);
 
   const rankingItemId = useMemo(() => {
-    if (candidateItemFilter !== "all") {
-      return candidateItemFilter;
+    return atsBoardItemId ?? ticket?.items?.[0]?.numericItemId ?? null;
+  }, [atsBoardItemId, ticket?.items]);
+
+  const candidateFromApplicationRecord = useCallback(
+    (app: ApplicationRecord): Candidate => ({
+      candidate_id: app.candidate_id,
+      person_id: app.candidate.person_id,
+      application_id: app.application_id,
+      requisition_item_id: app.requisition_item_id,
+      requisition_id: app.requisition_id,
+      full_name: app.candidate.full_name,
+      email: app.candidate.email,
+      phone: app.candidate.phone,
+      resume_path: app.candidate.resume_path ?? null,
+      current_stage: app.current_stage,
+      added_by: app.created_by,
+      source: app.source,
+      created_at: app.created_at,
+      updated_at: app.updated_at,
+      stage_history: app.stage_history ?? [],
+      interviews: [],
+    }),
+    [],
+  );
+
+  const openEvaluateFromAtsApp = useCallback(
+    (app: ApplicationRecord) => {
+      const existing = candidates.find((c) => c.candidate_id === app.candidate_id);
+      openCandidateModal(
+        existing ?? candidateFromApplicationRecord(app),
+        "evaluate",
+      );
+    },
+    [candidates, candidateFromApplicationRecord, openCandidateModal],
+  );
+
+  /** Ranking snapshot rows may include candidates not yet merged into `candidates` state — still open evaluate modal. */
+  const openEvaluateFromRankedRow = useCallback(
+    (rc: RequisitionItemRankingCandidate) => {
+      const existing = candidates.find((c) => c.candidate_id === rc.candidate_id);
+      if (existing) {
+        openCandidateModal(existing, "evaluate");
+        return;
+      }
+      const reqId = rankingData?.req_id;
+      if (reqId == null) return;
+      const minimal: Candidate = {
+        candidate_id: rc.candidate_id,
+        requisition_item_id: rc.requisition_item_id,
+        requisition_id: reqId,
+        full_name: rc.full_name,
+        email: rc.email,
+        phone: null,
+        resume_path: null,
+        current_stage: rc.current_stage,
+        added_by: null,
+        created_at: null,
+        updated_at: null,
+        interviews: [],
+      };
+      openCandidateModal(minimal, "evaluate");
+    },
+    [candidates, openCandidateModal, rankingData?.req_id],
+  );
+
+  const rankingBreakdownSnippet = (breakdown: Record<string, unknown>) => {
+    const ai = breakdown.ai_summary;
+    if (typeof ai === "string" && ai.trim()) {
+      const t = ai.trim();
+      return t.length > 140 ? `${t.slice(0, 137)}…` : t;
     }
-    return ticket?.items?.[0]?.numericItemId ?? null;
-  }, [candidateItemFilter, ticket?.items]);
+    const risks = breakdown.ai_risks;
+    if (Array.isArray(risks) && risks.length > 0) {
+      const first = risks[0];
+      if (typeof first === "string" && first.trim()) {
+        return first.length > 120 ? `${first.slice(0, 117)}…` : first;
+      }
+    }
+    return "";
+  };
+
+  const pipelineRankingTargetItem = useMemo(() => {
+    if (!ticket?.items.length) return null;
+    const id = rankingItemId ?? ticket.items[0]?.numericItemId ?? null;
+    if (id == null) return null;
+    return ticket.items.find((i) => i.numericItemId === id) ?? null;
+  }, [ticket, rankingItemId]);
+
+  const canEditPipelineRankingJd = useMemo(
+    () =>
+      userRoles.some((r) =>
+        ["ta", "hr", "admin", "owner", "manager"].includes(r.toLowerCase()),
+      ),
+    [userRoles],
+  );
 
   const parseReqId = (value?: string | null) => {
     if (!value) return null;
@@ -532,6 +694,11 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
           approvedBudget: item.approved_budget ?? null,
           currency: item.currency ?? "INR",
           jdFileKey: (item as BackendRequisitionItem).jd_file_key ?? null,
+          pipelineRankingUseRequisitionJd:
+            item.pipeline_ranking_use_requisition_jd !== false,
+          pipelineJdText: item.pipeline_jd_text ?? null,
+          pipelineJdFileKey: item.pipeline_jd_file_key ?? null,
+          rankingRequiredSkills: item.ranking_required_skills ?? null,
         })) ?? [],
       timeline: [],
       notes: [],
@@ -722,6 +889,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       if (!rankingItemId) {
         setRankingData(null);
         setRankingError(null);
+        setAtsBucketsData(null);
         return;
       }
       if (forceRecompute) {
@@ -731,12 +899,20 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       }
       setRankingError(null);
       try {
-        const data = forceRecompute
-          ? await recomputeRequisitionItemRanking(rankingItemId)
-          : await fetchRequisitionItemRanking(rankingItemId);
+        if (forceRecompute) {
+          await recomputeRequisitionItemRanking(rankingItemId);
+        }
+        const data = await fetchRequisitionItemRanking(rankingItemId, { aiEval: true });
         setRankingData(data);
+        try {
+          const ab = await fetchApplicationsAtsBuckets(rankingItemId);
+          setAtsBucketsData(ab);
+        } catch {
+          setAtsBucketsData(null);
+        }
       } catch {
         setRankingData(null);
+        setAtsBucketsData(null);
         setRankingError("Unable to load ranking for this position.");
       } finally {
         setRankingLoading(false);
@@ -745,6 +921,58 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     },
     [rankingItemId],
   );
+
+  const runAiEvalTopN = useCallback(
+    async (topN = 10) => {
+      if (!rankingItemId) return;
+      setAiEvalWorking(true);
+      setTransitionError(null);
+      try {
+        await runAiEvaluationForRequisitionItem(rankingItemId, {
+          top_n: topN,
+          force: false,
+        });
+        await loadRanking(false);
+      } catch (err: unknown) {
+        setTransitionError(
+          getCandidateActionErrorMessage(err, "AI evaluation failed"),
+        );
+      } finally {
+        setAiEvalWorking(false);
+      }
+    },
+    [loadRanking, rankingItemId],
+  );
+
+  const modalEvaluationProps = useMemo(() => {
+    if (!selectedCandidate || !ticket) {
+      return {
+        evaluationContext: undefined as EvaluationCardContext | undefined,
+        evaluationShortlistBlocked: false,
+        evaluationShortlistBlockedReason: undefined as string | undefined,
+      };
+    }
+    const item = ticket.items.find(
+      (i) => i.numericItemId === selectedCandidate.requisition_item_id,
+    );
+    const skillsCount =
+      rankingData?.meta?.required_skills_count ??
+      (item?.rankingRequiredSkills?.length
+        ? item.rankingRequiredSkills.length
+        : undefined);
+    const evaluationContext: EvaluationCardContext = {
+      requiredExperienceYears: item?.experience ?? null,
+      requiredSkillsCount: skillsCount,
+    };
+    const evaluationShortlistBlocked = Boolean(item && !item.cvFileUrl);
+    return {
+      evaluationContext,
+      evaluationShortlistBlocked,
+      evaluationShortlistBlockedReason: evaluationShortlistBlocked
+        ? "CV must be on file for this position before shortlisting"
+        : undefined,
+    };
+  }, [selectedCandidate, ticket, rankingData]);
 
   const refetchRequisition = useCallback(async () => {
     const reqId = parseReqId(effectiveTicketId);
@@ -766,9 +994,186 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   }, [effectiveTicketId]);
 
   useEffect(() => {
+    if (!pipelineRankingTargetItem) return;
+    setUseRequisitionJd(
+      pipelineRankingTargetItem.pipelineRankingUseRequisitionJd !== false,
+    );
+    setPipelineJdTextDraft(pipelineRankingTargetItem.pipelineJdText ?? "");
+    setRankingRequiredSkillsDraft(
+      (pipelineRankingTargetItem.rankingRequiredSkills ?? []).join(", "),
+    );
+    setPipelineJdMessage(null);
+  }, [
+    pipelineRankingTargetItem?.numericItemId,
+    pipelineRankingTargetItem?.pipelineRankingUseRequisitionJd,
+    pipelineRankingTargetItem?.pipelineJdText,
+    pipelineRankingTargetItem?.pipelineJdFileKey,
+    pipelineRankingTargetItem?.rankingRequiredSkills,
+  ]);
+
+  const savePipelineRankingJdSettings = async () => {
+    if (!pipelineRankingTargetItem || !canEditPipelineRankingJd) return;
+    const itemId = pipelineRankingTargetItem.numericItemId;
+    setPipelineJdSaving(true);
+    setPipelineJdMessage(null);
+    try {
+      const body: Record<string, unknown> = {
+        use_requisition_jd: useRequisitionJd,
+      };
+      if (!useRequisitionJd) {
+        body.pipeline_jd_text =
+          pipelineJdTextDraft.trim() === "" ? null : pipelineJdTextDraft;
+      }
+      const skillParts = rankingRequiredSkillsDraft
+        .split(/[,;\n]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      body.ranking_required_skills =
+        skillParts.length > 0 ? skillParts : null;
+      await apiClient.patch(
+        `/requisitions/items/${itemId}/pipeline-ranking-jd`,
+        body,
+      );
+      await refetchRequisition();
+      setPipelineJdMessage("Saved.");
+      void loadRanking(true);
+    } catch (err: unknown) {
+      setPipelineJdMessage(
+        getCandidateActionErrorMessage(
+          err,
+          "Failed to save ranking JD settings",
+        ),
+      );
+    } finally {
+      setPipelineJdSaving(false);
+    }
+  };
+
+  const uploadPipelineRankingJdPdf = async (file: File) => {
+    if (!pipelineRankingTargetItem || !canEditPipelineRankingJd) return;
+    const itemId = pipelineRankingTargetItem.numericItemId;
+    setPipelineJdUploading(true);
+    setPipelineJdMessage(null);
+    try {
+      const fd = new FormData();
+      fd.append("jd_file", file);
+      await apiClient.post(
+        `/requisitions/items/${itemId}/pipeline-ranking-jd/upload`,
+        fd,
+      );
+      await refetchRequisition();
+      setUseRequisitionJd(false);
+      setPipelineJdMessage(
+        "PDF uploaded. Rankings were recomputed for this item.",
+      );
+      void loadRanking(true);
+    } catch (err: unknown) {
+      setPipelineJdMessage(
+        getCandidateActionErrorMessage(err, "Failed to upload ranking JD PDF"),
+      );
+    } finally {
+      setPipelineJdUploading(false);
+    }
+  };
+
+  const removePipelineRankingJdPdf = async () => {
+    if (!pipelineRankingTargetItem || !canEditPipelineRankingJd) return;
+    const itemId = pipelineRankingTargetItem.numericItemId;
+    setPipelineJdUploading(true);
+    setPipelineJdMessage(null);
+    try {
+      await apiClient.delete(
+        `/requisitions/items/${itemId}/pipeline-ranking-jd/upload`,
+      );
+      await refetchRequisition();
+      setPipelineJdMessage("Pipeline ranking PDF removed.");
+      void loadRanking(true);
+    } catch (err: unknown) {
+      setPipelineJdMessage(
+        getCandidateActionErrorMessage(err, "Failed to remove ranking JD PDF"),
+      );
+    } finally {
+      setPipelineJdUploading(false);
+    }
+  };
+
+  useEffect(() => {
     loadCandidates();
-    loadPipelineCompact();
-  }, [loadCandidates, loadPipelineCompact]);
+  }, [loadCandidates]);
+
+  useEffect(() => {
+    if (!ticket?.items.length) {
+      setAtsBoardItemId(null);
+      return;
+    }
+    setAtsBoardItemId((prev) => {
+      if (prev != null && ticket.items.some((i) => i.numericItemId === prev)) {
+        return prev;
+      }
+      return ticket.items[0]!.numericItemId;
+    });
+  }, [ticket?.items]);
+
+  useEffect(() => {
+    if (activeTab !== "ats" || atsBoardItemId == null) {
+      return;
+    }
+    let cancelled = false;
+    setAtsBoardLoading(true);
+    void fetchApplicationsAtsBuckets(atsBoardItemId)
+      .then((ab) => {
+        if (!cancelled) setAtsBucketsData(ab);
+      })
+      .catch(() => {
+        if (!cancelled) setAtsBucketsData(null);
+      })
+      .finally(() => {
+        if (!cancelled) setAtsBoardLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, atsBoardItemId]);
+
+  useEffect(() => {
+    const reqId = parseReqId(effectiveTicketId);
+    if (activeTab !== "interviews" || reqId == null) {
+      return;
+    }
+    let cancelled = false;
+    setReqInterviewsLoading(true);
+    void fetchInterviews({ requisitionId: reqId })
+      .then((rows) => {
+        if (!cancelled) setReqInterviews(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setReqInterviews([]);
+      })
+      .finally(() => {
+        if (!cancelled) setReqInterviewsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, effectiveTicketId]);
+
+  useEffect(() => {
+    if (activeTab !== "interviews") {
+      return;
+    }
+    void loadCandidates();
+  }, [activeTab, loadCandidates]);
+
+  useEffect(() => {
+    setShortlistBulkAppIds([]);
+  }, [candidateItemFilter]);
+
+  useEffect(() => {
+    if (activeTab !== "ats" || !pipelineAdvancedOpen) {
+      return;
+    }
+    void loadPipelineCompact();
+  }, [activeTab, pipelineAdvancedOpen, loadPipelineCompact]);
 
   useEffect(() => {
     if (!expandedPipelineStage) {
@@ -785,12 +1190,14 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     setPipelineFull(null);
   }, [candidateItemFilter]);
 
+  // Ranking GET reuses DB snapshots when version/weights match, so scores/stages can
+  // lag behind real candidate changes. POST recompute keeps the panel aligned with data.
   useEffect(() => {
-    if (activeTab !== "candidates") {
+    if (activeTab !== "ats" || !pipelineAdvancedOpen) {
       return;
     }
-    void loadRanking(false);
-  }, [activeTab, loadRanking]);
+    void loadRanking(true);
+  }, [activeTab, pipelineAdvancedOpen, loadRanking]);
 
   // Load JD PDF for viewer when modal opens (item-level endpoint)
   useEffect(() => {
@@ -838,6 +1245,46 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     setShowJdViewer(true);
   };
 
+  const handleBulkShortlistToInterviewing = async () => {
+    if (!shortlistBulkAppIds.length) return;
+    setShortlistBulkWorking(true);
+    setTransitionError(null);
+    try {
+      const targets = shortlistedCandidatesForTable.filter(
+        (c) =>
+          c.application_id != null &&
+          shortlistBulkAppIds.includes(c.application_id),
+      );
+      let failures = 0;
+      let lastDetail: string | null = null;
+      for (const c of targets) {
+        if (c.current_stage !== "Shortlisted") continue;
+        try {
+          await updateCandidateStageCompatible(c, { new_stage: "Interviewing" });
+        } catch (err: unknown) {
+          failures += 1;
+          lastDetail = getCandidateActionErrorMessage(
+            err,
+            "Could not move to Interviewing",
+          );
+        }
+      }
+      if (failures === 0) {
+        setShortlistBulkAppIds([]);
+      } else {
+        setTransitionError(
+          failures === targets.length
+            ? (lastDetail ?? "Bulk stage update failed.")
+            : `${failures} of ${targets.length} updates failed. ${lastDetail ?? ""}`.trim(),
+        );
+      }
+      await loadCandidates();
+      void loadPipelineCompact();
+    } finally {
+      setShortlistBulkWorking(false);
+    }
+  };
+
   // ---- Add candidate handler ----
   const handleAddCandidate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -852,6 +1299,16 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       }
       const reqId = parseReqId(effectiveTicketId);
       if (!reqId) return;
+      const skillList = newCandidateSkills
+        .split(/[,;\n]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const expRaw = newCandidateExp.trim();
+      const expNum =
+        expRaw === "" ? undefined : Number.parseFloat(expRaw);
+      const noticeRaw = newCandidateNotice.trim();
+      const noticeNum =
+        noticeRaw === "" ? undefined : Number.parseInt(noticeRaw, 10);
       await createCandidate({
         requisition_item_id: addCandidateItemId,
         requisition_id: reqId,
@@ -859,11 +1316,21 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         email: newCandidateEmail.trim(),
         phone: newCandidatePhone.trim() || undefined,
         resume_path: resumePath,
+        total_experience_years:
+          expNum != null && Number.isFinite(expNum) ? expNum : null,
+        notice_period_days:
+          noticeNum != null && Number.isFinite(noticeNum) ? noticeNum : null,
+        is_referral: newCandidateReferral,
+        candidate_skills: skillList.length > 0 ? skillList : null,
       });
       // Reset form
       setNewCandidateName("");
       setNewCandidateEmail("");
       setNewCandidatePhone("");
+      setNewCandidateExp("");
+      setNewCandidateNotice("");
+      setNewCandidateReferral(false);
+      setNewCandidateSkills("");
       setResumeFile(null);
       setShowAddCandidate(false);
       setAddCandidateItemId(null);
@@ -1370,9 +1837,19 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       icon: <Briefcase size={16} />,
     },
     {
-      id: "candidates" as const,
-      label: "Candidates",
-      icon: <UserPlus size={16} />,
+      id: "ats" as const,
+      label: "ATS View",
+      icon: <Target size={16} />,
+    },
+    {
+      id: "shortlisted" as const,
+      label: "Shortlisted",
+      icon: <UserCheck size={16} />,
+    },
+    {
+      id: "interviews" as const,
+      label: "Interviews",
+      icon: <Calendar size={16} />,
     },
     { id: "timeline" as const, label: "Timeline", icon: <History size={16} /> },
   ];
@@ -2036,7 +2513,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   type="button"
                   className="action-button"
                   style={{ justifyContent: "flex-start", textAlign: "left" }}
-                  onClick={() => setActiveTab("candidates")}
+                  onClick={() => setActiveTab("ats")}
                 >
                   <Users size={16} />
                   View Candidates
@@ -2783,7 +3260,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                                   alignItems: "center",
                                   cursor: "pointer",
                                 }}
-                                onClick={() => setSelectedCandidate(c)}
+                                onClick={() => openCandidateModal(c, "execute")}
                               >
                                 <div>
                                   <div
@@ -3074,7 +3551,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         </div>
       )}
 
-      {activeTab === "candidates" && (
+      {(activeTab === "ats" ||
+        activeTab === "shortlisted" ||
+        activeTab === "interviews") && (
         <div className="master-data-manager">
           <div
             className="data-manager-header"
@@ -3087,7 +3566,11 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
             <div>
               <h2>Candidate Pipeline</h2>
               <p className="subtitle">
-                Track and manage candidates across all positions
+                {activeTab === "ats"
+                  ? "Quality-bucket board for the selected line — shortlist or reject from the candidate panel."
+                  : activeTab === "shortlisted"
+                    ? "Shortlisted applications only. Open a row for interviews and stage moves."
+                    : "Interviewing-stage roster and scheduled rounds for this requisition."}
               </p>
             </div>
             {ticket.items.some((it) => canEditItem(it)) && (
@@ -3110,482 +3593,6 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 <UserPlus size={14} /> Add Candidate
               </button>
             )}
-          </div>
-
-          {/* Phase 4 board columns (compact counters + full-stage expand) */}
-          <div
-            style={{
-              marginBottom: "20px",
-              padding: "14px",
-              borderRadius: "12px",
-              border: "1px solid var(--border-subtle)",
-              backgroundColor: "var(--bg-secondary)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: "10px",
-              }}
-            >
-              <div style={{ fontSize: "13px", fontWeight: 600 }}>
-                Applications Pipeline Board
-              </div>
-              <button
-                className="action-button"
-                onClick={() => {
-                  void loadPipelineCompact();
-                  if (expandedPipelineStage) {
-                    setPipelineFull(null);
-                    void loadPipelineFull();
-                  }
-                }}
-                style={{ fontSize: "11px", padding: "4px 10px" }}
-              >
-                <RefreshCw size={12} style={{ marginRight: "4px" }} />
-                Refresh
-              </button>
-            </div>
-
-            {pipelineLoading ? (
-              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                Loading compact counters...
-              </div>
-            ) : (
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                {[
-                  "Sourced",
-                  "Shortlisted",
-                  "Interviewing",
-                  "Offered",
-                  "Hired",
-                  "Rejected",
-                ].map((stage) => {
-                  const isExpanded = expandedPipelineStage === stage;
-                  return (
-                    <button
-                      key={stage}
-                      onClick={() =>
-                        setExpandedPipelineStage((prev) =>
-                          prev === stage ? null : stage,
-                        )
-                      }
-                      style={{
-                        border: isExpanded
-                          ? "2px solid var(--primary-accent)"
-                          : "1px solid var(--border-subtle)",
-                        borderRadius: "10px",
-                        padding: "8px 12px",
-                        background: isExpanded
-                          ? "rgba(59,130,246,0.08)"
-                          : "var(--bg-primary)",
-                        cursor: "pointer",
-                        minWidth: "132px",
-                        textAlign: "left",
-                      }}
-                    >
-                      <div style={{ fontSize: "12px", fontWeight: 600 }}>{stage}</div>
-                      <div
-                        style={{
-                          fontSize: "18px",
-                          fontWeight: 700,
-                          color: "var(--text-primary)",
-                        }}
-                      >
-                        {pipelineCountByStage[stage] ?? 0}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {expandedPipelineStage && (
-              <div style={{ marginTop: "12px" }}>
-                <div
-                  style={{
-                    fontSize: "12px",
-                    color: "var(--text-tertiary)",
-                    marginBottom: "8px",
-                  }}
-                >
-                  Expanded stage: {expandedPipelineStage}
-                </div>
-                {pipelineFullLoading ? (
-                  <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                    Loading full stage details...
-                  </div>
-                ) : expandedStageApplications.length === 0 ? (
-                  <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                    No applications in this stage.
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {expandedStageApplications.map((app) => (
-                      <div
-                        key={app.application_id}
-                        onClick={() =>
-                          setSelectedCandidate({
-                            candidate_id: app.candidate_id,
-                            application_id: app.application_id,
-                            requisition_item_id: app.requisition_item_id,
-                            requisition_id: app.requisition_id,
-                            full_name: app.candidate.full_name,
-                            email: app.candidate.email,
-                            phone: app.candidate.phone,
-                            resume_path: null,
-                            current_stage: app.current_stage,
-                            added_by: app.created_by,
-                            source: app.source,
-                            created_at: app.created_at,
-                            updated_at: app.updated_at,
-                            stage_history: app.stage_history ?? [],
-                            interviews: [],
-                          })
-                        }
-                        style={{
-                          padding: "10px 12px",
-                          borderRadius: "8px",
-                          border: "1px solid var(--border-subtle)",
-                          backgroundColor: "var(--bg-primary)",
-                          cursor: "pointer",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                        }}
-                      >
-                        <div>
-                          <div style={{ fontSize: "13px", fontWeight: 600 }}>
-                            {app.candidate.full_name}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              color: "var(--text-secondary)",
-                            }}
-                          >
-                            {app.candidate.email}
-                          </div>
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "11px",
-                            color: "var(--text-tertiary)",
-                          }}
-                        >
-                          App #{app.application_id}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Phase 5 ranking visibility panel */}
-          <div
-            style={{
-              marginBottom: "20px",
-              padding: "14px",
-              borderRadius: "12px",
-              border: "1px solid var(--border-subtle)",
-              backgroundColor: "var(--bg-secondary)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "10px",
-                flexWrap: "wrap",
-                marginBottom: "10px",
-              }}
-            >
-              <div>
-                <div style={{ fontSize: "13px", fontWeight: 600 }}>
-                  Ranking & Semantic Fit
-                </div>
-                <div style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
-                  Keyword + semantic/vector + business scoring
-                </div>
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  flexWrap: "wrap",
-                }}
-              >
-                <select
-                  value={rankingItemId ?? ""}
-                  onChange={(e) =>
-                    setCandidateItemFilter(
-                      e.target.value === "" ? "all" : Number(e.target.value),
-                    )
-                  }
-                  style={{
-                    padding: "6px 10px",
-                    borderRadius: "8px",
-                    border: "1px solid var(--border-subtle)",
-                    fontSize: "12px",
-                    backgroundColor: "var(--bg-primary)",
-                    color: "var(--text-primary)",
-                  }}
-                >
-                  {ticket.items.map((item) => (
-                    <option key={item.numericItemId} value={item.numericItemId}>
-                      Item #{item.numericItemId} - {item.skill}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="action-button"
-                  onClick={() => void loadRanking(false)}
-                  style={{ fontSize: "11px", padding: "4px 10px" }}
-                >
-                  <RefreshCw size={12} style={{ marginRight: "4px" }} />
-                  Refresh
-                </button>
-                <button
-                  className="action-button primary"
-                  onClick={() => void loadRanking(true)}
-                  style={{ fontSize: "11px", padding: "4px 10px" }}
-                >
-                  {rankingRefreshing ? "Recomputing..." : "Recompute"}
-                </button>
-              </div>
-            </div>
-
-            {rankingLoading ? (
-              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                Loading ranking...
-              </div>
-            ) : rankingError ? (
-              <div style={{ fontSize: "12px", color: "var(--error)" }}>{rankingError}</div>
-            ) : !rankingData ? (
-              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                Ranking not available for this position yet.
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "8px",
-                    flexWrap: "wrap",
-                    fontSize: "11px",
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  <span>Version: {rankingData.ranking_version}</span>
-                  <span>Total: {rankingData.total_candidates}</span>
-                  <span>
-                    Weights K/S/B: {rankingData.weights.keyword} /{" "}
-                    {rankingData.weights.semantic} / {rankingData.weights.business}
-                  </span>
-                  <span>
-                    Generated: {new Date(rankingData.generated_at).toLocaleString()}
-                  </span>
-                </div>
-
-                {rankingData.ranked_candidates.length === 0 ? (
-                  <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                    No ranked candidates available.
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {rankingData.ranked_candidates.slice(0, 8).map((rc, idx) => (
-                      <div
-                        key={rc.candidate_id}
-                        onClick={() => {
-                          const existing = candidates.find(
-                            (c) => c.candidate_id === rc.candidate_id,
-                          );
-                          if (existing) {
-                            setSelectedCandidate(existing);
-                          }
-                        }}
-                        style={{
-                          border: "1px solid var(--border-subtle)",
-                          borderRadius: "8px",
-                          padding: "10px 12px",
-                          backgroundColor: "var(--bg-primary)",
-                          cursor: "pointer",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: "8px",
-                            marginBottom: "4px",
-                          }}
-                        >
-                          <div style={{ fontSize: "13px", fontWeight: 600 }}>
-                            #{idx + 1} {rc.full_name}
-                          </div>
-                          <div style={{ fontSize: "13px", fontWeight: 700 }}>
-                            {rc.score.final_score.toFixed(2)}
-                          </div>
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "11px",
-                            color: "var(--text-secondary)",
-                            marginBottom: "4px",
-                          }}
-                        >
-                          {rc.email} • Stage {rc.current_stage}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "11px",
-                            color: "var(--text-secondary)",
-                            display: "flex",
-                            gap: "10px",
-                            flexWrap: "wrap",
-                          }}
-                        >
-                          <span>K: {rc.score.keyword_score.toFixed(2)}</span>
-                          <span>S: {rc.score.semantic_score.toFixed(2)}</span>
-                          <span>B: {rc.score.business_score.toFixed(2)}</span>
-                        </div>
-                        <div
-                          style={{
-                            marginTop: "6px",
-                            fontSize: "11px",
-                            color: "var(--text-tertiary)",
-                          }}
-                        >
-                          {rc.explain.reasons.slice(0, 2).join(" • ")}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Filters: Item and Stage */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "12px",
-              marginBottom: "20px",
-            }}
-          >
-            {/* Item filter */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "12px",
-                flexWrap: "wrap",
-              }}
-            >
-              <label
-                style={{
-                  fontSize: "12px",
-                  fontWeight: 500,
-                  color: "var(--text-secondary)",
-                }}
-              >
-                Filter by Position:
-              </label>
-              <select
-                value={
-                  candidateItemFilter === "all" ? "all" : candidateItemFilter
-                }
-                onChange={(e) =>
-                  setCandidateItemFilter(
-                    e.target.value === "all" ? "all" : Number(e.target.value),
-                  )
-                }
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--border-subtle)",
-                  fontSize: "12px",
-                  backgroundColor: "var(--bg-primary)",
-                  color: "var(--text-primary)",
-                  cursor: "pointer",
-                  minWidth: "200px",
-                }}
-              >
-                <option value="all">All Positions</option>
-                {ticket.items.map((item) => {
-                  const itemCandidateCount =
-                    candidatesByItemId.get(item.numericItemId)?.length ?? 0;
-                  return (
-                    <option key={item.numericItemId} value={item.numericItemId}>
-                      {item.skill} ({itemCandidateCount})
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-
-            {/* Stage filter tabs */}
-            <div
-              style={{
-                display: "flex",
-                gap: "8px",
-                flexWrap: "wrap",
-              }}
-            >
-              {[
-                "all",
-                "Sourced",
-                "Shortlisted",
-                "Interviewing",
-                "Offered",
-                "Hired",
-                "Rejected",
-              ].map((stage) => {
-                const filteredByItem =
-                  candidateItemFilter === "all"
-                    ? candidates
-                    : (candidatesByItemId.get(candidateItemFilter) ?? []);
-                const count =
-                  stage === "all"
-                    ? filteredByItem.length
-                    : filteredByItem.filter((c) => c.current_stage === stage)
-                        .length;
-                const isActive = candidateStageFilter === stage;
-                return (
-                  <button
-                    key={stage}
-                    onClick={() => setCandidateStageFilter(stage)}
-                    style={{
-                      padding: "6px 14px",
-                      borderRadius: "20px",
-                      fontSize: "12px",
-                      fontWeight: isActive ? 600 : 400,
-                      border: isActive
-                        ? "2px solid var(--primary-accent)"
-                        : "1px solid var(--border-subtle)",
-                      backgroundColor: isActive
-                        ? "rgba(59,130,246,0.08)"
-                        : "transparent",
-                      color: isActive
-                        ? "var(--primary-accent)"
-                        : "var(--text-secondary)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {stage === "all" ? "All" : stage} ({count})
-                  </button>
-                );
-              })}
-            </div>
           </div>
 
           {/* Add Candidate Form */}
@@ -3757,6 +3764,120 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
               <div
                 style={{
                   display: "flex",
+                  gap: "12px",
+                  marginBottom: "16px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: "140px" }}>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      display: "block",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Years experience (ATS)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={80}
+                    step={0.5}
+                    value={newCandidateExp}
+                    onChange={(e) => setNewCandidateExp(e.target.value)}
+                    placeholder="e.g. 5"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-subtle)",
+                      fontSize: "13px",
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1, minWidth: "140px" }}>
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      display: "block",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Notice (days)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={365}
+                    value={newCandidateNotice}
+                    onChange={(e) => setNewCandidateNotice(e.target.value)}
+                    placeholder="0 = immediate"
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-subtle)",
+                      fontSize: "13px",
+                    }}
+                  />
+                </div>
+                <div
+                  style={{
+                    flex: "1 1 200px",
+                    display: "flex",
+                    alignItems: "flex-end",
+                    paddingBottom: "4px",
+                  }}
+                >
+                  <label
+                    style={{
+                      fontSize: "12px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={newCandidateReferral}
+                      onChange={(e) => setNewCandidateReferral(e.target.checked)}
+                    />
+                    Referral (ATS bonus)
+                  </label>
+                </div>
+              </div>
+              <div style={{ marginBottom: "16px" }}>
+                <label
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: 500,
+                    display: "block",
+                    marginBottom: "4px",
+                  }}
+                >
+                  Skills (comma-separated, ATS)
+                </label>
+                <input
+                  type="text"
+                  value={newCandidateSkills}
+                  onChange={(e) => setNewCandidateSkills(e.target.value)}
+                  placeholder="React, Python, AWS"
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border-subtle)",
+                    fontSize: "13px",
+                  }}
+                />
+              </div>
+              <div
+                style={{
+                  display: "flex",
                   gap: "8px",
                   justifyContent: "flex-end",
                 }}
@@ -3787,6 +3908,980 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
               </div>
             </form>
           )}
+
+
+          {activeTab === "ats" && (
+            <>
+          <div
+            style={{
+              marginBottom: "18px",
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "12px",
+              alignItems: "center",
+            }}
+          >
+            <label
+              style={{
+                fontSize: "12px",
+                fontWeight: 500,
+                color: "var(--text-secondary)",
+              }}
+            >
+              Position (line):
+            </label>
+            <select
+              value={atsBoardItemId ?? ""}
+              onChange={(e) => setAtsBoardItemId(Number(e.target.value))}
+              style={{
+                padding: "8px 12px",
+                borderRadius: "8px",
+                border: "1px solid var(--border-subtle)",
+                fontSize: "12px",
+                backgroundColor: "var(--bg-primary)",
+                color: "var(--text-primary)",
+                minWidth: "220px",
+              }}
+            >
+              {ticket.items.map((item) => (
+                <option key={item.numericItemId} value={item.numericItemId}>
+                  {item.skill} — {item.level}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="action-button"
+              style={{ fontSize: "11px", padding: "6px 12px" }}
+              disabled={!atsBoardItemId || atsBoardLoading}
+              onClick={() => {
+                if (!atsBoardItemId) return;
+                void (async () => {
+                  setAtsBoardLoading(true);
+                  try {
+                    const ab = await fetchApplicationsAtsBuckets(atsBoardItemId);
+                    setAtsBucketsData(ab);
+                  } catch {
+                    setAtsBucketsData(null);
+                  } finally {
+                    setAtsBoardLoading(false);
+                  }
+                })();
+              }}
+            >
+              <RefreshCw size={12} style={{ marginRight: "4px" }} />
+              Refresh buckets
+            </button>
+          </div>
+
+          <div
+            style={{
+              marginBottom: "20px",
+              padding: "14px",
+              borderRadius: "12px",
+              border: "1px solid var(--border-subtle)",
+              backgroundColor: "var(--bg-secondary)",
+            }}
+          >
+            <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "8px" }}>
+              ATS evaluation board
+            </div>
+            <p
+              style={{
+                fontSize: "11px",
+                color: "var(--text-tertiary)",
+                marginTop: 0,
+                marginBottom: "12px",
+                lineHeight: 1.45,
+              }}
+            >
+              Click a card for read-only evaluation and shortlist. Interview scheduling
+              and pipeline moves are on the Shortlisted and Interviews tabs.
+            </p>
+            {atsBoardLoading ? (
+              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                Loading ATS buckets…
+              </div>
+            ) : !atsBucketsData ? (
+              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                No bucket data yet for this line. Open ranking settings below or
+                refresh.
+              </div>
+            ) : (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "10px",
+                    overflowX: "auto",
+                    paddingBottom: "8px",
+                  }}
+                >
+                  {(
+                    [
+                      "BEST",
+                      "VERY_GOOD",
+                      "GOOD",
+                      "AVERAGE",
+                      "NOT_SUITABLE",
+                    ] as const
+                  ).map((bucketKey) => {
+                    const labels: Record<string, string> = {
+                      BEST: "Best",
+                      VERY_GOOD: "Very good",
+                      GOOD: "Good",
+                      AVERAGE: "Average",
+                      NOT_SUITABLE: "Not suitable",
+                    };
+                    const apps = atsBucketsData[bucketKey] ?? [];
+                    return (
+                      <div
+                        key={bucketKey}
+                        style={{
+                          minWidth: "160px",
+                          flex: "0 0 auto",
+                          border: "1px solid var(--border-subtle)",
+                          borderRadius: "8px",
+                          padding: "8px",
+                          backgroundColor: "var(--bg-primary)",
+                          maxHeight: "360px",
+                          overflowY: "auto",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            marginBottom: "6px",
+                          }}
+                        >
+                          {labels[bucketKey] ?? bucketKey}{" "}
+                          <span style={{ color: "var(--text-tertiary)" }}>
+                            ({apps.length}
+                            {atsBucketsData.meta?.truncated?.[bucketKey] ? "+" : ""}
+                            )
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "6px",
+                          }}
+                        >
+                          {apps.map((app) => {
+                            const bd = app.ranking?.breakdown;
+                            const snippet = bd ? rankingBreakdownSnippet(bd) : "";
+                            return (
+                              <div
+                                key={app.application_id}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => openEvaluateFromAtsApp(app)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    openEvaluateFromAtsApp(app);
+                                  }
+                                }}
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "8px 10px",
+                                  borderRadius: "8px",
+                                  border: "1px solid var(--border-subtle)",
+                                  cursor: "pointer",
+                                  lineHeight: 1.35,
+                                  backgroundColor: "var(--bg-secondary)",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "flex-start",
+                                    justifyContent: "space-between",
+                                    gap: "6px",
+                                  }}
+                                >
+                                  <span style={{ fontWeight: 600 }}>
+                                    {app.candidate.full_name}
+                                  </span>
+                                  {app.ranking?.final_score != null ? (
+                                    <span style={{ fontWeight: 700, fontSize: "11px" }}>
+                                      {Math.round(app.ranking.final_score)}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                {snippet ? (
+                                  <div
+                                    style={{
+                                      color: "var(--text-tertiary)",
+                                      fontSize: "10px",
+                                      marginTop: "4px",
+                                    }}
+                                  >
+                                    {snippet}
+                                  </div>
+                                ) : null}
+                                <div
+                                  style={{
+                                    color: "var(--text-tertiary)",
+                                    fontSize: "10px",
+                                    marginTop: "4px",
+                                  }}
+                                >
+                                  {app.current_stage}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ marginTop: "12px" }}>
+                  <div style={{ fontSize: "11px", fontWeight: 600, marginBottom: "6px" }}>
+                    Unranked
+                  </div>
+                  <div style={{ display: "flex", gap: "10px", overflowX: "auto" }}>
+                    {(atsBucketsData.UNRANKED ?? []).length === 0 ? (
+                      <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
+                        None
+                      </span>
+                    ) : (
+                      (atsBucketsData.UNRANKED ?? []).map((app) => (
+                        <div
+                          key={app.application_id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openEvaluateFromAtsApp(app)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              openEvaluateFromAtsApp(app);
+                            }
+                          }}
+                          style={{
+                            fontSize: "11px",
+                            padding: "8px 10px",
+                            borderRadius: "8px",
+                            border: "1px solid var(--border-subtle)",
+                            cursor: "pointer",
+                            minWidth: "120px",
+                            backgroundColor: "var(--bg-primary)",
+                          }}
+                        >
+                          <div style={{ fontWeight: 600 }}>{app.candidate.full_name}</div>
+                          <div style={{ fontSize: "10px", color: "var(--text-tertiary)" }}>
+                            {app.current_stage}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          <details
+            open={pipelineAdvancedOpen}
+            onToggle={(e) =>
+              setPipelineAdvancedOpen((e.target as HTMLDetailsElement).open)
+            }
+            style={{ marginBottom: "8px" }}
+          >
+            <summary
+              style={{
+                cursor: "pointer",
+                fontSize: "13px",
+                fontWeight: 600,
+                marginBottom: "12px",
+                userSelect: "none",
+              }}
+            >
+              Ranking settings, pipeline board, and filters (advanced)
+            </summary>
+
+          {/* Phase 4 board columns (compact counters + full-stage expand) */}
+          <div
+            style={{
+              marginBottom: "20px",
+              padding: "14px",
+              borderRadius: "12px",
+              border: "1px solid var(--border-subtle)",
+              backgroundColor: "var(--bg-secondary)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: "10px",
+              }}
+            >
+              <div style={{ fontSize: "13px", fontWeight: 600 }}>
+                Applications Pipeline Board
+              </div>
+              <button
+                className="action-button"
+                onClick={() => {
+                  void loadPipelineCompact();
+                  if (expandedPipelineStage) {
+                    setPipelineFull(null);
+                    void loadPipelineFull();
+                  }
+                }}
+                style={{ fontSize: "11px", padding: "4px 10px" }}
+              >
+                <RefreshCw size={12} style={{ marginRight: "4px" }} />
+                Refresh
+              </button>
+            </div>
+
+            {pipelineLoading ? (
+              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                Loading compact counters...
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                {[
+                  "Sourced",
+                  "Shortlisted",
+                  "Interviewing",
+                  "Offered",
+                  "Hired",
+                  "Rejected",
+                ].map((stage) => {
+                  const isExpanded = expandedPipelineStage === stage;
+                  return (
+                    <button
+                      key={stage}
+                      onClick={() =>
+                        setExpandedPipelineStage((prev) =>
+                          prev === stage ? null : stage,
+                        )
+                      }
+                      style={{
+                        border: isExpanded
+                          ? "2px solid var(--primary-accent)"
+                          : "1px solid var(--border-subtle)",
+                        borderRadius: "10px",
+                        padding: "8px 12px",
+                        background: isExpanded
+                          ? "rgba(59,130,246,0.08)"
+                          : "var(--bg-primary)",
+                        cursor: "pointer",
+                        minWidth: "132px",
+                        textAlign: "left",
+                      }}
+                    >
+                      <div style={{ fontSize: "12px", fontWeight: 600 }}>{stage}</div>
+                      <div
+                        style={{
+                          fontSize: "18px",
+                          fontWeight: 700,
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        {pipelineCountByStage[stage] ?? 0}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {expandedPipelineStage && (
+              <div style={{ marginTop: "12px" }}>
+                <div
+                  style={{
+                    fontSize: "12px",
+                    color: "var(--text-tertiary)",
+                    marginBottom: "8px",
+                  }}
+                >
+                  Expanded stage: {expandedPipelineStage}
+                </div>
+                {pipelineFullLoading ? (
+                  <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                    Loading full stage details...
+                  </div>
+                ) : expandedStageApplications.length === 0 ? (
+                  <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                    No applications in this stage.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {expandedStageApplications.map((app) => (
+                      <div
+                        key={app.application_id}
+                        onClick={() =>
+                          openCandidateModal(
+                            {
+                              candidate_id: app.candidate_id,
+                              application_id: app.application_id,
+                              requisition_item_id: app.requisition_item_id,
+                              requisition_id: app.requisition_id,
+                              full_name: app.candidate.full_name,
+                              email: app.candidate.email,
+                              phone: app.candidate.phone,
+                              resume_path: null,
+                              current_stage: app.current_stage,
+                              added_by: app.created_by,
+                              source: app.source,
+                              created_at: app.created_at,
+                              updated_at: app.updated_at,
+                              stage_history: app.stage_history ?? [],
+                              interviews: [],
+                            },
+                            "evaluate",
+                          )
+                        }
+                        style={{
+                          padding: "10px 12px",
+                          borderRadius: "8px",
+                          border: "1px solid var(--border-subtle)",
+                          backgroundColor: "var(--bg-primary)",
+                          cursor: "pointer",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: "13px", fontWeight: 600 }}>
+                            {app.candidate.full_name}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              color: "var(--text-secondary)",
+                            }}
+                          >
+                            {app.candidate.email}
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            color: "var(--text-tertiary)",
+                          }}
+                        >
+                          App #{app.application_id}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Phase 5 ranking visibility panel */}
+          <div
+            style={{
+              marginBottom: "20px",
+              padding: "14px",
+              borderRadius: "12px",
+              border: "1px solid var(--border-subtle)",
+              backgroundColor: "var(--bg-secondary)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "10px",
+                flexWrap: "wrap",
+                marginBottom: "10px",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 600 }}>
+                  Ranking & Semantic Fit
+                </div>
+                <div style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
+                  Keyword + semantic/vector + business scoring
+                </div>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <select
+                  value={rankingItemId ?? ""}
+                  onChange={(e) => setAtsBoardItemId(Number(e.target.value))}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border-subtle)",
+                    fontSize: "12px",
+                    backgroundColor: "var(--bg-primary)",
+                    color: "var(--text-primary)",
+                  }}
+                >
+                  {ticket.items.map((item) => (
+                    <option key={item.numericItemId} value={item.numericItemId}>
+                      Item #{item.numericItemId} - {item.skill}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="action-button"
+                  onClick={() => void loadRanking(false)}
+                  style={{ fontSize: "11px", padding: "4px 10px" }}
+                >
+                  <RefreshCw size={12} style={{ marginRight: "4px" }} />
+                  Refresh
+                </button>
+                <button
+                  className="action-button primary"
+                  onClick={() => void loadRanking(true)}
+                  style={{ fontSize: "11px", padding: "4px 10px" }}
+                >
+                  {rankingRefreshing ? "Recomputing..." : "Recompute"}
+                </button>
+                <button
+                  className="action-button"
+                  disabled={aiEvalWorking || !rankingItemId}
+                  onClick={() => void runAiEvalTopN(10)}
+                  style={{ fontSize: "11px", padding: "4px 10px" }}
+                  title="Runs AI evaluation for top 10 ranked candidates and stores results."
+                >
+                  {aiEvalWorking ? "AI evaluating..." : "AI Eval (Top 10)"}
+                </button>
+              </div>
+            </div>
+
+            <div
+              style={{
+                marginBottom: "12px",
+                paddingBottom: "12px",
+                borderBottom: "1px solid var(--border-subtle)",
+              }}
+            >
+              <div style={{ fontSize: "12px", fontWeight: 600, marginBottom: "4px" }}>
+                Ranking job description (ATS)
+              </div>
+              <div
+                style={{
+                  fontSize: "11px",
+                  color: "var(--text-tertiary)",
+                  marginBottom: "10px",
+                  lineHeight: 1.45,
+                }}
+              >
+                Optional text or PDF used only to rank candidates for the selected
+                item. It does not replace the manager&apos;s requisition JD on the
+                item.
+              </div>
+              {!canEditPipelineRankingJd ? (
+                <div style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
+                  TA, HR, Admin, Owner, or Manager role is required to change these
+                  settings.
+                </div>
+              ) : null}
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  fontSize: "12px",
+                  cursor: canEditPipelineRankingJd ? "pointer" : "default",
+                  marginBottom: "10px",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={useRequisitionJd}
+                  disabled={!canEditPipelineRankingJd}
+                  onChange={(e) => setUseRequisitionJd(e.target.checked)}
+                />
+                <span>Use same JD as requisition (manager item + header PDFs)</span>
+              </label>
+              {!useRequisitionJd ? (
+                <>
+                  <textarea
+                    value={pipelineJdTextDraft}
+                    onChange={(e) => setPipelineJdTextDraft(e.target.value)}
+                    disabled={!canEditPipelineRankingJd || pipelineJdSaving}
+                    placeholder="Paste or type a JD for ranking..."
+                    rows={5}
+                    style={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      padding: "8px 10px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-subtle)",
+                      fontSize: "12px",
+                      fontFamily: "inherit",
+                      resize: "vertical",
+                      backgroundColor: "var(--bg-primary)",
+                      color: "var(--text-primary)",
+                    }}
+                  />
+                  <input
+                    ref={pipelineJdFileInputRef}
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (file) void uploadPipelineRankingJdPdf(file);
+                    }}
+                  />
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "8px",
+                      marginTop: "8px",
+                      alignItems: "center",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="action-button"
+                      disabled={
+                        !canEditPipelineRankingJd || pipelineJdUploading
+                      }
+                      onClick={() => pipelineJdFileInputRef.current?.click()}
+                      style={{ fontSize: "11px", padding: "4px 10px" }}
+                    >
+                      <Upload size={12} style={{ marginRight: "4px" }} />
+                      {pipelineJdUploading ? "Uploading..." : "Upload ranking PDF"}
+                    </button>
+                    {pipelineRankingTargetItem?.pipelineJdFileKey ? (
+                      <button
+                        type="button"
+                        className="action-button"
+                        disabled={
+                          !canEditPipelineRankingJd || pipelineJdUploading
+                        }
+                        onClick={() => void removePipelineRankingJdPdf()}
+                        style={{ fontSize: "11px", padding: "4px 10px" }}
+                      >
+                        Remove ranking PDF
+                      </button>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
+              {useRequisitionJd &&
+              pipelineRankingTargetItem &&
+              (Boolean(pipelineRankingTargetItem.pipelineJdText?.trim()) ||
+                Boolean(pipelineRankingTargetItem.pipelineJdFileKey)) ? (
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "var(--text-tertiary)",
+                    marginTop: "8px",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  Custom ranking text or PDF is saved but ignored while
+                  &quot;Use same JD as requisition&quot; is checked.
+                </div>
+              ) : null}
+              {!useRequisitionJd && pipelineRankingTargetItem?.pipelineJdFileKey ? (
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "var(--text-secondary)",
+                    marginTop: "6px",
+                  }}
+                >
+                  A custom ranking PDF is attached for this item (combined with the
+                  text above when both are present).
+                </div>
+              ) : null}
+              <div style={{ marginTop: "12px" }}>
+                <label
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    display: "block",
+                    marginBottom: "6px",
+                  }}
+                >
+                  ATS required skills (optional)
+                </label>
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "var(--text-tertiary)",
+                    marginBottom: "6px",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  Comma-separated list. Overrides Primary/Secondary parsing from item
+                  requirements when non-empty.
+                </div>
+                <textarea
+                  value={rankingRequiredSkillsDraft}
+                  onChange={(e) => setRankingRequiredSkillsDraft(e.target.value)}
+                  disabled={!canEditPipelineRankingJd || pipelineJdSaving}
+                  placeholder="e.g. React, Node.js, PostgreSQL"
+                  rows={2}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "8px 10px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border-subtle)",
+                    fontSize: "12px",
+                    fontFamily: "inherit",
+                    resize: "vertical",
+                    backgroundColor: "var(--bg-primary)",
+                    color: "var(--text-primary)",
+                  }}
+                />
+              </div>
+              <div style={{ marginTop: "10px" }}>
+                <button
+                  type="button"
+                  className="action-button primary"
+                  disabled={
+                    !canEditPipelineRankingJd ||
+                    pipelineJdSaving ||
+                    !pipelineRankingTargetItem
+                  }
+                  onClick={() => void savePipelineRankingJdSettings()}
+                  style={{ fontSize: "11px", padding: "4px 10px" }}
+                >
+                  {pipelineJdSaving ? "Saving..." : "Save ranking JD settings"}
+                </button>
+              </div>
+              {pipelineJdMessage ? (
+                <div
+                  style={{
+                    marginTop: "8px",
+                    fontSize: "11px",
+                    color: "var(--text-secondary)",
+                  }}
+                >
+                  {pipelineJdMessage}
+                </div>
+              ) : null}
+            </div>
+
+            {rankingLoading ? (
+              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                Loading ranking...
+              </div>
+            ) : rankingError ? (
+              <div style={{ fontSize: "12px", color: "var(--error)" }}>{rankingError}</div>
+            ) : !rankingData ? (
+              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                Ranking not available for this position yet.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "8px",
+                    flexWrap: "wrap",
+                    fontSize: "11px",
+                    color: "var(--text-secondary)",
+                  }}
+                >
+                  <span>Version: {rankingData.ranking_version}</span>
+                  <span>Total: {rankingData.total_candidates}</span>
+                  <span>
+                    Generated: {new Date(rankingData.generated_at).toLocaleString()}
+                  </span>
+                </div>
+
+                {rankingData.ranked_candidates.length === 0 ? (
+                  <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                    No ranked candidates available.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        color: "var(--text-tertiary)",
+                        marginBottom: 2,
+                      }}
+                    >
+                      Open a candidate to see role fit, AI insight, and actions.
+                    </div>
+                    {rankingData.ranked_candidates.slice(0, 8).map((rc, idx) => (
+                      <div
+                        key={rc.candidate_id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => openEvaluateFromRankedRow(rc)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            openEvaluateFromRankedRow(rc);
+                          }
+                        }}
+                        style={{
+                          border: "1px solid var(--border-subtle)",
+                          borderRadius: "8px",
+                          padding: "10px 12px",
+                          backgroundColor: "var(--bg-primary)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "8px",
+                            marginBottom: "4px",
+                          }}
+                        >
+                          <div style={{ fontSize: "13px", fontWeight: 600 }}>
+                            #{idx + 1} {rc.full_name}
+                          </div>
+                          <div style={{ fontSize: "13px", fontWeight: 700 }}>
+                            {Math.round(rc.score.final_score)}
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            color: "var(--text-secondary)",
+                          }}
+                        >
+                          {rc.email} • {rc.current_stage}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Filters: Item and Stage */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "12px",
+              marginBottom: "20px",
+            }}
+          >
+            {/* Item filter */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                flexWrap: "wrap",
+              }}
+            >
+              <label
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 500,
+                  color: "var(--text-secondary)",
+                }}
+              >
+                Filter by Position:
+              </label>
+              <select
+                value={
+                  candidateItemFilter === "all" ? "all" : candidateItemFilter
+                }
+                onChange={(e) =>
+                  setCandidateItemFilter(
+                    e.target.value === "all" ? "all" : Number(e.target.value),
+                  )
+                }
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-subtle)",
+                  fontSize: "12px",
+                  backgroundColor: "var(--bg-primary)",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                  minWidth: "200px",
+                }}
+              >
+                <option value="all">All Positions</option>
+                {ticket.items.map((item) => {
+                  const itemCandidateCount =
+                    candidatesByItemId.get(item.numericItemId)?.length ?? 0;
+                  return (
+                    <option key={item.numericItemId} value={item.numericItemId}>
+                      {item.skill} ({itemCandidateCount})
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            {/* Stage filter tabs */}
+            <div
+              style={{
+                display: "flex",
+                gap: "8px",
+                flexWrap: "wrap",
+              }}
+            >
+              {[
+                "all",
+                "Sourced",
+                "Shortlisted",
+                "Interviewing",
+                "Offered",
+                "Hired",
+                "Rejected",
+              ].map((stage) => {
+                const filteredByItem =
+                  candidateItemFilter === "all"
+                    ? candidates
+                    : (candidatesByItemId.get(candidateItemFilter) ?? []);
+                const count =
+                  stage === "all"
+                    ? filteredByItem.length
+                    : filteredByItem.filter((c) => c.current_stage === stage)
+                        .length;
+                const isActive = candidateStageFilter === stage;
+                return (
+                  <button
+                    key={stage}
+                    onClick={() => setCandidateStageFilter(stage)}
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: "20px",
+                      fontSize: "12px",
+                      fontWeight: isActive ? 600 : 400,
+                      border: isActive
+                        ? "2px solid var(--primary-accent)"
+                        : "1px solid var(--border-subtle)",
+                      backgroundColor: isActive
+                        ? "rgba(59,130,246,0.08)"
+                        : "transparent",
+                      color: isActive
+                        ? "var(--primary-accent)"
+                        : "var(--text-secondary)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {stage === "all" ? "All" : stage} ({count})
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           {/* Candidate cards (Kanban-style by stage) */}
           {candidatesLoading ? (
@@ -3866,7 +4961,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   return (
                     <div
                       key={c.candidate_id}
-                      onClick={() => setSelectedCandidate(c)}
+                      onClick={() => openCandidateModal(c, "evaluate")}
                       style={{
                         padding: "16px 20px",
                         backgroundColor: "var(--bg-primary)",
@@ -3972,6 +5067,714 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 })}
             </div>
           )}
+          </details>
+            </>
+          )}
+
+        {activeTab === "shortlisted" && (
+          <div style={{ marginTop: "8px" }}>
+            {transitionError ? (
+              <div
+                style={{
+                  marginBottom: "14px",
+                  padding: "12px 16px",
+                  borderRadius: "10px",
+                  backgroundColor: "rgba(239, 68, 68, 0.08)",
+                  border: "1px solid rgba(239, 68, 68, 0.2)",
+                  color: "var(--error)",
+                  fontSize: "13px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <AlertCircle size={16} />
+                {transitionError}
+                <button
+                  type="button"
+                  onClick={() => setTransitionError(null)}
+                  style={{
+                    marginLeft: "auto",
+                    background: "none",
+                    border: "none",
+                    color: "var(--error)",
+                    cursor: "pointer",
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ) : null}
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "12px",
+                alignItems: "center",
+                marginBottom: "14px",
+              }}
+            >
+              <label style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                Position:
+              </label>
+              <select
+                value={candidateItemFilter === "all" ? "all" : candidateItemFilter}
+                onChange={(e) =>
+                  setCandidateItemFilter(
+                    e.target.value === "all" ? "all" : Number(e.target.value),
+                  )
+                }
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-subtle)",
+                  fontSize: "12px",
+                  backgroundColor: "var(--bg-primary)",
+                }}
+              >
+                <option value="all">All positions</option>
+                {ticket.items.map((item) => (
+                  <option key={item.numericItemId} value={item.numericItemId}>
+                    {item.skill} — {item.level}
+                  </option>
+                ))}
+              </select>
+              {shortlistedCandidatesForTable.some((c) => c.application_id) ? (
+                <button
+                  type="button"
+                  className="action-button"
+                  style={{ fontSize: "11px", padding: "6px 12px" }}
+                  onClick={() => {
+                    const ids = shortlistedCandidatesForTable
+                      .map((c) => c.application_id)
+                      .filter((id): id is number => id != null);
+                    const allSelected =
+                      ids.length > 0 &&
+                      ids.every((id) => shortlistBulkAppIds.includes(id));
+                    if (allSelected) {
+                      setShortlistBulkAppIds([]);
+                    } else {
+                      setShortlistBulkAppIds(ids);
+                    }
+                  }}
+                >
+                  Toggle all
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="action-button primary"
+                style={{ fontSize: "11px", padding: "6px 12px" }}
+                disabled={
+                  shortlistBulkWorking || shortlistBulkAppIds.length === 0
+                }
+                onClick={() => void handleBulkShortlistToInterviewing()}
+              >
+                {shortlistBulkWorking
+                  ? "Updating…"
+                  : `Move ${shortlistBulkAppIds.length} to Interviewing`}
+              </button>
+            </div>
+            {candidatesLoading ? (
+              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                Loading…
+              </div>
+            ) : shortlistedCandidatesForTable.length === 0 ? (
+              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                No shortlisted candidates for this filter.
+              </div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    fontSize: "12px",
+                  }}
+                >
+                  <thead>
+                    <tr style={{ textAlign: "left", color: "var(--text-tertiary)" }}>
+                      <th
+                        style={{
+                          padding: "8px",
+                          borderBottom: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        Select
+                      </th>
+                      <th
+                        style={{
+                          padding: "8px 10px",
+                          borderBottom: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        Name
+                      </th>
+                      <th
+                        style={{
+                          padding: "8px 10px",
+                          borderBottom: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        Email
+                      </th>
+                      <th
+                        style={{
+                          padding: "8px 10px",
+                          borderBottom: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        Position
+                      </th>
+                      <th
+                        style={{
+                          padding: "8px 10px",
+                          borderBottom: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        Experience
+                      </th>
+                      <th
+                        style={{
+                          padding: "8px 10px",
+                          borderBottom: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...shortlistedCandidatesForTable]
+                      .sort((a, b) =>
+                        a.full_name.localeCompare(b.full_name, undefined, {
+                          sensitivity: "base",
+                        }),
+                      )
+                      .map((c) => {
+                        const linkedItem = ticket.items.find(
+                          (it) => it.numericItemId === c.requisition_item_id,
+                        );
+                        const appId = c.application_id;
+                        return (
+                          <tr
+                            key={`${c.application_id ?? c.candidate_id}-${c.requisition_item_id}`}
+                            style={{ backgroundColor: "var(--bg-primary)" }}
+                          >
+                            <td
+                              style={{
+                                padding: "8px",
+                                borderBottom: "1px solid var(--border-subtle)",
+                              }}
+                            >
+                              {appId != null ? (
+                                <input
+                                  type="checkbox"
+                                  checked={shortlistBulkAppIds.includes(appId)}
+                                  onChange={() => {
+                                    setShortlistBulkAppIds((prev) =>
+                                      prev.includes(appId)
+                                        ? prev.filter((id) => id !== appId)
+                                        : [...prev, appId],
+                                    );
+                                  }}
+                                  aria-label={`Select ${c.full_name}`}
+                                />
+                              ) : null}
+                            </td>
+                            <td
+                              style={{
+                                padding: "10px",
+                                borderBottom: "1px solid var(--border-subtle)",
+                                fontWeight: 600,
+                              }}
+                            >
+                              {c.full_name}
+                            </td>
+                            <td
+                              style={{
+                                padding: "10px",
+                                borderBottom: "1px solid var(--border-subtle)",
+                                color: "var(--text-secondary)",
+                              }}
+                            >
+                              {c.email}
+                            </td>
+                            <td
+                              style={{
+                                padding: "10px",
+                                borderBottom: "1px solid var(--border-subtle)",
+                              }}
+                            >
+                              {linkedItem
+                                ? `${linkedItem.skill} — ${linkedItem.level}`
+                                : `Item #${c.requisition_item_id}`}
+                            </td>
+                            <td
+                              style={{
+                                padding: "10px",
+                                borderBottom: "1px solid var(--border-subtle)",
+                              }}
+                            >
+                              {c.total_experience_years != null
+                                ? `${c.total_experience_years} yrs`
+                                : "—"}
+                            </td>
+                            <td
+                              style={{
+                                padding: "10px",
+                                borderBottom: "1px solid var(--border-subtle)",
+                              }}
+                            >
+                              <button
+                                type="button"
+                                className="action-button"
+                                style={{ fontSize: "11px", padding: "4px 10px" }}
+                                onClick={() => openCandidateModal(c, "execute")}
+                              >
+                                Open
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "interviews" && (
+          <div style={{ marginTop: "8px" }}>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "12px",
+                alignItems: "center",
+                marginBottom: "14px",
+              }}
+            >
+              <label style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+                Position:
+              </label>
+              <select
+                value={candidateItemFilter === "all" ? "all" : candidateItemFilter}
+                onChange={(e) =>
+                  setCandidateItemFilter(
+                    e.target.value === "all" ? "all" : Number(e.target.value),
+                  )
+                }
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-subtle)",
+                  fontSize: "12px",
+                  backgroundColor: "var(--bg-primary)",
+                }}
+              >
+                <option value="all">All positions</option>
+                {ticket.items.map((item) => (
+                  <option key={item.numericItemId} value={item.numericItemId}>
+                    {item.skill} — {item.level}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div
+              style={{
+                marginBottom: "24px",
+                padding: "14px",
+                borderRadius: "12px",
+                border: "1px solid var(--border-subtle)",
+                backgroundColor: "var(--bg-secondary)",
+              }}
+            >
+              <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "6px" }}>
+                Candidates in Interviewing stage
+              </div>
+              <p
+                style={{
+                  fontSize: "11px",
+                  color: "var(--text-tertiary)",
+                  marginTop: 0,
+                  marginBottom: "12px",
+                  lineHeight: 1.45,
+                }}
+              >
+                Pipeline stage <strong>Interviewing</strong> is separate from calendar rounds.
+                Use <strong>Schedule interview</strong> to add a round (or <strong>
+                Profile</strong> for the full hiring view).
+              </p>
+              {candidatesLoading ? (
+                <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                  Loading…
+                </div>
+              ) : interviewingCandidatesForTable.length === 0 ? (
+                <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                  No candidates in Interviewing for this filter. Move someone from
+                  Shortlisted or open a profile to change stage.
+                </div>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      fontSize: "12px",
+                    }}
+                  >
+                    <thead>
+                      <tr style={{ textAlign: "left", color: "var(--text-tertiary)" }}>
+                        <th
+                          style={{
+                            padding: "8px 10px",
+                            borderBottom: "1px solid var(--border-subtle)",
+                          }}
+                        >
+                          Name
+                        </th>
+                        <th
+                          style={{
+                            padding: "8px 10px",
+                            borderBottom: "1px solid var(--border-subtle)",
+                          }}
+                        >
+                          Email
+                        </th>
+                        <th
+                          style={{
+                            padding: "8px 10px",
+                            borderBottom: "1px solid var(--border-subtle)",
+                          }}
+                        >
+                          Position
+                        </th>
+                        <th
+                          style={{
+                            padding: "8px 10px",
+                            borderBottom: "1px solid var(--border-subtle)",
+                          }}
+                        >
+                          Stage
+                        </th>
+                        <th
+                          style={{
+                            padding: "8px 10px",
+                            borderBottom: "1px solid var(--border-subtle)",
+                          }}
+                        >
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...interviewingCandidatesForTable]
+                        .sort((a, b) =>
+                          a.full_name.localeCompare(b.full_name, undefined, {
+                            sensitivity: "base",
+                          }),
+                        )
+                        .map((c) => {
+                          const linkedItem = ticket.items.find(
+                            (it) => it.numericItemId === c.requisition_item_id,
+                          );
+                          return (
+                            <tr
+                              key={`int-pipeline-${c.application_id ?? c.candidate_id}-${c.requisition_item_id}`}
+                              style={{ backgroundColor: "var(--bg-primary)" }}
+                            >
+                              <td
+                                style={{
+                                  padding: "10px",
+                                  borderBottom: "1px solid var(--border-subtle)",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {c.full_name}
+                              </td>
+                              <td
+                                style={{
+                                  padding: "10px",
+                                  borderBottom: "1px solid var(--border-subtle)",
+                                  color: "var(--text-secondary)",
+                                }}
+                              >
+                                {c.email}
+                              </td>
+                              <td
+                                style={{
+                                  padding: "10px",
+                                  borderBottom: "1px solid var(--border-subtle)",
+                                }}
+                              >
+                                {linkedItem
+                                  ? `${linkedItem.skill} — ${linkedItem.level}`
+                                  : `Item #${c.requisition_item_id}`}
+                              </td>
+                              <td
+                                style={{
+                                  padding: "10px",
+                                  borderBottom: "1px solid var(--border-subtle)",
+                                }}
+                              >
+                                {c.current_stage}
+                              </td>
+                              <td
+                                style={{
+                                  padding: "10px",
+                                  borderBottom: "1px solid var(--border-subtle)",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    flexWrap: "wrap",
+                                    gap: "8px",
+                                    alignItems: "center",
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    className="action-button primary"
+                                    style={{ fontSize: "11px", padding: "4px 10px" }}
+                                    onClick={() => openCandidateModal(c, "execute")}
+                                  >
+                                    Schedule interview
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="action-button"
+                                    style={{ fontSize: "11px", padding: "4px 10px" }}
+                                    onClick={() => openCandidateModal(c, "execute")}
+                                  >
+                                    Profile
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "8px" }}>
+              Scheduled interview rounds
+            </div>
+            {reqInterviewsLoading ? (
+              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                Loading scheduled rounds…
+              </div>
+            ) : reqInterviews.length === 0 ? (
+              <div
+                style={{
+                  padding: "14px 16px",
+                  borderRadius: "10px",
+                  border: "1px solid rgba(59, 130, 246, 0.25)",
+                  backgroundColor: "rgba(59, 130, 246, 0.06)",
+                  fontSize: "12px",
+                  color: "var(--text-secondary)",
+                  lineHeight: 1.5,
+                }}
+              >
+                {interviewingCandidatesForTable.length > 0 ? (
+                  <>
+                    <strong style={{ color: "var(--text-primary)" }}>
+                      No calendar rounds yet — that’s expected.
+                    </strong>{" "}
+                    The table above is the <em>Interviewing</em> pipeline list. This section
+                    only lists <strong>scheduled</strong> rounds (date, interviewer, status).
+                    Click <strong>Schedule interview</strong> on a candidate to create one;
+                    it will show up here automatically.
+                  </>
+                ) : (
+                  <>
+                    No scheduled rounds for this requisition. When candidates reach{" "}
+                    <strong>Interviewing</strong> and you add rounds from their profile,
+                    each round appears here as a separate row.
+                  </>
+                )}
+              </div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    fontSize: "12px",
+                  }}
+                >
+                  <thead>
+                    <tr style={{ textAlign: "left", color: "var(--text-tertiary)" }}>
+                      <th
+                        style={{
+                          padding: "8px 10px",
+                          borderBottom: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        Candidate
+                      </th>
+                      <th
+                        style={{
+                          padding: "8px 10px",
+                          borderBottom: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        Round
+                      </th>
+                      <th
+                        style={{
+                          padding: "8px 10px",
+                          borderBottom: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        Interviewer
+                      </th>
+                      <th
+                        style={{
+                          padding: "8px 10px",
+                          borderBottom: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        Scheduled
+                      </th>
+                      <th
+                        style={{
+                          padding: "8px 10px",
+                          borderBottom: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        Status
+                      </th>
+                      <th
+                        style={{
+                          padding: "8px 10px",
+                          borderBottom: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        Result
+                      </th>
+                      <th
+                        style={{
+                          padding: "8px 10px",
+                          borderBottom: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reqInterviews.map((iv) => {
+                      const cand = candidates.find(
+                        (x) => x.candidate_id === iv.candidate_id,
+                      );
+                      return (
+                        <tr
+                          key={iv.id}
+                          style={{ backgroundColor: "var(--bg-primary)" }}
+                        >
+                          <td
+                            style={{
+                              padding: "10px",
+                              borderBottom: "1px solid var(--border-subtle)",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {iv.candidate_name ??
+                              cand?.full_name ??
+                              `Candidate #${iv.candidate_id}`}
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                fontWeight: 400,
+                                color: "var(--text-tertiary)",
+                              }}
+                            >
+                              {iv.candidate_email ?? cand?.email ?? ""}
+                            </div>
+                          </td>
+                          <td
+                            style={{
+                              padding: "10px",
+                              borderBottom: "1px solid var(--border-subtle)",
+                            }}
+                          >
+                            {iv.round_number}
+                          </td>
+                          <td
+                            style={{
+                              padding: "10px",
+                              borderBottom: "1px solid var(--border-subtle)",
+                            }}
+                          >
+                            {iv.interviewer_name}
+                          </td>
+                          <td
+                            style={{
+                              padding: "10px",
+                              borderBottom: "1px solid var(--border-subtle)",
+                            }}
+                          >
+                            {new Date(iv.scheduled_at).toLocaleString()}
+                          </td>
+                          <td
+                            style={{
+                              padding: "10px",
+                              borderBottom: "1px solid var(--border-subtle)",
+                            }}
+                          >
+                            {iv.status}
+                          </td>
+                          <td
+                            style={{
+                              padding: "10px",
+                              borderBottom: "1px solid var(--border-subtle)",
+                            }}
+                          >
+                            {iv.result ?? "—"}
+                          </td>
+                          <td
+                            style={{
+                              padding: "10px",
+                              borderBottom: "1px solid var(--border-subtle)",
+                            }}
+                          >
+                            {cand ? (
+                              <button
+                                type="button"
+                                className="action-button"
+                                style={{ fontSize: "11px", padding: "4px 10px" }}
+                                onClick={() => openCandidateModal(cand, "execute")}
+                              >
+                                Open
+                              </button>
+                            ) : (
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  color: "var(--text-tertiary)",
+                                }}
+                              >
+                                —
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
         </div>
       )}
 
@@ -3986,15 +5789,28 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 c.candidate_id === updated.candidate_id ? updated : c,
               ),
             );
+            void loadCandidates();
             void loadPipelineCompact();
-            void loadRanking(true);
+            void loadRanking(false);
             setPipelineFull(null);
+            const rid = parseReqId(effectiveTicketId);
+            if (rid != null) {
+              void fetchInterviews({ requisitionId: rid }).then(setReqInterviews);
+            }
             if (updated.current_stage === "Hired") {
               refetchRequisition();
             }
             setSelectedCandidate(null);
           }}
           userRoles={userRoles}
+          evaluationContext={modalEvaluationProps.evaluationContext}
+          evaluationShortlistBlocked={
+            modalEvaluationProps.evaluationShortlistBlocked
+          }
+          evaluationShortlistBlockedReason={
+            modalEvaluationProps.evaluationShortlistBlockedReason
+          }
+          pipelineWorkspace={modalPipelineWorkspace}
         />
       )}
 

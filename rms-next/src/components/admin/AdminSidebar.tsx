@@ -8,15 +8,18 @@ import { Shield, Database, Users, FileText, Menu, X } from "lucide-react";
 interface AdminSidebarProps {
   collapsed: boolean;
   onToggleCollapse: () => void;
+  /** HR-only access: show Master Data link only. */
+  masterDataOnly?: boolean;
 }
 
 const AdminSidebar: React.FC<AdminSidebarProps> = ({
   collapsed,
   onToggleCollapse,
+  masterDataOnly = false,
 }) => {
   const pathname = usePathname() || "";
 
-  const menuItems: {
+  const allMenuItems: {
     href: string;
     label: string;
     icon: React.ReactNode;
@@ -39,6 +42,10 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
       icon: <Users size={20} />,
     },
   ];
+
+  const menuItems = masterDataOnly
+    ? allMenuItems.filter((item) => item.href === "/admin/master-data")
+    : allMenuItems;
 
   const isActive = (href: string, end?: boolean) => {
     if (end) {

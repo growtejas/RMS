@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { parseFastapiJsonBody } from "@/lib/http/parse-fastapi-body";
 import { RequisitionItemWorkflowEngine } from "@/lib/workflow/item-workflow-engine";
 import { workflowCatch } from "@/lib/workflow/workflow-http";
-import { asAppDb } from "@/lib/workflow/workflow-route-utils";
+import { asAppDb, requireItemInOrganization } from "@/lib/workflow/workflow-route-utils";
 import { itemBudgetApproveBody } from "@/lib/validators/workflow";
 
 export const runtime = "nodejs";
@@ -38,6 +38,8 @@ export async function POST(req: Request, { params }: Ctx) {
     if (itemId instanceof NextResponse) {
       return itemId;
     }
+
+    await requireItemInOrganization(itemId, user.organizationId);
 
     const parsed = await parseFastapiJsonBody(req, itemBudgetApproveBody);
     if (!parsed.ok) {

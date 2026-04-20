@@ -117,6 +117,7 @@ export default function LoginPage() {
             width={160}
             height={48}
             priority
+            style={{ width: "auto", height: "auto" }}
           />
         </div>
 

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { getDb } from "@/lib/db";
 import { getRequestId } from "@/lib/http/request-id";
+import { logInfo } from "@/lib/observability/structured-log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,7 @@ export async function GET(req: Request) {
   try {
     const db = getDb();
     await db.execute(sql`SELECT 1`);
+    logInfo("health_ok", { database: "connected" }, req);
     const res = NextResponse.json({
       status: "ok",
       database: "connected",

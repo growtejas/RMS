@@ -7,6 +7,7 @@ export type InboundEventStatus = "received" | "processing" | "processed" | "fail
 export type InboundEventRow = typeof inboundEvents.$inferSelect;
 
 export async function insertInboundEvent(params: {
+  organizationId: string;
   source: string;
   externalId: string;
   payload: Record<string, unknown>;
@@ -16,6 +17,7 @@ export async function insertInboundEvent(params: {
   const [inserted] = await db
     .insert(inboundEvents)
     .values({
+      organizationId: params.organizationId,
       source: params.source,
       externalId: params.externalId,
       payload: params.payload,

@@ -36,7 +36,7 @@ export async function POST(request: Request) {
     if (user instanceof NextResponse) {
       return user;
     }
-    const denied = requireAnyRole(user, "Admin", "Owner");
+    const denied = requireAnyRole(user, "Admin", "Owner", "HR");
     if (denied) {
       return denied;
     }

@@ -10,22 +10,22 @@ Status legend:
 | Plan Area | Status | Current Coverage | Required Implementation |
 |---|---|---|---|
 | Foundation stack (Next.js + Drizzle + PostgreSQL) | implemented | Existing app uses Next.js App Router, TypeScript, Drizzle ORM, Postgres. | Keep and extend. |
-| Multi-tenant organizations | missing | No `organizations` table or tenant scoping. | Add org model, tenant FKs, scoped queries, RLS strategy. |
-| Auth.js v5 auth stack | partial | Custom JWT auth with role checks exists. | Add Auth.js v5 and bridge with existing JWT while migrating. |
-| Role/permission model with scoped assignments | partial | `roles`, `user_roles` and role checks exist. | Add granular permissions and assignment scopes. |
-| Jobs + applications ATS model | missing | Current model is requisitions + requisition items. | Add jobs/applications/pipelines/stages model and adapters. |
-| Pipeline stage automation | partial | Workflow engines and transition rules exist for requisitions/items. | Add ATS pipeline-stage automation model and rules. |
-| Candidate 360 profile | partial | Candidate + interview + audit data exists. | Expand with activity timeline, notes, files, email threads, cross-job applications. |
-| Interview panelist + scorecards | partial | Interview CRUD exists. | Add panelists, structured feedback, scorecards, decision support. |
-| Google Calendar/Meet/Gmail | missing | No Google integration layer. | Add OAuth, token encryption, scheduling sync, outbound email integration. |
-| Bulk import/export and async processing | missing | No queue orchestration for large async operations. | Add BullMQ + Redis workers + operation tracking. |
-| Career page + public apply + candidate portal | missing | No public ATS career routes and self-service portal. | Add public APIs/pages and candidate self-service flows. |
-| Notifications system | missing | No in-app/email/push notification center. | Add notification events, preferences, delivery channels. |
-| Reports and analytics suite | partial | Existing dashboards and metrics endpoints exist for current RMS workflow. | Add ATS funnel/time-to-hire/source/recruiter/interviewer reports and exports. |
-| Audit and compliance enhancements | partial | Audit logs exist for core actions. | Add richer compliance exports, retention controls, and organization scoping. |
-| Object storage (S3/MinIO) | partial | Current uploads are local-file based. | Add S3/MinIO storage adapters and migration path. |
-| Security hardening (rate limits, CSRF, encryption) | partial | Auth + validation exists. | Add full security controls and policy-driven hardening. |
-| Performance + observability + E2E | partial | Basic app runtime exists, no full production hardening stack. | Add tracing/monitoring, performance tuning, E2E coverage. |
+| Multi-tenant organizations | partial | `organizations` + `organization_members`; `organization_id` on requisitions, candidates, applications, inbound events; JWT `org_id`; `ApiUser.organizationId`; scoped requisition/candidate/application queries; workflow routes call `requireItemInOrganization`. | Extend org scope to remaining modules (dashboards, audit exports, ranking internals); optional Postgres RLS; org picker for multi-membership users. |
+| Auth.js v5 auth stack | partial | Custom JWT with `org_id` claim; `src/lib/auth/authjs-bridge.ts` documents dual-read cutover. | Mount Auth.js v5, validate session alongside JWT in `requireBearerUser`, migrate clients. |
+| Role/permission model with scoped assignments | partial | `roles`, `user_roles`, org membership; role checks unchanged. | Granular permissions keyed by org + resource. |
+| Jobs + applications ATS model | partial | **Job = `requisition_item`**: `/api/v1/jobs` and `/api/v1/jobs/[jobId]` alias scoped items; applications/candidates carry `organization_id`. | Product decision: keep alias or split `jobs` table; public naming consistency. |
+| Pipeline stage automation | partial | `pipeline_stage_definitions` + `/api/pipeline/stages`; `ats_automation_rules` + `/api/automation/rules`; item/requisition workflow engines unchanged. | Rule evaluation workers tied to stage transitions + SLA. |
+| Candidate 360 profile | partial | Candidate + application sync + interviews; multi-tenant filters on list/detail. | Timeline, notes, cross-job applications, comms history. |
+| Interview panelist + scorecards | partial | `interview_panelists`, `interview_scorecards`; `/api/interviews/[id]/panelists`, `/api/interviews/[id]/scorecards`. | HR UI in `CandidateDetailModal` + aggregation/read models for decisions. |
+| Google Calendar/Meet/Gmail | partial | Stub `/api/integrations/google/oauth/start` (flag `GOOGLE_WORKSPACE_INTEGRATION_ENABLED`); `organizations.google_oauth_tokens` column. | Real OAuth, encrypted tokens, Calendar/Gmail workers. |
+| Bulk import/export and async processing | partial | `bulk_import_jobs`; `/api/bulk-import`; BullMQ queue `bulk-import`; `npm run worker:bulk-import` (stub processor). | CSV/Excel parsers, progress UI, dead-letter handling. |
+| Career page + public apply + candidate portal | partial | `/api/public/apply/[slug]` with in-memory rate limit; `/api/candidate-portal/tokens` (staff) + `/api/candidate-portal/me?token=`. | Public Next.js career pages, magic-link email delivery, uploads from portal. |
+| Notifications system | partial | `notification_events` ledger; `/api/notifications/events` (enqueue/list stub). | Template engine, user prefs, worker delivery (email/SMTP), in-app inbox. |
+| Reports and analytics suite | partial | `/api/reports/ats-funnel` (stage counts per org); existing HR/manager dashboards. | Time-to-hire, source attribution, exports, scheduled reports. |
+| Audit and compliance enhancements | partial | Audit logs; core ATS entities org-scoped. | Compliance exports, retention, org-filtered audit UIs. |
+| Object storage (S3/MinIO) | partial | `src/lib/storage/s3-storage.ts` (S3/MinIO via `@aws-sdk/client-s3`); JD/resume paths still local-first. | Wire `STORAGE_DRIVER=s3` into JD/resume upload paths; blob migration tool. |
+| Security hardening (rate limits, CSRF, encryption) | partial | CSRF middleware; public apply rate limit (`PUBLIC_RATE_LIMIT_*` env). | Global API rate limits, secret rotation, field encryption for PII. |
+| Performance + observability + E2E | partial | `x-request-id`; structured JSON log on `/api/health`; Playwright `tests/e2e/health.spec.ts` + `npm run test:e2e`. | Tracing, metrics, broader E2E (login, apply, TA path). |
 
 ## Execution Order
 

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
 import { listRequisitionStatusHistoryForApi } from "@/lib/repositories/requisitions-read";
+import { assertRequisitionInOrganization } from "@/lib/tenant/org-assert";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,6 +63,7 @@ export async function GET(req: Request, { params }: Ctx) {
 
     const limit = Math.min(Math.max(pageSize, 1), 200);
     const offset = (page - 1) * limit;
+    await assertRequisitionInOrganization(reqId, user.organizationId);
     const data = await listRequisitionStatusHistoryForApi(reqId, { limit, offset });
     return NextResponse.json(data);
   } catch (e) {

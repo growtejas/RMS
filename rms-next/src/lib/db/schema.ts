@@ -14,6 +14,7 @@ import {
   uuid,
   jsonb,
   pgEnum,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 export const subscriptionPlanEnum = pgEnum("subscription_plan", [
@@ -65,6 +66,21 @@ export const userRoles = pgTable(
       .references(() => roles.roleId, { onDelete: "cascade" }),
   },
   (t) => [primaryKey({ columns: [t.userId, t.roleId] })],
+);
+
+/** User ↔ organization membership; primary org drives JWT `org_id` unless overridden. */
+export const organizationMembers = pgTable(
+  "organization_members",
+  {
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.userId, { onDelete: "cascade" }),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    isPrimary: boolean("is_primary").notNull().default(false),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.organizationId] })],
 );
 
 export type UserRow = typeof users.$inferSelect;
@@ -176,11 +192,15 @@ export const requisitions = pgTable(
     approvalHistory: timestamp("approval_history", { mode: "date" }),
     assignedAt: timestamp("assigned_at", { mode: "date" }),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
   },
   (t) => [
     index("idx_requisitions_status_reqid_desc").on(t.overallStatus, t.reqId),
     index("idx_requisitions_raisedby_reqid_desc").on(t.raisedBy, t.reqId),
     index("idx_requisitions_assignedta_reqid_desc").on(t.assignedTa, t.reqId),
+    index("idx_requisitions_organization_reqid_desc").on(t.organizationId, t.reqId),
   ],
 );
 
@@ -200,6 +220,16 @@ export const requisitionItems = pgTable(
     experienceYears: integer("experience_years"),
     educationRequirement: varchar("education_requirement", { length: 100 }),
     requirements: text("requirements"),
+    /** When true, ranking uses manager/requisition JD PDFs only; when false, uses pipeline overrides below. */
+    pipelineRankingUseRequisitionJd: boolean("pipeline_ranking_use_requisition_jd")
+      .notNull()
+      .default(true),
+    /** TA/HR-entered JD text for candidate ranking (used when not using requisition JD). */
+    pipelineJdText: text("pipeline_jd_text"),
+    /** Optional PDF stored like manager JD; extracted for ranking when not using requisition JD. */
+    pipelineJdFileKey: text("pipeline_jd_file_key"),
+    /** Optional explicit skill list for ATS V1 ranking; else derived from `requirements`. */
+    rankingRequiredSkills: jsonb("ranking_required_skills").$type<string[] | null>(),
     assignedEmpId: varchar("assigned_emp_id", { length: 20 }).references(
       () => employees.empId,
       { onDelete: "restrict" },
@@ -231,11 +261,40 @@ export const requisitionItems = pgTable(
   ],
 );
 
+/**
+ * Global identity per organization (normalized email). Multiple `candidates` rows
+ * (one per requisition line) may reference the same person.
+ */
+export const candidatePersons = pgTable(
+  "candidate_persons",
+  {
+    personId: serial("person_id").primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    emailNormalized: varchar("email_normalized", { length: 255 }).notNull(),
+    fullName: varchar("full_name", { length: 150 }).notNull(),
+    phone: varchar("phone", { length: 30 }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("uq_candidate_persons_org_email").on(
+      t.organizationId,
+      t.emailNormalized,
+    ),
+    index("idx_candidate_persons_org").on(t.organizationId),
+  ],
+);
+
 /** `backend/db/models/candidate.py` */
 export const candidates = pgTable(
   "candidates",
   {
     candidateId: serial("candidate_id").primaryKey(),
+    personId: integer("person_id")
+      .notNull()
+      .references(() => candidatePersons.personId, { onDelete: "restrict" }),
     requisitionItemId: integer("requisition_item_id")
       .notNull()
       .references(() => requisitionItems.itemId, { onDelete: "cascade" }),
@@ -253,8 +312,35 @@ export const candidates = pgTable(
     addedBy: integer("added_by").references(() => users.userId, {
       onDelete: "set null",
     }),
+    totalExperienceYears: numeric("total_experience_years", {
+      precision: 5,
+      scale: 2,
+    }),
+    noticePeriodDays: integer("notice_period_days"),
+    isReferral: boolean("is_referral").notNull().default(false),
+    candidateSkills: jsonb("candidate_skills").$type<string[] | null>(),
+    educationRaw: text("education_raw"),
+    /** SHA-256 hex of normalized resume text (for dedupe + parse cache invalidation). */
+    resumeContentHash: varchar("resume_content_hash", { length: 64 }),
+    /** Versioned JSON cache of last `ParsedResumeArtifact` for ranking (avoids re-parsing). */
+    resumeParseCache: jsonb("resume_parse_cache").$type<Record<string, unknown> | null>(),
+    /** Same requisition line + org: another candidate row with identical resume hash (flag-only dedupe). */
+    duplicateResumeOfCandidateId: integer("duplicate_resume_of_candidate_id").references(
+      (): AnyPgColumn => candidates.candidateId,
+      { onDelete: "set null" },
+    ),
+    /**
+     * Canonical structured resume (schema_version in JSON). Null when disabled or not yet extracted.
+     * @see rms-next/src/lib/services/resume-structure/resume-structure.schema.ts
+     */
+    resumeStructuredProfile: jsonb("resume_structured_profile").$type<Record<string, unknown> | null>(),
+    /** ready | pending | failed — async LLM refinement; null when unused. */
+    resumeStructureStatus: varchar("resume_structure_status", { length: 20 }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
   },
   (t) => [
     index("idx_candidates_item_stage_createdat").on(
@@ -263,6 +349,18 @@ export const candidates = pgTable(
       t.createdAt,
     ),
     index("idx_candidates_req_createdat").on(t.requisitionId, t.createdAt),
+    index("idx_candidates_org_item").on(t.organizationId, t.requisitionItemId),
+    uniqueIndex("uq_candidates_org_item_person").on(
+      t.organizationId,
+      t.requisitionItemId,
+      t.personId,
+    ),
+    index("idx_candidates_org_item_resume_hash").on(
+      t.organizationId,
+      t.requisitionItemId,
+      t.resumeContentHash,
+    ),
+    index("idx_candidates_resume_structure_status").on(t.resumeStructureStatus),
   ],
 );
 
@@ -287,6 +385,11 @@ export const applications = pgTable(
     }),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    /** ATS quality bucket from last ranking run (BEST | VERY_GOOD | GOOD | AVERAGE | NOT_SUITABLE). */
+    atsBucket: varchar("ats_bucket", { length: 30 }),
   },
   (t) => [
     uniqueIndex("uq_applications_candidate").on(t.candidateId),
@@ -296,6 +399,12 @@ export const applications = pgTable(
       t.createdAt,
     ),
     index("idx_applications_req_createdat").on(t.requisitionId, t.createdAt),
+    index("idx_applications_org_item").on(t.organizationId, t.requisitionItemId),
+    index("idx_applications_org_item_ats_bucket").on(
+      t.organizationId,
+      t.requisitionItemId,
+      t.atsBucket,
+    ),
   ],
 );
 
@@ -322,6 +431,66 @@ export const applicationStageHistory = pgTable(
   (t) => [
     index("idx_application_stage_history_app_changedat").on(t.applicationId, t.changedAt),
     index("idx_application_stage_history_candidate_changedat").on(t.candidateId, t.changedAt),
+  ],
+);
+
+/** Canonical skill names for ATS V1 alias resolution (docs/ATS §9.3). */
+export const skillAliases = pgTable(
+  "skill_aliases",
+  {
+    aliasId: serial("alias_id").primaryKey(),
+    canonicalSkill: varchar("canonical_skill", { length: 100 }).notNull(),
+    alias: varchar("alias", { length: 100 }).notNull().unique(),
+  },
+  (t) => [index("idx_skill_aliases_canonical").on(t.canonicalSkill)],
+);
+
+/** Versioned ranking config per requisition item (docs/ATS §6). */
+export const rankingVersions = pgTable(
+  "ranking_versions",
+  {
+    rankingVersionId: serial("ranking_version_id").primaryKey(),
+    requisitionItemId: integer("requisition_item_id")
+      .notNull()
+      .references(() => requisitionItems.itemId, { onDelete: "cascade" }),
+    versionNumber: integer("version_number").notNull(),
+    config: jsonb("config").notNull().default({}),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ranking_versions_item_version_unique").on(
+      t.requisitionItemId,
+      t.versionNumber,
+    ),
+    index("idx_ranking_versions_item_active").on(t.requisitionItemId, t.isActive),
+  ],
+);
+
+/** Per-candidate score for a ranking version (docs/ATS §5). */
+export const candidateJobScores = pgTable(
+  "candidate_job_scores",
+  {
+    scoreId: serial("score_id").primaryKey(),
+    candidateId: integer("candidate_id")
+      .notNull()
+      .references(() => candidates.candidateId, { onDelete: "cascade" }),
+    requisitionItemId: integer("requisition_item_id")
+      .notNull()
+      .references(() => requisitionItems.itemId, { onDelete: "cascade" }),
+    rankingVersionId: integer("ranking_version_id")
+      .notNull()
+      .references(() => rankingVersions.rankingVersionId, { onDelete: "cascade" }),
+    score: numeric("score", { precision: 5, scale: 2 }).notNull(),
+    breakdown: jsonb("breakdown").notNull(),
+    computedAt: timestamp("computed_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("candidate_job_scores_unique").on(
+      t.candidateId,
+      t.rankingVersionId,
+    ),
+    index("idx_candidate_job_scores_item_score").on(t.requisitionItemId, t.score),
   ],
 );
 
@@ -353,6 +522,42 @@ export const rankingSnapshots = pgTable(
   (t) => [
     index("idx_ranking_snapshots_item_generatedat").on(t.requisitionItemId, t.generatedAt),
     index("idx_ranking_snapshots_req_generatedat").on(t.requisitionId, t.generatedAt),
+  ],
+);
+
+/** Cached AI evaluation (structured) per requisition item + candidate + input hash. */
+export const candidateAiEvaluations = pgTable(
+  "candidate_ai_evaluations",
+  {
+    evaluationId: serial("evaluation_id").primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    requisitionItemId: integer("requisition_item_id")
+      .notNull()
+      .references(() => requisitionItems.itemId, { onDelete: "cascade" }),
+    candidateId: integer("candidate_id")
+      .notNull()
+      .references(() => candidates.candidateId, { onDelete: "cascade" }),
+    inputHash: varchar("input_hash", { length: 64 }).notNull(),
+    model: varchar("model", { length: 80 }).notNull(),
+    promptVersion: varchar("prompt_version", { length: 40 }).notNull(),
+    aiScore: numeric("ai_score", { precision: 6, scale: 2 }).notNull(),
+    breakdown: jsonb("breakdown").notNull(),
+    summary: text("summary").notNull(),
+    risks: jsonb("risks").$type<string[]>().notNull(),
+    confidence: numeric("confidence", { precision: 5, scale: 4 }).notNull(),
+    rawError: text("raw_error"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("uq_candidate_ai_eval_item_candidate_hash").on(
+      t.requisitionItemId,
+      t.candidateId,
+      t.inputHash,
+    ),
+    index("idx_candidate_ai_eval_org_item").on(t.organizationId, t.requisitionItemId),
+    index("idx_candidate_ai_eval_candidate").on(t.candidateId),
   ],
 );
 
@@ -429,6 +634,9 @@ export const inboundEvents = pgTable(
     dedupeReview: jsonb("dedupe_review"),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
   },
   (t) => [
     uniqueIndex("uq_inbound_events_source_external").on(t.source, t.externalId),
@@ -481,6 +689,138 @@ export const interviews = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow(),
   },
   (t) => [index("idx_interviews_candidate_round").on(t.candidateId, t.roundNumber)],
+);
+
+/** Configurable pipeline stage labels per org (requisition_item / application stages). */
+export const pipelineStageDefinitions = pgTable(
+  "pipeline_stage_definitions",
+  {
+    id: serial("id").primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    stageKey: varchar("stage_key", { length: 40 }).notNull(),
+    label: varchar("label", { length: 120 }).notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    isTerminal: boolean("is_terminal").notNull().default(false),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("pipeline_stage_definitions_org_stage_unique").on(
+      t.organizationId,
+      t.stageKey,
+    ),
+  ],
+);
+
+/** ATS automation hooks (thresholds, SLA reminders); evaluated by workers / services. */
+export const atsAutomationRules = pgTable(
+  "ats_automation_rules",
+  {
+    id: serial("id").primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 120 }).notNull(),
+    trigger: varchar("trigger", { length: 80 }).notNull(),
+    config: jsonb("config").notNull().default({}),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [index("idx_ats_automation_rules_org_active").on(t.organizationId, t.isActive)],
+);
+
+export const interviewPanelists = pgTable(
+  "interview_panelists",
+  {
+    id: serial("id").primaryKey(),
+    interviewId: integer("interview_id")
+      .notNull()
+      .references(() => interviews.id, { onDelete: "cascade" }),
+    userId: integer("user_id").references(() => users.userId, { onDelete: "set null" }),
+    displayName: varchar("display_name", { length: 150 }).notNull(),
+    roleLabel: varchar("role_label", { length: 80 }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow(),
+  },
+  (t) => [index("idx_interview_panelists_interview").on(t.interviewId)],
+);
+
+export const interviewScorecards = pgTable(
+  "interview_scorecards",
+  {
+    id: serial("id").primaryKey(),
+    interviewId: integer("interview_id")
+      .notNull()
+      .references(() => interviews.id, { onDelete: "cascade" }),
+    panelistId: integer("panelist_id").references(() => interviewPanelists.id, {
+      onDelete: "set null",
+    }),
+    scores: jsonb("scores").notNull().default({}),
+    notes: text("notes"),
+    submittedBy: integer("submitted_by").references(() => users.userId, {
+      onDelete: "set null",
+    }),
+    submittedAt: timestamp("submitted_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [index("idx_interview_scorecards_interview").on(t.interviewId)],
+);
+
+export const bulkImportJobs = pgTable(
+  "bulk_import_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: varchar("kind", { length: 40 }).notNull(),
+    status: varchar("status", { length: 20 }).notNull().default("queued"),
+    payload: jsonb("payload"),
+    resultSummary: jsonb("result_summary"),
+    errorMessage: text("error_message"),
+    createdBy: integer("created_by").references(() => users.userId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_bulk_import_jobs_org_status").on(t.organizationId, t.status, t.createdAt),
+  ],
+);
+
+export const notificationEvents = pgTable(
+  "notification_events",
+  {
+    id: serial("id").primaryKey(),
+    organizationId: uuid("organization_id").references(() => organizations.id, {
+      onDelete: "cascade",
+    }),
+    eventType: varchar("event_type", { length: 80 }).notNull(),
+    payload: jsonb("payload").notNull(),
+    channel: varchar("channel", { length: 20 }).notNull().default("email"),
+    status: varchar("status", { length: 20 }).notNull().default("pending"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_notification_events_org_status").on(
+      t.organizationId,
+      t.status,
+      t.createdAt,
+    ),
+  ],
+);
+
+export const candidatePortalTokens = pgTable(
+  "candidate_portal_tokens",
+  {
+    tokenHash: varchar("token_hash", { length: 64 }).primaryKey(),
+    applicationId: integer("application_id")
+      .notNull()
+      .references(() => applications.applicationId, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [index("idx_candidate_portal_tokens_app").on(t.applicationId)],
 );
 
 /** `backend/db/models/requisition_status_history.py` */

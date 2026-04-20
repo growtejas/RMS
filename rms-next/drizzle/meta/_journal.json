@@ -57,6 +57,76 @@
       "when": 1776337496395,
       "tag": "0007_phase5_embeddings_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1776400000000,
+      "tag": "0008_pipeline_ranking_jd",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1776500000000,
+      "tag": "0009_ats_v1_ranking",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1776600000000,
+      "tag": "0010_ats_gap_matrix_rollout",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1776700000000,
+      "tag": "0011_tenant_org_members_repair",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1776800000000,
+      "tag": "0012_candidate_education_raw",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1776900000000,
+      "tag": "0013_candidate_resume_cache_dedupe",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1777000000000,
+      "tag": "0014_resume_structured_profile",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1777100000000,
+      "tag": "0015_candidate_ai_evaluations",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1777200000000,
+      "tag": "0016_applications_ats_bucket",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1777300000000,
+      "tag": "0017_candidate_persons_global_pool",
+      "breakpoints": true
     }
   ]
 }

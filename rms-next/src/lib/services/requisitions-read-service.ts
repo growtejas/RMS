@@ -20,6 +20,10 @@ export type RequisitionItemJson = {
   education_requirement: string | null;
   job_description: string;
   jd_file_key: string | null;
+  pipeline_ranking_use_requisition_jd: boolean;
+  pipeline_jd_text: string | null;
+  pipeline_jd_file_key: string | null;
+  ranking_required_skills: string[] | null;
   requirements: string | null;
   item_status: string;
   replacement_hire: boolean;
@@ -104,6 +108,14 @@ export function requisitionItemToJson(row: RequisitionItemRow): RequisitionItemJ
     education_requirement: row.educationRequirement ?? null,
     job_description: row.jobDescription,
     jd_file_key: row.jdFileKey ?? null,
+    pipeline_ranking_use_requisition_jd: row.pipelineRankingUseRequisitionJd !== false,
+    pipeline_jd_text: row.pipelineJdText ?? null,
+    pipeline_jd_file_key: row.pipelineJdFileKey ?? null,
+    ranking_required_skills: Array.isArray(row.rankingRequiredSkills)
+      ? row.rankingRequiredSkills.filter(
+          (s): s is string => typeof s === "string",
+        )
+      : null,
     requirements: row.requirements ?? null,
     item_status: row.itemStatus,
     replacement_hire: row.replacementHire,
@@ -211,6 +223,7 @@ export function isTaRole(roles: readonly string[]): boolean {
 }
 
 export async function listRequisitionsRead(input: {
+  organizationId: string;
   roles: readonly string[];
   currentUserId: number;
   status: string | null;
@@ -231,6 +244,7 @@ export async function listRequisitionsRead(input: {
 
   const assignedToMeAlias = input.assignedTo === "me";
   const headers = await listRequisitionsFiltered({
+    organizationId: input.organizationId,
     isTaUser: isTaRole(input.roles),
     currentUserId: input.currentUserId,
     myAssignments: input.myAssignments,
@@ -243,7 +257,7 @@ export async function listRequisitionsRead(input: {
   });
 
   const reqIds = headers.map((h) => h.reqId);
-  const allItems = await selectItemsForReqIds(reqIds);
+  const allItems = await selectItemsForReqIds(reqIds, input.organizationId);
   const byReq = new Map<number, RequisitionItemRow[]>();
   for (const it of allItems) {
     const list = byReq.get(it.reqId) ?? [];
@@ -260,6 +274,7 @@ export async function listRequisitionsRead(input: {
 }
 
 export async function listMyRequisitionsRead(
+  organizationId: string,
   userId: number,
   params?: { page?: number; pageSize?: number },
 ): Promise<RequisitionListJson[]> {
@@ -271,9 +286,12 @@ export async function listMyRequisitionsRead(
   const pageSize = Math.min(Math.max(pageSizeRaw, 1), 200);
   const offset = (page - 1) * pageSize;
 
-  const headers = await listRequisitionsForRaisedBy(userId, { limit: pageSize, offset });
+  const headers = await listRequisitionsForRaisedBy(organizationId, userId, {
+    limit: pageSize,
+    offset,
+  });
   const reqIds = headers.map((h) => h.reqId);
-  const allItems = await selectItemsForReqIds(reqIds);
+  const allItems = await selectItemsForReqIds(reqIds, organizationId);
   const byReq = new Map<number, RequisitionItemRow[]>();
   for (const it of allItems) {
     const list = byReq.get(it.reqId) ?? [];
@@ -290,12 +308,13 @@ export async function listMyRequisitionsRead(
 
 export async function getRequisitionDetailRead(
   reqId: number,
+  organizationId: string,
 ): Promise<RequisitionDetailJson> {
-  const header = await selectRequisitionById(reqId);
+  const header = await selectRequisitionById(reqId, organizationId);
   if (!header) {
     throw new HttpError(404, "Requisition not found");
   }
-  const itemRows = await selectItemsForReqId(reqId);
+  const itemRows = await selectItemsForReqId(reqId, organizationId);
   const items = itemRows.map(requisitionItemToJson);
   const base = headerToListBase(header, items);
   const computed = computeDetailFields(itemRows);

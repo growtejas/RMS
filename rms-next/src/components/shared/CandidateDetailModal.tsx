@@ -9,7 +9,7 @@
  *  3. Round Scheduler (multi-step form to add interviews)
  *  4. Stage transition actions
  */
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   X,
   FileText,
@@ -31,8 +31,15 @@ import {
   getCandidateWithApplication,
   getCandidateActionErrorMessage,
   updateCandidateStageCompatible,
+  fetchRequisitionItemRanking,
 } from "@/lib/api/candidateApi";
 import { apiClient } from "@/lib/api/client";
+import CandidateEvaluationCard from "@/components/evaluation/CandidateEvaluationCard";
+import type { CandidateEvaluationCardModel } from "@/components/evaluation/candidate-evaluation-card.types";
+import {
+  mapRankedCandidateToEvaluationCard,
+  type EvaluationCardContext,
+} from "@/components/evaluation/mapRankedCandidateToEvaluationCard";
 
 /** Re-export for callers that need the 403 message text. */
 export { TA_OWNERSHIP_DENIED_MESSAGE } from "@/lib/api/candidateApi";
@@ -45,6 +52,16 @@ interface CandidateDetailModalProps {
   userRoles: string[];
   /** Base URL for the API to construct resume download URLs */
   apiBaseUrl?: string;
+  /** Optional requisition context for role-fit mapping (experience years, required skills count). */
+  evaluationContext?: EvaluationCardContext;
+  /** When true, Shortlist from the evaluation card is disabled (e.g. TA item has no CV on file). */
+  evaluationShortlistBlocked?: boolean;
+  evaluationShortlistBlockedReason?: string;
+  /**
+   * `evaluate` = ATS evaluation only (shortlist/reject via card; no interviews or stage moves).
+   * `execute` = full hiring workspace. Omit for legacy HR/manager screens (treated as execute).
+   */
+  pipelineWorkspace?: "evaluate" | "execute";
 }
 
 const STAGE_COLORS: Record<
@@ -102,8 +119,15 @@ export default function CandidateDetailModal({
   onClose,
   onUpdate,
   userRoles,
+  evaluationContext,
+  evaluationShortlistBlocked,
+  evaluationShortlistBlockedReason,
+  pipelineWorkspace,
 }: CandidateDetailModalProps) {
+  const isEvaluateWorkspace = pipelineWorkspace === "evaluate";
+
   const [candidate, setCandidate] = useState<Candidate>(initialCandidate);
+  const modalBodyRef = useRef<HTMLDivElement>(null);
   const [showScheduler, setShowScheduler] = useState(false);
   const [showResume, setShowResume] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
@@ -111,6 +135,7 @@ export default function CandidateDetailModal({
   const [resumeBlobUrl, setResumeBlobUrl] = useState<string | null>(null);
   const [resumeMimeType, setResumeMimeType] = useState<string | null>(null);
   const [loadingResume, setLoadingResume] = useState(false);
+  const [resumeLoadError, setResumeLoadError] = useState<string | null>(null);
 
   // Scheduler form state
   const [interviewerName, setInterviewerName] = useState("");
@@ -123,6 +148,17 @@ export default function CandidateDetailModal({
   const [editResult, setEditResult] = useState<string>("");
   const [editFeedback, setEditFeedback] = useState<string>("");
 
+  const [evaluationLoading, setEvaluationLoading] = useState(false);
+  const [evaluationError, setEvaluationError] = useState<string | null>(null);
+  const [evaluationModel, setEvaluationModel] =
+    useState<CandidateEvaluationCardModel | null>(null);
+  const [evaluationRank, setEvaluationRank] = useState<number | null>(null);
+  const [evaluationNotInSnapshot, setEvaluationNotInSnapshot] = useState(false);
+  const [evaluationRefreshKey, setEvaluationRefreshKey] = useState(0);
+
+  /** Bumped when opening / hydrating or when user mutates candidate so stale fetches cannot overwrite. */
+  const candidateHydrateGenRef = useRef(0);
+
   const normalizedRoles = userRoles.map((r) => r.toLowerCase());
   const canEdit = normalizedRoles.some((r) =>
     ["ta", "hr", "admin"].includes(r),
@@ -130,8 +166,135 @@ export default function CandidateDetailModal({
   const stageColor =
     STAGE_COLORS[candidate.current_stage] ?? STAGE_COLORS["Sourced"]!;
 
+  useEffect(() => {
+    setCandidate(initialCandidate);
+    const gen = ++candidateHydrateGenRef.current;
+    const { candidate_id, application_id } = initialCandidate;
+    void (async () => {
+      try {
+        const full = await getCandidateWithApplication(
+          candidate_id,
+          application_id ?? undefined,
+        );
+        if (gen !== candidateHydrateGenRef.current) {
+          return;
+        }
+        setCandidate({
+          ...full,
+          application_id:
+            full.application_id ?? initialCandidate.application_id ?? undefined,
+          stage_history:
+            full.stage_history ?? initialCandidate.stage_history ?? [],
+        });
+      } catch {
+        // Keep initialCandidate (already set); list payloads often omit interviews[]
+      }
+    })();
+  }, [initialCandidate.candidate_id, initialCandidate.application_id]);
+
+  useEffect(() => {
+    if (isEvaluateWorkspace) {
+      setShowScheduler(false);
+    }
+  }, [isEvaluateWorkspace]);
+
+  const loadEvaluation = useCallback(async () => {
+    const itemId = candidate.requisition_item_id;
+    if (!itemId) {
+      setEvaluationLoading(false);
+      setEvaluationError(null);
+      setEvaluationModel(null);
+      setEvaluationRank(null);
+      setEvaluationNotInSnapshot(false);
+      return;
+    }
+    setEvaluationLoading(true);
+    setEvaluationError(null);
+    setEvaluationModel(null);
+    setEvaluationRank(null);
+    setEvaluationNotInSnapshot(false);
+    try {
+      const data = await fetchRequisitionItemRanking(itemId, { aiEval: true });
+      const idx = data.ranked_candidates.findIndex(
+        (r) => r.candidate_id === candidate.candidate_id,
+      );
+      if (idx < 0) {
+        setEvaluationNotInSnapshot(true);
+        return;
+      }
+      const row = data.ranked_candidates[idx]!;
+      const ctx: EvaluationCardContext = {
+        requiredExperienceYears:
+          evaluationContext?.requiredExperienceYears ?? null,
+        requiredSkillsCount:
+          evaluationContext?.requiredSkillsCount ??
+          data.meta?.required_skills_count,
+      };
+      setEvaluationRank(idx + 1);
+      setEvaluationModel(mapRankedCandidateToEvaluationCard(row, ctx));
+    } catch (err: unknown) {
+      setEvaluationError(
+        getCandidateActionErrorMessage(
+          err,
+          "Could not load role fit for this position.",
+        ),
+      );
+    } finally {
+      setEvaluationLoading(false);
+    }
+  }, [
+    candidate.candidate_id,
+    candidate.requisition_item_id,
+    evaluationContext?.requiredExperienceYears,
+    evaluationContext?.requiredSkillsCount,
+    evaluationRefreshKey,
+  ]);
+
+  useEffect(() => {
+    void loadEvaluation();
+  }, [loadEvaluation]);
+
+  const handleEvaluationShortlist = async () => {
+    setError(null);
+    try {
+      candidateHydrateGenRef.current += 1;
+      const updated = await updateCandidateStageCompatible(candidate, {
+        new_stage: "Shortlisted",
+      });
+      setCandidate(updated);
+      onUpdate(updated);
+      setEvaluationRefreshKey((k) => k + 1);
+    } catch (err: unknown) {
+      setError(
+        getCandidateActionErrorMessage(err, "Could not shortlist candidate"),
+      );
+    }
+  };
+
+  const handleEvaluationReject = async () => {
+    setError(null);
+    try {
+      candidateHydrateGenRef.current += 1;
+      const updated = await updateCandidateStageCompatible(candidate, {
+        new_stage: "Rejected",
+      });
+      setCandidate(updated);
+      onUpdate(updated);
+      setEvaluationRefreshKey((k) => k + 1);
+    } catch (err: unknown) {
+      setError(
+        getCandidateActionErrorMessage(err, "Could not reject candidate"),
+      );
+    }
+  };
+
+  const scrollModalBodyToTop = () => {
+    modalBodyRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   // Refresh candidate data
   const refresh = async () => {
+    candidateHydrateGenRef.current += 1;
     try {
       const updated = await getCandidateWithApplication(
         candidate.candidate_id,
@@ -149,6 +312,7 @@ export default function CandidateDetailModal({
     setError(null);
     setTransitioning(true);
     try {
+      candidateHydrateGenRef.current += 1;
       const updated = await updateCandidateStageCompatible(candidate, {
         new_stage: newStage as Candidate["current_stage"],
       });
@@ -238,8 +402,9 @@ export default function CandidateDetailModal({
     let objectUrl: string | null = null;
     const loadResume = async () => {
       setLoadingResume(true);
+      setResumeLoadError(null);
       try {
-        const response = await apiClient.get(`/uploads/resume/${filename}`, {
+        const response = await apiClient.get(`/uploads/resume/${encodeURIComponent(filename)}`, {
           responseType: "blob",
         });
         objectUrl = URL.createObjectURL(response.data);
@@ -248,6 +413,9 @@ export default function CandidateDetailModal({
       } catch {
         setResumeBlobUrl(null);
         setResumeMimeType(null);
+        setResumeLoadError(
+          "Could not load this resume. The file may be missing on the server or you may not have access.",
+        );
       } finally {
         setLoadingResume(false);
       }
@@ -372,7 +540,10 @@ export default function CandidateDetailModal({
         </div>
 
         {/* ---- Body (scrollable) ---- */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "24px" }}>
+        <div
+          ref={modalBodyRef}
+          style={{ flex: 1, overflowY: "auto", padding: "24px" }}
+        >
           {error && (
             <div
               style={{
@@ -392,8 +563,109 @@ export default function CandidateDetailModal({
             </div>
           )}
 
+          {isEvaluateWorkspace && (
+            <div
+              style={{
+                marginBottom: "16px",
+                padding: "12px 14px",
+                borderRadius: "10px",
+                backgroundColor: "rgba(59,130,246,0.06)",
+                border: "1px solid rgba(59,130,246,0.2)",
+                fontSize: "12px",
+                color: "var(--text-secondary)",
+                lineHeight: 1.45,
+              }}
+            >
+              <strong>ATS evaluation:</strong> use role fit and shortlist or
+              reject below. Scheduling interviews, editing rounds, and stage moves
+              belong in the <strong>Shortlisted</strong> and{" "}
+              <strong>Interviews</strong> tabs on the requisition.
+            </div>
+          )}
+
+          {isEvaluateWorkspace &&
+            evaluationShortlistBlocked === true &&
+            evaluationShortlistBlockedReason ? (
+            <div
+              style={{
+                marginBottom: "16px",
+                padding: "12px 14px",
+                borderRadius: "10px",
+                backgroundColor: "rgba(245,158,11,0.08)",
+                border: "1px solid rgba(245,158,11,0.28)",
+                fontSize: "12px",
+                color: "var(--text-secondary)",
+                lineHeight: 1.45,
+              }}
+            >
+              <strong style={{ color: "var(--text-primary)" }}>
+                Shortlist unavailable:{" "}
+              </strong>
+              {evaluationShortlistBlockedReason} Upload the position CV on the
+              requisition line (ATS) if you have not already.
+            </div>
+          ) : null}
+
+          {/* ---- Role fit & evaluation (lazy-loaded) ---- */}
+          <div style={{ marginBottom: "20px" }}>
+            <div
+              style={{
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "var(--text-tertiary)",
+                marginBottom: "8px",
+                textTransform: "uppercase",
+                letterSpacing: "0.5px",
+              }}
+            >
+              Role fit & evaluation
+            </div>
+            {!candidate.requisition_item_id ? (
+              <div style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
+                No position is linked to this candidate record.
+              </div>
+            ) : evaluationLoading ? (
+              <div style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
+                Loading evaluation…
+              </div>
+            ) : evaluationError ? (
+              <div style={{ fontSize: "13px", color: "#ef4444" }}>
+                {evaluationError}
+              </div>
+            ) : evaluationNotInSnapshot ? (
+              <div style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
+                This candidate is not in the current ranking snapshot for this
+                position. Try refreshing the ranking from the requisition view.
+              </div>
+            ) : evaluationModel ? (
+              <>
+                {evaluationRank != null ? (
+                  <div
+                    style={{
+                      fontSize: "11px",
+                      color: "var(--text-tertiary)",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Rank #{evaluationRank} for this position
+                  </div>
+                ) : null}
+                <CandidateEvaluationCard
+                  model={evaluationModel}
+                  readOnly={!canEdit}
+                  disabled={evaluationShortlistBlocked === true}
+                  shortlistDisabledReason={evaluationShortlistBlockedReason}
+                  onShortlist={() => void handleEvaluationShortlist()}
+                  onReject={() => void handleEvaluationReject()}
+                  onViewDetails={scrollModalBodyToTop}
+                />
+              </>
+            ) : null}
+          </div>
+
           {/* ---- Stage Actions ---- */}
           {canEdit &&
+            !isEvaluateWorkspace &&
             !["Hired", "Rejected"].includes(candidate.current_stage) && (
               <div style={{ marginBottom: "20px" }}>
                 <div
@@ -548,6 +820,17 @@ export default function CandidateDetailModal({
                   >
                     Loading resume...
                   </div>
+                ) : resumeLoadError ? (
+                  <div
+                    style={{
+                      padding: "24px",
+                      textAlign: "center",
+                      color: "var(--error)",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {resumeLoadError}
+                  </div>
                 ) : resumeUrl ? (
                   <>
                     {isPdf ? (
@@ -614,7 +897,7 @@ export default function CandidateDetailModal({
                       fontSize: "13px",
                     }}
                   >
-                    No resume uploaded yet.
+                    No resume on file for this candidate.
                   </div>
                 )}
               </div>
@@ -622,6 +905,7 @@ export default function CandidateDetailModal({
           </div>
 
           {/* ---- Interview Timeline ---- */}
+          {(!isEvaluateWorkspace || candidate.interviews.length > 0) && (
           <div style={{ marginBottom: "24px" }}>
             <div
               style={{
@@ -643,7 +927,7 @@ export default function CandidateDetailModal({
                 <Calendar size={16} /> Interview Rounds (
                 {candidate.interviews.length})
               </span>
-              {canEdit && (
+              {canEdit && !isEvaluateWorkspace && (
                 <button
                   className="action-button primary"
                   style={{
@@ -659,9 +943,22 @@ export default function CandidateDetailModal({
                 </button>
               )}
             </div>
+            {!isEvaluateWorkspace ? (
+            <p
+              style={{
+                fontSize: "12px",
+                color: "var(--muted-foreground, #64748b)",
+                margin: "0 0 12px 0",
+              }}
+            >
+              Structured panelists and scorecards: API routes{" "}
+              <code>{"/api/interviews/{id}/panelists"}</code> and{" "}
+              <code>{"/api/interviews/{id}/scorecards"}</code>.
+            </p>
+            ) : null}
 
             {/* Scheduler form */}
-            {showScheduler && (
+            {showScheduler && !isEvaluateWorkspace && (
               <form
                 onSubmit={handleSchedule}
                 style={{
@@ -915,7 +1212,9 @@ export default function CandidateDetailModal({
                         )}
 
                         {/* Inline edit for interview result */}
-                        {canEdit && iv.status !== "Cancelled" && (
+                        {canEdit &&
+                          !isEvaluateWorkspace &&
+                          iv.status !== "Cancelled" && (
                           <>
                             {!isEditing ? (
                               <div
@@ -1060,6 +1359,7 @@ export default function CandidateDetailModal({
               </div>
             )}
           </div>
+          )}
         </div>
       </div>
     </div>

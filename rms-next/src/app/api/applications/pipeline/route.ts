@@ -51,6 +51,7 @@ export async function GET(req: Request) {
     }
 
     const data = await getApplicationsPipelineJson({
+      organizationId: user.organizationId,
       requisitionItemId,
       requisitionId,
       compact,

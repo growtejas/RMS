@@ -15,6 +15,7 @@ export async function GET(req: Request) {
     user_id: user.userId,
     username: user.username,
     roles: user.roles,
+    organization_id: user.organizationId,
   });
 }
 

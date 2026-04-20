@@ -23,10 +23,28 @@ import { insertResumeParseArtifact } from "@/lib/repositories/resume-parse-artif
 import { validateInboundPayloadBySource } from "@/lib/services/inbound-events-validation-service";
 import { getDb } from "@/lib/db";
 import { auditLog, candidates } from "@/lib/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, ne } from "drizzle-orm";
+import {
+  contentHashFromArtifact,
+  parsedArtifactToCacheRecord,
+  resolveResumeRefForFilesystem,
+  tryStatLocalResumeFile,
+} from "@/lib/services/resume-parse-cache";
 import { parseResumeArtifact } from "@/lib/services/resume-parser-service";
 import * as candidatesRepo from "@/lib/repositories/candidates-repo";
+import { findOrCreatePersonTx } from "@/lib/repositories/candidate-persons-repo";
 import { ensureApplicationForCandidateTx } from "@/lib/services/application-sync-service";
+import { enqueueResumeStructureRefineJob } from "@/lib/queue/resume-structure-queue";
+import { mergeStructuredProfileForPersist } from "@/lib/services/resume-structure/merge-candidate-profile";
+import {
+  resolveResumeStructureEnabled,
+  runResumeStructurePipeline,
+} from "@/lib/services/resume-structure/resume-structure-pipeline";
+
+function candidateResumeHashRejectDuplicates(): boolean {
+  const v = process.env.CANDIDATE_RESUME_HASH_REJECT_DUPLICATES?.trim().toLowerCase();
+  return v === "true" || v === "1";
+}
 
 function cleanString(value: unknown): string | null {
   if (typeof value !== "string") {
@@ -420,21 +438,156 @@ export async function persistInboundEvent(params: {
     ? ` dedupe_review=probable_match ids=[${probableIds.join(",")}]`
     : "";
 
+  const parsed = params.parsedResumeArtifact.parsedData ?? {};
+  const parsedSkills = Array.isArray((parsed as { skills?: unknown }).skills)
+    ? ((parsed as { skills?: unknown }).skills as unknown[])
+        .filter((s): s is string => typeof s === "string")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+  const parsedExp = (parsed as { experience_years?: unknown }).experience_years;
+  const parsedNotice = (parsed as { notice_period_days?: unknown }).notice_period_days;
+  const parsedEdu = (parsed as { education_raw?: unknown }).education_raw;
+  const experienceYears =
+    typeof parsedExp === "number" && Number.isFinite(parsedExp) ? parsedExp : null;
+  const noticeDays =
+    typeof parsedNotice === "number" && Number.isFinite(parsedNotice)
+      ? Math.trunc(parsedNotice)
+      : null;
+  const educationRaw = typeof parsedEdu === "string" && parsedEdu.trim() ? parsedEdu.trim() : null;
+
+  const resumeRefFs = resolveResumeRefForFilesystem(resumePath);
+  const resumeStat = resumeRefFs ? await tryStatLocalResumeFile(resumeRefFs) : null;
+  const resumeCacheRow = parsedArtifactToCacheRecord(
+    params.parsedResumeArtifact,
+    resumeStat,
+    resumePath ?? null,
+  );
+  const resumeHash = contentHashFromArtifact(params.parsedResumeArtifact);
+
   const db = getDb();
+  let enqueueStructureRefineCandidateId: number | null = null;
+  let shouldEnqueueStructureRefine = false;
+
   await db.transaction(async (tx) => {
+    const emailNorm = email.trim().toLowerCase();
+    const personId = await findOrCreatePersonTx(tx, {
+      organizationId: meta.organizationId,
+      emailNormalized: emailNorm,
+      fullName,
+      phone,
+    });
     const [existing] = await tx
-      .select({ candidateId: candidates.candidateId, currentStage: candidates.currentStage })
+      .select({
+        candidateId: candidates.candidateId,
+        currentStage: candidates.currentStage,
+        totalExperienceYears: candidates.totalExperienceYears,
+        noticePeriodDays: candidates.noticePeriodDays,
+        candidateSkills: candidates.candidateSkills,
+        educationRaw: candidates.educationRaw,
+        resumeStructuredProfile: candidates.resumeStructuredProfile,
+      })
       .from(candidates)
       .where(
-        and(eq(candidates.requisitionItemId, itemId), eq(candidates.email, email)),
+        and(
+          eq(candidates.requisitionItemId, itemId),
+          eq(candidates.personId, personId),
+        ),
       )
       .limit(1);
+
+    const structureOutcome = await runResumeStructurePipeline({
+      rawText: params.parsedResumeArtifact.rawText,
+      sourceHash: resumeHash,
+      fallbackName: fullName,
+      fallbackEmail: email,
+      existingProfile: (existing?.resumeStructuredProfile ?? null) as Record<
+        string,
+        unknown
+      > | null,
+      logContext: {
+        inbound_event_id: params.inboundEventId,
+        requisition_item_id: itemId,
+      },
+    });
+
+    const merged = mergeStructuredProfileForPersist({
+      existing: existing
+        ? {
+            candidateSkills: existing.candidateSkills,
+            totalExperienceYears: existing.totalExperienceYears,
+            noticePeriodDays: existing.noticePeriodDays,
+            educationRaw: existing.educationRaw,
+          }
+        : null,
+      parsed: {
+        skills: parsedSkills,
+        experienceYears,
+        noticeDays,
+        educationRaw,
+      },
+      structured: structureOutcome.document?.profile ?? null,
+    });
+
+    const structuredProfileValue = structureOutcome.document
+      ? (structureOutcome.document as unknown as Record<string, unknown>)
+      : null;
+    const structuredStatusValue = structureOutcome.document
+      ? structureOutcome.resumeStructureStatus ?? "ready"
+      : null;
+
+    shouldEnqueueStructureRefine =
+      resolveResumeStructureEnabled() && structureOutcome.enqueueLlmRefine;
 
     let candidateId: number;
     let candidateStage: string;
     if (existing) {
       candidateId = existing.candidateId;
       candidateStage = existing.currentStage;
+
+      let duplicateResumeOfCandidateId: number | null = null;
+      if (resumeHash) {
+        if (candidateResumeHashRejectDuplicates()) {
+          const [collision] = await tx
+            .select({ candidateId: candidates.candidateId })
+            .from(candidates)
+            .where(
+              and(
+                eq(candidates.organizationId, meta.organizationId),
+                eq(candidates.requisitionItemId, itemId),
+                eq(candidates.resumeContentHash, resumeHash),
+                isNotNull(candidates.resumeContentHash),
+                ne(candidates.candidateId, existing.candidateId),
+              ),
+            )
+            .limit(1);
+          if (collision) {
+            throw new HttpError(
+              409,
+              `Duplicate resume content already exists for this job (candidate_id=${collision.candidateId})`,
+            );
+          }
+        } else {
+          const [dup] = await tx
+            .select({ candidateId: candidates.candidateId })
+            .from(candidates)
+            .where(
+              and(
+                eq(candidates.organizationId, meta.organizationId),
+                eq(candidates.requisitionItemId, itemId),
+                eq(candidates.resumeContentHash, resumeHash),
+                isNotNull(candidates.resumeContentHash),
+                ne(candidates.candidateId, existing.candidateId),
+                ne(candidates.email, email),
+              ),
+            )
+            .limit(1);
+          if (dup) {
+            duplicateResumeOfCandidateId = dup.candidateId;
+          }
+        }
+      }
+
       await tx
         .update(candidates)
         .set({
@@ -442,6 +595,21 @@ export async function persistInboundEvent(params: {
           phone,
           currentCompany,
           resumePath,
+          totalExperienceYears: merged.totalExperienceYears,
+          noticePeriodDays: merged.noticePeriodDays,
+          candidateSkills: merged.candidateSkills,
+          educationRaw: merged.educationRaw,
+          resumeContentHash: resumeHash,
+          resumeParseCache: { ...resumeCacheRow } as Record<string, unknown>,
+          ...(resolveResumeStructureEnabled()
+            ? {
+                resumeStructuredProfile: structuredProfileValue,
+                resumeStructureStatus: structuredStatusValue,
+              }
+            : {}),
+          ...(duplicateResumeOfCandidateId != null
+            ? { duplicateResumeOfCandidateId }
+            : {}),
           updatedAt: new Date(),
         })
         .where(eq(candidates.candidateId, existing.candidateId));
@@ -457,9 +625,51 @@ export async function persistInboundEvent(params: {
         performedAt: new Date(),
       });
     } else {
+      if (resumeHash && candidateResumeHashRejectDuplicates()) {
+        const [collision] = await tx
+          .select({ candidateId: candidates.candidateId })
+          .from(candidates)
+          .where(
+            and(
+              eq(candidates.organizationId, meta.organizationId),
+              eq(candidates.requisitionItemId, itemId),
+              eq(candidates.resumeContentHash, resumeHash),
+              isNotNull(candidates.resumeContentHash),
+            ),
+          )
+          .limit(1);
+        if (collision) {
+          throw new HttpError(
+            409,
+            `Duplicate resume content already exists for this job (candidate_id=${collision.candidateId})`,
+          );
+        }
+      }
+      let duplicateResumeOfCandidateIdNew: number | null = null;
+      if (resumeHash && !candidateResumeHashRejectDuplicates()) {
+        const [dup] = await tx
+          .select({ candidateId: candidates.candidateId })
+          .from(candidates)
+          .where(
+            and(
+              eq(candidates.organizationId, meta.organizationId),
+              eq(candidates.requisitionItemId, itemId),
+              eq(candidates.resumeContentHash, resumeHash),
+              isNotNull(candidates.resumeContentHash),
+              ne(candidates.email, email),
+            ),
+          )
+          .limit(1);
+        if (dup) {
+          duplicateResumeOfCandidateIdNew = dup.candidateId;
+        }
+      }
+
       const [row] = await tx
         .insert(candidates)
         .values({
+          organizationId: meta.organizationId,
+          personId,
           requisitionItemId: itemId,
           requisitionId: meta.reqId,
           fullName,
@@ -467,6 +677,19 @@ export async function persistInboundEvent(params: {
           phone,
           currentCompany,
           resumePath,
+          totalExperienceYears: merged.totalExperienceYears,
+          noticePeriodDays: merged.noticePeriodDays,
+          candidateSkills: merged.candidateSkills,
+          educationRaw: merged.educationRaw,
+          resumeContentHash: resumeHash,
+          resumeParseCache: { ...resumeCacheRow } as Record<string, unknown>,
+          ...(resolveResumeStructureEnabled()
+            ? {
+                resumeStructuredProfile: structuredProfileValue,
+                resumeStructureStatus: structuredStatusValue,
+              }
+            : {}),
+          duplicateResumeOfCandidateId: duplicateResumeOfCandidateIdNew,
           currentStage: "Sourced",
           addedBy: performedBy,
         })
@@ -490,8 +713,11 @@ export async function persistInboundEvent(params: {
       });
     }
 
+    enqueueStructureRefineCandidateId = candidateId;
+
     await ensureApplicationForCandidateTx({
       tx,
+      organizationId: meta.organizationId,
       candidateId,
       requisitionItemId: itemId,
       requisitionId: meta.reqId,
@@ -506,6 +732,20 @@ export async function persistInboundEvent(params: {
       },
     });
   });
+
+  if (
+    shouldEnqueueStructureRefine &&
+    enqueueStructureRefineCandidateId != null
+  ) {
+    try {
+      await enqueueResumeStructureRefineJob(enqueueStructureRefineCandidateId);
+    } catch (e) {
+      log("warn", "resume_structure_refine_enqueue_failed", {
+        candidate_id: enqueueStructureRefineCandidateId,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
 
   log("info", "Inbound event persisted to candidates", {
     inbound_event_id: params.inboundEventId,

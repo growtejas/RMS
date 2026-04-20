@@ -1,30 +1,88 @@
 import { and, asc, count, desc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
-import { auditLog, candidates, interviews, requisitionItems, requisitions } from "@/lib/db/schema";
+import {
+  applications,
+  auditLog,
+  candidates,
+  interviews,
+  requisitionItems,
+  requisitions,
+} from "@/lib/db/schema";
+import type { AppDb } from "@/lib/workflow/workflow-db";
 
 export type CandidateRow = typeof candidates.$inferSelect;
 export type InterviewRow = typeof interviews.$inferSelect;
 
 export async function selectCandidateById(
   candidateId: number,
+  organizationId: string,
 ): Promise<CandidateRow | null> {
   const db = getDb();
   const [row] = await db
     .select()
     .from(candidates)
-    .where(eq(candidates.candidateId, candidateId))
+    .where(
+      and(
+        eq(candidates.candidateId, candidateId),
+        eq(candidates.organizationId, organizationId),
+      ),
+    )
     .limit(1);
   return row ?? null;
 }
 
+/** Same org + job line: one candidate row per email (case-insensitive). */
+export async function selectCandidateIdByOrgItemEmailLower(params: {
+  organizationId: string;
+  requisitionItemId: number;
+  emailLower: string;
+}): Promise<number | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({ candidateId: candidates.candidateId })
+    .from(candidates)
+    .where(
+      and(
+        eq(candidates.organizationId, params.organizationId),
+        eq(candidates.requisitionItemId, params.requisitionItemId),
+        sql`lower(${candidates.email}) = ${params.emailLower}`,
+      ),
+    )
+    .limit(1);
+  return row?.candidateId ?? null;
+}
+
+export async function selectCandidateIdByOrgItemPersonTx(
+  tx: AppDb,
+  params: {
+    organizationId: string;
+    requisitionItemId: number;
+    personId: number;
+  },
+): Promise<number | null> {
+  const [row] = await tx
+    .select({ candidateId: candidates.candidateId })
+    .from(candidates)
+    .where(
+      and(
+        eq(candidates.organizationId, params.organizationId),
+        eq(candidates.requisitionItemId, params.requisitionItemId),
+        eq(candidates.personId, params.personId),
+      ),
+    )
+    .limit(1);
+  return row?.candidateId ?? null;
+}
+
 export async function selectCandidatesFiltered(params: {
+  organizationId: string;
   requisitionId?: number | null;
   requisitionItemId?: number | null;
   currentStage?: string | null;
 }): Promise<CandidateRow[]> {
   const db = getDb();
-  const conds = [];
+  const conds = [eq(candidates.organizationId, params.organizationId)];
   if (params.requisitionId != null) {
     conds.push(eq(candidates.requisitionId, params.requisitionId));
   }
@@ -66,31 +124,71 @@ export async function selectInterviewsForCandidate(
     .orderBy(asc(interviews.roundNumber));
 }
 
-/** List interviews; optional filter by candidate (FastAPI `GET /interviews/`). */
+export type InterviewWithCandidateRow = {
+  interview: InterviewRow;
+  candidateFullName: string;
+  candidateEmail: string | null;
+};
+
+/** List interviews with candidate identity; optional filters (AND). */
 export async function selectInterviewsList(
-  candidateId?: number | null,
-): Promise<InterviewRow[]> {
+  organizationId: string,
+  filters?: { candidateId?: number | null; requisitionId?: number | null },
+): Promise<InterviewWithCandidateRow[]> {
   const db = getDb();
-  if (candidateId != null) {
-    return db
-      .select()
-      .from(interviews)
-      .where(eq(interviews.candidateId, candidateId))
-      .orderBy(asc(interviews.roundNumber));
+  const conds = [eq(candidates.organizationId, organizationId)];
+  if (filters?.candidateId != null) {
+    conds.push(eq(interviews.candidateId, filters.candidateId));
   }
-  return db.select().from(interviews).orderBy(asc(interviews.roundNumber));
+  if (filters?.requisitionId != null) {
+    conds.push(eq(applications.requisitionId, filters.requisitionId));
+    conds.push(eq(applications.organizationId, organizationId));
+  }
+  if (filters?.requisitionId != null) {
+    return db
+      .select({
+        interview: interviews,
+        candidateFullName: candidates.fullName,
+        candidateEmail: candidates.email,
+      })
+      .from(interviews)
+      .innerJoin(candidates, eq(interviews.candidateId, candidates.candidateId))
+      .innerJoin(
+        applications,
+        eq(applications.candidateId, candidates.candidateId),
+      )
+      .where(and(...conds))
+      .orderBy(desc(interviews.scheduledAt));
+  }
+  return db
+    .select({
+      interview: interviews,
+      candidateFullName: candidates.fullName,
+      candidateEmail: candidates.email,
+    })
+    .from(interviews)
+    .innerJoin(candidates, eq(interviews.candidateId, candidates.candidateId))
+    .where(and(...conds))
+    .orderBy(desc(interviews.scheduledAt));
 }
 
 export async function selectInterviewById(
   interviewId: number,
+  organizationId: string,
 ): Promise<InterviewRow | null> {
   const db = getDb();
   const [row] = await db
-    .select()
+    .select({ iv: interviews })
     .from(interviews)
-    .where(eq(interviews.id, interviewId))
+    .innerJoin(candidates, eq(interviews.candidateId, candidates.candidateId))
+    .where(
+      and(
+        eq(interviews.id, interviewId),
+        eq(candidates.organizationId, organizationId),
+      ),
+    )
     .limit(1);
-  return row ?? null;
+  return row?.iv ?? null;
 }
 
 export async function countInterviewsForCandidate(
@@ -107,12 +205,13 @@ export async function countInterviewsForCandidate(
 /** Requisition header `raised_by` is used as `added_by` for system / inbound creates. */
 export async function selectRequisitionItemMetaByItemId(
   itemId: number,
-): Promise<{ reqId: number; raisedBy: number } | null> {
+): Promise<{ reqId: number; raisedBy: number; organizationId: string } | null> {
   const db = getDb();
   const [row] = await db
     .select({
       reqId: requisitionItems.reqId,
       raisedBy: requisitions.raisedBy,
+      organizationId: requisitions.organizationId,
     })
     .from(requisitionItems)
     .innerJoin(requisitions, eq(requisitionItems.reqId, requisitions.reqId))
@@ -190,6 +289,8 @@ export async function selectCandidateIdsSameItemNameNoCompany(params: {
 }
 
 export async function insertCandidateRow(values: {
+  organizationId: string;
+  personId: number;
   requisitionItemId: number;
   requisitionId: number;
   fullName: string;
@@ -203,6 +304,8 @@ export async function insertCandidateRow(values: {
   const [row] = await db
     .insert(candidates)
     .values({
+      organizationId: values.organizationId,
+      personId: values.personId,
       requisitionItemId: values.requisitionItemId,
       requisitionId: values.requisitionId,
       fullName: values.fullName,
@@ -238,6 +341,7 @@ export async function insertCandidateAuditCreate(params: {
 
 export async function updateCandidateRow(
   candidateId: number,
+  organizationId: string,
   patch: Partial<{
     fullName: string;
     email: string;
@@ -245,6 +349,11 @@ export async function updateCandidateRow(
     currentCompany: string | null;
     resumePath: string | null;
     currentStage: string;
+    totalExperienceYears: string | null;
+    noticePeriodDays: number | null;
+    isReferral: boolean;
+    candidateSkills: string[] | null;
+    educationRaw: string | null;
   }>,
 ): Promise<CandidateRow | null> {
   const db = getDb();
@@ -267,10 +376,30 @@ export async function updateCandidateRow(
   if (patch.currentStage !== undefined) {
     set.currentStage = patch.currentStage;
   }
+  if (patch.totalExperienceYears !== undefined) {
+    set.totalExperienceYears = patch.totalExperienceYears;
+  }
+  if (patch.noticePeriodDays !== undefined) {
+    set.noticePeriodDays = patch.noticePeriodDays;
+  }
+  if (patch.isReferral !== undefined) {
+    set.isReferral = patch.isReferral;
+  }
+  if (patch.candidateSkills !== undefined) {
+    set.candidateSkills = patch.candidateSkills;
+  }
+  if (patch.educationRaw !== undefined) {
+    set.educationRaw = patch.educationRaw;
+  }
   const [row] = await db
     .update(candidates)
     .set(set)
-    .where(eq(candidates.candidateId, candidateId))
+    .where(
+      and(
+        eq(candidates.candidateId, candidateId),
+        eq(candidates.organizationId, organizationId),
+      ),
+    )
     .returning();
   return row ?? null;
 }
@@ -310,11 +439,19 @@ export async function insertAuditCandidateRejectFilled(params: {
   });
 }
 
-export async function deleteCandidateById(candidateId: number): Promise<boolean> {
+export async function deleteCandidateById(
+  candidateId: number,
+  organizationId: string,
+): Promise<boolean> {
   const db = getDb();
   const deleted = await db
     .delete(candidates)
-    .where(eq(candidates.candidateId, candidateId))
+    .where(
+      and(
+        eq(candidates.candidateId, candidateId),
+        eq(candidates.organizationId, organizationId),
+      ),
+    )
     .returning({ id: candidates.candidateId });
   return deleted.length > 0;
 }
@@ -469,4 +606,37 @@ export async function insertInterviewAuditDelete(params: {
     oldValue: params.oldValue,
     performedAt: new Date(),
   });
+}
+
+export async function batchUpdateResumeParseCache(
+  rows: Array<{
+    candidateId: number;
+    resumeContentHash?: string | null;
+    resumeParseCache?: Record<string, unknown> | null;
+    resumeStructuredProfile?: Record<string, unknown> | null;
+    resumeStructureStatus?: string | null;
+  }>,
+): Promise<void> {
+  if (rows.length === 0) {
+    return;
+  }
+  const db = getDb();
+  for (const r of rows) {
+    const patch: Record<string, unknown> = {
+      updatedAt: new Date(),
+    };
+    if (r.resumeContentHash !== undefined) {
+      patch.resumeContentHash = r.resumeContentHash;
+    }
+    if (r.resumeParseCache !== undefined) {
+      patch.resumeParseCache = r.resumeParseCache;
+    }
+    if (r.resumeStructuredProfile !== undefined) {
+      patch.resumeStructuredProfile = r.resumeStructuredProfile;
+    }
+    if (r.resumeStructureStatus !== undefined) {
+      patch.resumeStructureStatus = r.resumeStructureStatus;
+    }
+    await db.update(candidates).set(patch).where(eq(candidates.candidateId, r.candidateId));
+  }
 }

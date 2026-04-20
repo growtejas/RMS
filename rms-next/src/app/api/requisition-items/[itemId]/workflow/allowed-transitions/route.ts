@@ -9,6 +9,7 @@ import {
   buildAllowedItemTransitions,
 } from "@/lib/workflow/workflow-allowed";
 import { workflowCatch } from "@/lib/workflow/workflow-http";
+import { requireItemInOrganization } from "@/lib/workflow/workflow-route-utils";
 import { isItemStatus } from "@/types/workflow";
 
 export const runtime = "nodejs";
@@ -45,6 +46,8 @@ export async function GET(req: Request, { params }: Ctx) {
     if (itemId instanceof NextResponse) {
       return itemId;
     }
+
+    await requireItemInOrganization(itemId, user.organizationId);
 
     const db = getDb();
     const rows = await db

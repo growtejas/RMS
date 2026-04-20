@@ -34,7 +34,10 @@ export async function GET(req: Request, { params }: Ctx) {
       return applicationId;
     }
 
-    const data = await getApplicationJson(applicationId);
+    const data = await getApplicationJson(
+      applicationId,
+      user.organizationId,
+    );
     return NextResponse.json(data);
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/applications/[applicationId]]");

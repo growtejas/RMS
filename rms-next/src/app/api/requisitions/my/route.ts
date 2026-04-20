@@ -26,7 +26,10 @@ export async function GET(req: Request) {
       return denied;
     }
 
-    const data = await listMyRequisitionsRead(user.userId);
+    const data = await listMyRequisitionsRead(
+      user.organizationId,
+      user.userId,
+    );
     return NextResponse.json(data);
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/requisitions/my]");

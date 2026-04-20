@@ -75,6 +75,7 @@ export async function POST(req: Request) {
     };
 
     const created = await createRequisitionFromForm({
+      organizationId: user.organizationId,
       projectName: str("project_name"),
       clientName: str("client_name"),
       officeLocation: str("office_location"),
@@ -91,7 +92,10 @@ export async function POST(req: Request) {
       raisedBy: user.userId,
     });
 
-    const data = await getRequisitionDetailRead(created.reqId);
+    const data = await getRequisitionDetailRead(
+      created.reqId,
+      user.organizationId,
+    );
     return NextResponse.json(data);
   } catch (e) {
     return referenceWriteCatch(e, "[POST /api/requisitions]");
@@ -162,6 +166,7 @@ export async function GET(req: Request) {
     }
 
     const data = await listRequisitionsRead({
+      organizationId: user.organizationId,
       roles: user.roles,
       currentUserId: user.userId,
       status,

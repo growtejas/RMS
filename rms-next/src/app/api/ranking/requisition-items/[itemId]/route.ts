@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
+import { enrichRankingWithCachedAiEvaluations } from "@/lib/services/ai-evaluation/ai-evaluation-service";
 import {
   rankCandidatesForRequisitionItem,
   recomputeRankingForRequisitionItem,
 } from "@/lib/services/ranking-service";
+import { assertRequisitionItemInOrganization } from "@/lib/tenant/org-assert";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,7 +39,25 @@ export async function GET(req: Request, { params }: Ctx) {
       return itemId;
     }
 
-    const data = await rankCandidatesForRequisitionItem(itemId);
+    const url = new URL(req.url);
+    const aiEval = url.searchParams.get("ai_eval") === "1";
+    const strictSnapshot =
+      url.searchParams.get("strict_snapshot") === "1" ||
+      url.searchParams.get("strict_snapshot") === "true";
+
+    const data = await rankCandidatesForRequisitionItem(itemId, {
+      strictSnapshot,
+    });
+    if (aiEval) {
+      await assertRequisitionItemInOrganization(itemId, user.organizationId);
+      return NextResponse.json(
+        await enrichRankingWithCachedAiEvaluations({
+          organizationId: user.organizationId,
+          itemId,
+          ranking: data,
+        }),
+      );
+    }
     return NextResponse.json(data);
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/ranking/requisition-items/[itemId]]");

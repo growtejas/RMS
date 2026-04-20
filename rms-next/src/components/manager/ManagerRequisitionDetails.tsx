@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { apiClient } from "@/lib/api/client";
 import type { Candidate } from "@/lib/api/candidateApi";
-import { fetchCandidates } from "@/lib/api/candidateApi";
+import { fetchCandidatesFromApplications } from "@/lib/api/candidateApi";
 import CandidateDetailModal from "@/components/shared/CandidateDetailModal";
 import { useAuth } from "@/contexts/useAuth";
 import { PlainStatusText } from "@/components/common/PlainStatusText";
@@ -893,7 +893,9 @@ const ManagerRequisitionDetails: React.FC = () => {
       try {
         setCandidatesLoading(true);
         setCandidateError(null);
-        const data = await fetchCandidates(requisition.req_id);
+        const data = await fetchCandidatesFromApplications({
+          requisition_id: requisition.req_id,
+        });
         if (!isMounted) return;
         setCandidates(data);
       } catch (err: unknown) {

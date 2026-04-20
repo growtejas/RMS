@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { logError } from "@/lib/logging/logger";
 import { enqueueProcessInboundEventJob } from "@/lib/queue/inbound-events-queue";
 import { insertInboundEvent } from "@/lib/repositories/inbound-events-repo";
+import { resolveDefaultOrganizationId } from "@/lib/tenant/resolve-org";
 
 type IngestionSource = "public_apply" | "linkedin" | "naukri" | "bulk";
 
@@ -31,8 +32,12 @@ export async function acknowledgeInboundEvent(params: {
   source: IngestionSource;
   externalId: string;
   payload: Record<string, unknown>;
+  organizationId?: string;
 }) {
+  const organizationId =
+    params.organizationId ?? (await resolveDefaultOrganizationId());
   const saved = await insertInboundEvent({
+    organizationId,
     source: params.source,
     externalId: params.externalId,
     payload: params.payload,

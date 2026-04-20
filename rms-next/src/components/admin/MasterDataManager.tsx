@@ -311,6 +311,7 @@ const MasterDataManager: React.FC = () => {
   };
 
   const handleEditItem = (item: MasterDataItem) => {
+    setError(null);
     setEditingItem(item);
     setShowEditModal(true);
   };
@@ -387,7 +388,13 @@ const MasterDataManager: React.FC = () => {
             <strong>Skills, Locations, Departments, and Company Roles</strong>.
           </p> */}
         </div>
-        <button className="add-button" onClick={() => setShowAddModal(true)}>
+        <button
+          className="add-button"
+          onClick={() => {
+            setError(null);
+            setShowAddModal(true);
+          }}
+        >
           <Plus size={16} />
           Add New
         </button>
@@ -539,14 +546,20 @@ const MasterDataManager: React.FC = () => {
                   <p>Fill in the required information</p>
                 </div>
                 <div className="form-group">
-                  <label>Name *</label>
+                  <label>
+                    {activeTab === "locations" ? "City *" : "Name *"}
+                  </label>
                   <input
                     type="text"
                     value={newItem.name}
                     onChange={(e) =>
                       setNewItem({ ...newItem, name: e.target.value })
                     }
-                    placeholder={`Enter ${activeTab.slice(0, -1)} name`}
+                    placeholder={
+                      activeTab === "locations"
+                        ? "e.g. Bengaluru"
+                        : `Enter ${activeTab.slice(0, -1)} name`
+                    }
                   />
                 </div>
                 {activeTab === "locations" && (
@@ -619,8 +632,13 @@ const MasterDataManager: React.FC = () => {
               </button>
             </div>
             <div className="modal-body">
+              {error && (
+                <p style={{ color: "#ef4444", marginBottom: "12px" }}>{error}</p>
+              )}
               <div className="form-group">
-                <label>Name *</label>
+                <label>
+                  {editingItem.type === "location" ? "City *" : "Name *"}
+                </label>
                 <input
                   type="text"
                   value={editingItem.name}
@@ -630,7 +648,11 @@ const MasterDataManager: React.FC = () => {
                       name: e.target.value,
                     })
                   }
-                  placeholder={`Enter ${editingItem.type} name`}
+                  placeholder={
+                    editingItem.type === "location"
+                      ? "e.g. Bengaluru"
+                      : `Enter ${editingItem.type} name`
+                  }
                 />
               </div>
               {editingItem.type === "location" && (

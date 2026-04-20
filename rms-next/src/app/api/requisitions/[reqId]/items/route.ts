@@ -46,7 +46,7 @@ export async function GET(req: Request, { params }: Ctx) {
       return reqId;
     }
 
-    const data = await listRequisitionItemsJson(reqId);
+    const data = await listRequisitionItemsJson(reqId, user.organizationId);
     return NextResponse.json(data);
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/requisitions/[reqId]/items]");
@@ -77,7 +77,11 @@ export async function POST(req: Request, { params }: Ctx) {
       return parsed.response;
     }
 
-    const body = await createRequisitionItemNonWorkflow(reqId, parsed.data);
+    const body = await createRequisitionItemNonWorkflow(
+      reqId,
+      user.organizationId,
+      parsed.data,
+    );
     return NextResponse.json(body);
   } catch (e) {
     return referenceWriteCatch(e, "[POST /api/requisitions/[reqId]/items]");

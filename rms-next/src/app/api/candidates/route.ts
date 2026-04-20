@@ -20,7 +20,14 @@ function optInt(raw: string | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** GET /api/candidates — parity with FastAPI list. */
+/**
+ * GET /api/candidates — parity with FastAPI list.
+ *
+ * For **ATS roster by requisition or line**, prefer `GET /api/applications` with
+ * `requisitionId` / `requisitionItemId` so every row is an application (see
+ * Candidate Pipeline §4, §17). When this route is called with `requisition_id`
+ * or `requisition_item_id`, the response includes `X-ATS-Roster-Deprecated`.
+ */
 export async function GET(req: Request) {
   try {
     const user = await requireBearerUser(req);
@@ -59,11 +66,24 @@ export async function GET(req: Request) {
     }
 
     const data = await listCandidatesJson({
+      organizationId: user.organizationId,
       requisitionId,
       requisitionItemId,
       currentStage: currentStage?.trim() || null,
     });
-    return NextResponse.json(data);
+    const headers = new Headers();
+    if (requisitionId != null) {
+      headers.set(
+        "X-ATS-Roster-Deprecated",
+        "Prefer GET /api/applications?requisitionId=… for application-scoped ATS list (Candidate Pipeline §17).",
+      );
+    } else if (requisitionItemId != null) {
+      headers.set(
+        "X-ATS-Roster-Deprecated",
+        "Prefer GET /api/applications?requisitionItemId=… for application-scoped ATS list (Candidate Pipeline §17).",
+      );
+    }
+    return NextResponse.json(data, { headers });
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/candidates]");
   }

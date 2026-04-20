@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { parseJsonBody } from "@/lib/http/parse-body";
+import { allowPublicRequest } from "@/lib/security/public-rate-limit";
 import { acknowledgeInboundEvent, resolveExternalId } from "@/lib/services/inbound-events-service";
 import { publicApplyIngestBody } from "@/lib/validators/inbound-events";
 
@@ -21,6 +22,14 @@ function parseSlug(raw: string): string | null {
 /** POST /api/public/apply/[slug] — persist inbound event and return async ack. */
 export async function POST(req: Request, { params }: Ctx) {
   try {
+    const ip =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      req.headers.get("x-real-ip")?.trim() ||
+      "unknown";
+    if (!allowPublicRequest(`public_apply:${ip}`)) {
+      return NextResponse.json({ detail: "Rate limit exceeded" }, { status: 429 });
+    }
+
     const slug = parseSlug(params.slug);
     if (!slug) {
       return NextResponse.json({ detail: "Invalid job slug" }, { status: 422 });

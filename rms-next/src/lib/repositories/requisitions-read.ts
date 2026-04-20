@@ -24,20 +24,28 @@ export type RequisitionItemRow = typeof requisitionItems.$inferSelect;
 
 export async function selectRequisitionById(
   reqId: number,
+  organizationId: string,
 ): Promise<RequisitionHeaderRow | null> {
   const db = getDb();
   const rows = await db
     .select()
     .from(requisitions)
-    .where(eq(requisitions.reqId, reqId))
+    .where(
+      and(eq(requisitions.reqId, reqId), eq(requisitions.organizationId, organizationId)),
+    )
     .limit(1);
   return rows[0] ?? null;
 }
 
 export async function selectItemsForReqId(
   reqId: number,
+  organizationId: string,
 ): Promise<RequisitionItemRow[]> {
   const db = getDb();
+  const header = await selectRequisitionById(reqId, organizationId);
+  if (!header) {
+    return [];
+  }
   return db
     .select()
     .from(requisitionItems)
@@ -46,6 +54,7 @@ export async function selectItemsForReqId(
 }
 
 export async function listRequisitionsFiltered(input: {
+  organizationId: string;
   isTaUser: boolean;
   currentUserId: number;
   myAssignments: boolean;
@@ -60,7 +69,7 @@ export async function listRequisitionsFiltered(input: {
   const myAssignments =
     input.myAssignments || input.assignedToMeAlias;
 
-  const conds: SQL[] = [];
+  const conds: SQL[] = [eq(requisitions.organizationId, input.organizationId)];
 
   if (input.isTaUser) {
     conds.push(
@@ -105,6 +114,7 @@ export async function listRequisitionsFiltered(input: {
 }
 
 export async function listRequisitionsForRaisedBy(
+  organizationId: string,
   userId: number,
   params?: { limit?: number; offset?: number },
 ): Promise<RequisitionHeaderRow[]> {
@@ -112,7 +122,12 @@ export async function listRequisitionsForRaisedBy(
   return db
     .select()
     .from(requisitions)
-    .where(eq(requisitions.raisedBy, userId))
+    .where(
+      and(
+        eq(requisitions.organizationId, organizationId),
+        eq(requisitions.raisedBy, userId),
+      ),
+    )
     .orderBy(desc(requisitions.reqId))
     .limit(params?.limit ?? 200)
     .offset(params?.offset ?? 0);
@@ -120,16 +135,24 @@ export async function listRequisitionsForRaisedBy(
 
 export async function selectItemsForReqIds(
   reqIds: number[],
+  organizationId: string,
 ): Promise<RequisitionItemRow[]> {
   if (reqIds.length === 0) {
     return [];
   }
   const db = getDb();
   return db
-    .select()
+    .select({ item: requisitionItems })
     .from(requisitionItems)
-    .where(inArray(requisitionItems.reqId, reqIds))
-    .orderBy(asc(requisitionItems.itemId));
+    .innerJoin(requisitions, eq(requisitionItems.reqId, requisitions.reqId))
+    .where(
+      and(
+        inArray(requisitionItems.reqId, reqIds),
+        eq(requisitions.organizationId, organizationId),
+      ),
+    )
+    .orderBy(asc(requisitionItems.itemId))
+    .then((rows) => rows.map((r) => r.item));
 }
 
 /** FastAPI `GET /api/requisitions/{req_id}/status-history` — newest first. */

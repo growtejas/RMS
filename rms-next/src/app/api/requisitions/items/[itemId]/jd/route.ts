@@ -42,7 +42,7 @@ export async function GET(req: Request, { params }: Ctx) {
       return itemId;
     }
 
-    const item = await findItemById(itemId);
+    const item = await findItemById(itemId, user.organizationId);
     if (!item) {
       return NextResponse.json(
         { detail: "Requisition item not found" },
@@ -108,12 +108,17 @@ export async function POST(req: Request, { params }: Ctx) {
     if (!(file instanceof File) || file.size === 0) {
       return NextResponse.json({ detail: "jd_file is required" }, { status: 400 });
     }
-    const body = await uploadItemJd(itemId, {
-      stream: webToNodeReadable(file.stream()),
-      size: file.size,
-      filename: file.name || "upload.pdf",
-      mime: file.type || null,
-    }, user.userId);
+    const body = await uploadItemJd(
+      itemId,
+      user.organizationId,
+      {
+        stream: webToNodeReadable(file.stream()),
+        size: file.size,
+        filename: file.name || "upload.pdf",
+        mime: file.type || null,
+      },
+      user.userId,
+    );
     return NextResponse.json(body);
   } catch (e) {
     return referenceWriteCatch(e, "[POST /api/requisitions/items/[itemId]/jd]");
@@ -137,7 +142,11 @@ export async function DELETE(req: Request, { params }: Ctx) {
       return itemId;
     }
 
-    const body = await deleteItemJd(itemId, user.userId);
+    const body = await deleteItemJd(
+      itemId,
+      user.organizationId,
+      user.userId,
+    );
     return NextResponse.json(body);
   } catch (e) {
     return referenceWriteCatch(e, "[DELETE /api/requisitions/items/[itemId]/jd]");

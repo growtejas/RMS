@@ -19,9 +19,12 @@ export default function AdminShell({
   const router = useRouter();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  const hasAdminAccess = user?.roles?.some((role) =>
-    ["admin", "owner"].includes(role),
+  const privilegedAdmin = Boolean(
+    user?.roles?.some((role) => ["admin", "owner"].includes(role)),
   );
+  const isHr = Boolean(user?.roles?.includes("hr"));
+  /** HR can maintain reference data; other admin routes stay admin/owner-only. */
+  const canAccessAdminShell = Boolean(privilegedAdmin || isHr);
 
   const title = useMemo(() => {
     if (pathname.startsWith("/admin/master-data")) {
@@ -45,6 +48,18 @@ export default function AdminShell({
     }
   }, [isHydrating, isAuthenticated, router]);
 
+  useEffect(() => {
+    if (isHydrating || !isAuthenticated || !user) {
+      return;
+    }
+    if (privilegedAdmin) {
+      return;
+    }
+    if (isHr && !pathname.startsWith("/admin/master-data")) {
+      router.replace("/admin/master-data");
+    }
+  }, [isHydrating, isAuthenticated, user, privilegedAdmin, isHr, pathname, router]);
+
   if (isHydrating) {
     return (
       <div
@@ -63,7 +78,7 @@ export default function AdminShell({
     return null;
   }
 
-  if (!hasAdminAccess) {
+  if (!canAccessAdminShell) {
     return (
       <div className="unauthorized-access">
         <h2>Unauthorized Access</h2>
@@ -81,6 +96,7 @@ export default function AdminShell({
       <AdminSidebar
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+        masterDataOnly={Boolean(isHr && !privilegedAdmin)}
       />
 
       <div

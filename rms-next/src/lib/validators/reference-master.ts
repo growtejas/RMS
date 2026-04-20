@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const skillCreateBody = z.object({
-  skill_name: z.string(),
+  skill_name: z.string().min(1, "Skill name is required"),
 });
 
 export const skillUpdateBody = z.object({
@@ -21,7 +21,7 @@ export const departmentUpdateBody = z.object({
 });
 
 export const locationCreateBody = z.object({
-  city: z.string().nullable().optional(),
+  city: z.string().min(1, "City is required"),
   country: z.string().nullable().optional(),
 });
 

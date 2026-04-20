@@ -44,7 +44,7 @@ export async function GET(req: Request, { params }: Ctx) {
       return reqId;
     }
 
-    const header = await selectRequisitionById(reqId);
+    const header = await selectRequisitionById(reqId, user.organizationId);
     if (!header) {
       return NextResponse.json({ detail: "Requisition not found" }, { status: 404 });
     }
@@ -104,12 +104,17 @@ export async function POST(req: Request, { params }: Ctx) {
     if (!(file instanceof File) || file.size === 0) {
       return NextResponse.json({ detail: "jd_file is required" }, { status: 400 });
     }
-    const body = await uploadRequisitionJd(reqId, {
-      stream: webToNodeReadable(file.stream()),
-      size: file.size,
-      filename: file.name || "upload.pdf",
-      mime: file.type || null,
-    }, user.userId);
+    const body = await uploadRequisitionJd(
+      reqId,
+      user.organizationId,
+      {
+        stream: webToNodeReadable(file.stream()),
+        size: file.size,
+        filename: file.name || "upload.pdf",
+        mime: file.type || null,
+      },
+      user.userId,
+    );
     return NextResponse.json(body);
   } catch (e) {
     return referenceWriteCatch(e, "[POST /api/requisitions/[reqId]/jd]");
@@ -133,7 +138,11 @@ export async function DELETE(req: Request, { params }: Ctx) {
       return reqId;
     }
 
-    const body = await deleteRequisitionJd(reqId, user.userId);
+    const body = await deleteRequisitionJd(
+      reqId,
+      user.organizationId,
+      user.userId,
+    );
     return NextResponse.json(body);
   } catch (e) {
     return referenceWriteCatch(e, "[DELETE /api/requisitions/[reqId]/jd]");

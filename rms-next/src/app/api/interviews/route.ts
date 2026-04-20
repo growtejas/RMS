@@ -34,6 +34,9 @@ export async function GET(req: Request) {
 
     const url = new URL(req.url);
     const candidateId = optInt(url.searchParams.get("candidate_id"));
+    const requisitionId =
+      optInt(url.searchParams.get("requisition_id")) ??
+      optInt(url.searchParams.get("requisitionId"));
     if (
       url.searchParams.has("candidate_id") &&
       candidateId == null
@@ -43,8 +46,21 @@ export async function GET(req: Request) {
         { status: 422 },
       );
     }
+    if (
+      (url.searchParams.has("requisition_id") ||
+        url.searchParams.has("requisitionId")) &&
+      requisitionId == null
+    ) {
+      return NextResponse.json(
+        { detail: "requisition_id / requisitionId must be an integer" },
+        { status: 422 },
+      );
+    }
 
-    const data = await listInterviewsJson(candidateId);
+    const data = await listInterviewsJson(user.organizationId, {
+      candidateId: candidateId ?? undefined,
+      requisitionId: requisitionId ?? undefined,
+    });
     return NextResponse.json(data);
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/interviews]");

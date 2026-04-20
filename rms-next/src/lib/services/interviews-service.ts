@@ -7,7 +7,10 @@ import { auditLog, interviews } from "@/lib/db/schema";
 import { HttpError } from "@/lib/http/http-error";
 import * as repo from "@/lib/repositories/candidates-repo";
 
-function interviewToJson(row: repo.InterviewRow) {
+function interviewToJson(
+  row: repo.InterviewRow,
+  extras?: { candidate_name?: string; candidate_email?: string | null },
+) {
   return {
     id: row.id,
     candidate_id: row.candidateId,
@@ -20,6 +23,12 @@ function interviewToJson(row: repo.InterviewRow) {
     conducted_by: row.conductedBy ?? null,
     created_at: row.createdAt?.toISOString() ?? null,
     updated_at: row.updatedAt?.toISOString() ?? null,
+    ...(extras
+      ? {
+          candidate_name: extras.candidate_name,
+          candidate_email: extras.candidate_email ?? null,
+        }
+      : {}),
   };
 }
 
@@ -27,13 +36,21 @@ function isPastSchedule(d: Date): boolean {
   return d.getTime() < Date.now();
 }
 
-export async function listInterviewsJson(candidateId?: number | null) {
-  const rows = await repo.selectInterviewsList(candidateId);
-  return rows.map(interviewToJson);
+export async function listInterviewsJson(
+  organizationId: string,
+  filters?: { candidateId?: number | null; requisitionId?: number | null },
+) {
+  const rows = await repo.selectInterviewsList(organizationId, filters);
+  return rows.map((r) =>
+    interviewToJson(r.interview, {
+      candidate_name: r.candidateFullName,
+      candidate_email: r.candidateEmail,
+    }),
+  );
 }
 
-export async function getInterviewJson(interviewId: number) {
-  const row = await repo.selectInterviewById(interviewId);
+export async function getInterviewJson(interviewId: number, organizationId: string) {
+  const row = await repo.selectInterviewById(interviewId, organizationId);
   if (!row) {
     throw new HttpError(404, "Interview not found");
   }
@@ -49,7 +66,10 @@ export async function createInterviewJson(
   },
   user: ApiUser,
 ) {
-  const cand = await repo.selectCandidateById(payload.candidate_id);
+  const cand = await repo.selectCandidateById(
+    payload.candidate_id,
+    user.organizationId,
+  );
   if (!cand) {
     throw new HttpError(404, "Candidate not found");
   }
@@ -108,7 +128,10 @@ export async function patchInterviewJson(
   },
   user: ApiUser,
 ) {
-  const existing = await repo.selectInterviewById(interviewId);
+  const existing = await repo.selectInterviewById(
+    interviewId,
+    user.organizationId,
+  );
   if (!existing) {
     throw new HttpError(404, "Interview not found");
   }
@@ -169,7 +192,10 @@ export async function deleteInterviewJson(
   interviewId: number,
   user: ApiUser,
 ): Promise<void> {
-  const existing = await repo.selectInterviewById(interviewId);
+  const existing = await repo.selectInterviewById(
+    interviewId,
+    user.organizationId,
+  );
   if (!existing) {
     throw new HttpError(404, "Interview not found");
   }

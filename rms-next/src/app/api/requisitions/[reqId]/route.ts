@@ -50,7 +50,7 @@ export async function GET(req: Request, { params }: Ctx) {
       return reqId;
     }
 
-    const data = await getRequisitionDetailRead(reqId);
+    const data = await getRequisitionDetailRead(reqId, user.organizationId);
     return NextResponse.json(data);
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/requisitions/[reqId]]");
@@ -79,7 +79,12 @@ export async function PUT(req: Request, { params }: Ctx) {
       return parsed.response;
     }
 
-    const body = await putRequisitionManager(reqId, parsed.data, user.userId);
+    const body = await putRequisitionManager(
+      reqId,
+      user.organizationId,
+      parsed.data,
+      user.userId,
+    );
     return NextResponse.json(body);
   } catch (e) {
     return referenceWriteCatch(e, "[PUT /api/requisitions/[reqId]]");
@@ -108,7 +113,11 @@ export async function PATCH(req: Request, { params }: Ctx) {
       return parsed.response;
     }
 
-    const body = await patchRequisitionNonWorkflow(reqId, parsed.data);
+    const body = await patchRequisitionNonWorkflow(
+      reqId,
+      user.organizationId,
+      parsed.data,
+    );
     return NextResponse.json(body);
   } catch (e) {
     return referenceWriteCatch(e, "[PATCH /api/requisitions/[reqId]]");

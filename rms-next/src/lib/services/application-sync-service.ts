@@ -5,6 +5,7 @@ import type { AppDb } from "@/lib/workflow/workflow-db";
 
 export async function ensureApplicationForCandidateTx(params: {
   tx: AppDb;
+  organizationId: string;
   candidateId: number;
   requisitionItemId: number;
   requisitionId: number;
@@ -35,6 +36,7 @@ export async function ensureApplicationForCandidateTx(params: {
       await params.tx
         .update(applications)
         .set({
+          organizationId: params.organizationId,
           requisitionItemId: params.requisitionItemId,
           requisitionId: params.requisitionId,
           currentStage: params.candidateStage,
@@ -63,6 +65,7 @@ export async function ensureApplicationForCandidateTx(params: {
   const [created] = await params.tx
     .insert(applications)
     .values({
+      organizationId: params.organizationId,
       candidateId: params.candidateId,
       requisitionItemId: params.requisitionItemId,
       requisitionId: params.requisitionId,

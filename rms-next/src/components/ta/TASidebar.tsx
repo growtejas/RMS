@@ -48,6 +48,11 @@ const TASidebar: React.FC<TASidebarProps> = ({
       icon: <ClipboardList size={20} />,
     },
     {
+      href: "/ta/candidates",
+      label: "Candidates (Global)",
+      icon: <Users size={20} />,
+    },
+    {
       href: "/ta/resource-pool",
       label: "Resource Pool",
       icon: <Users size={20} />,

@@ -17,7 +17,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
     if (user instanceof NextResponse) {
       return user;
     }
-    const denied = requireAnyRole(user, "Admin", "Owner");
+    const denied = requireAnyRole(user, "Admin", "Owner", "HR");
     if (denied) {
       return denied;
     }
@@ -48,7 +48,7 @@ export async function DELETE(request: Request, { params }: Ctx) {
     if (user instanceof NextResponse) {
       return user;
     }
-    const denied = requireAnyRole(user, "Admin", "Owner");
+    const denied = requireAnyRole(user, "Admin", "Owner", "HR");
     if (denied) {
       return denied;
     }
