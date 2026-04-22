@@ -127,6 +127,13 @@
       "when": 1777300000000,
       "tag": "0017_candidate_persons_global_pool",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1777400000000,
+      "tag": "0018_item_cv_upload",
+      "breakpoints": true
     }
   ]
 }

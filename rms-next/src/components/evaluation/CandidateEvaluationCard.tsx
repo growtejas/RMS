@@ -17,6 +17,7 @@ export default function CandidateEvaluationCard({
 }: CandidateEvaluationCardProps) {
   const [shortlistOpen, setShortlistOpen] = useState(false);
   const [aiExpanded, setAiExpanded] = useState(false);
+  const [shortlistBlockedNudge, setShortlistBlockedNudge] = useState(false);
 
   const aiDisplay =
     model.ai.score != null
@@ -264,49 +265,77 @@ export default function CandidateEvaluationCard({
         {!readOnly ? (
           <div
             style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 8,
               marginTop: 4,
               paddingTop: 10,
               borderTop: "1px solid var(--border-subtle)",
             }}
           >
-            <button
-              type="button"
-              className="action-button primary"
-              disabled={disabled}
-              title={shortlistDisabledReason}
-              style={{ fontSize: 11, padding: "6px 12px" }}
-              onClick={(e) => {
-                e.stopPropagation();
-                setShortlistOpen(true);
-              }}
-            >
-              Shortlist
-            </button>
-            <button
-              type="button"
-              className="action-button"
-              style={{ fontSize: 11, padding: "6px 12px" }}
-              onClick={(e) => {
-                e.stopPropagation();
-                onReject();
-              }}
-            >
-              Reject
-            </button>
-            <button
-              type="button"
-              className="action-button"
-              style={{ fontSize: 11, padding: "6px 12px" }}
-              onClick={(e) => {
-                e.stopPropagation();
-                onViewDetails();
-              }}
-            >
-              View details
-            </button>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <button
+                type="button"
+                className="action-button primary"
+                aria-disabled={disabled ? true : undefined}
+                title={shortlistDisabledReason}
+                style={{
+                  fontSize: 11,
+                  padding: "6px 12px",
+                  opacity: disabled ? 0.6 : 1,
+                  cursor: disabled ? "not-allowed" : "pointer",
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (disabled) {
+                    setShortlistBlockedNudge(true);
+                    window.setTimeout(() => setShortlistBlockedNudge(false), 2000);
+                    return;
+                  }
+                  setShortlistOpen(true);
+                }}
+              >
+                Shortlist
+              </button>
+              <button
+                type="button"
+                className="action-button"
+                style={{ fontSize: 11, padding: "6px 12px" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onReject();
+                }}
+              >
+                Reject
+              </button>
+              <button
+                type="button"
+                className="action-button"
+                style={{ fontSize: 11, padding: "6px 12px" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onViewDetails();
+                }}
+              >
+                View details
+              </button>
+            </div>
+
+            {disabled && shortlistDisabledReason ? (
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 11,
+                  color: "var(--text-tertiary)",
+                  lineHeight: 1.4,
+                }}
+              >
+                {shortlistDisabledReason}
+              </div>
+            ) : null}
+
+            {shortlistBlockedNudge && disabled && shortlistDisabledReason ? (
+              <div style={{ marginTop: 6, fontSize: 11, color: "var(--warning, #f59e0b)" }}>
+                Shortlist is blocked: {shortlistDisabledReason}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>

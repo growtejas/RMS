@@ -28,6 +28,8 @@ import {
   resolveAtsV1HybridWeight,
   resolveRankingAllowEmptyRequiredSkills,
   resolveRequiredSkillsForRanking,
+  resolveRequiredSkillsFromItem,
+  type AtsRankingEngineMode,
   type AtsV1Breakdown,
 } from "@/lib/services/ats-v1-scoring";
 import {
@@ -160,6 +162,64 @@ export type RequisitionItemRankingJson = {
     ai_eval_enriched?: boolean;
   };
 };
+
+/** One candidate’s score + explain + merged ranking signals (for integrations / audits). */
+export type CandidateScoringDetailsJson = {
+  requisition_item_id: number;
+  req_id: number;
+  candidate_id: number;
+  full_name: string;
+  email: string;
+  current_stage: string;
+  meta?: RankedCandidateRow["meta"];
+  generated_at: string;
+  ranking_version: string;
+  weights: RequisitionItemRankingJson["weights"];
+  total_candidates: number;
+  ranking_meta?: RequisitionItemRankingJson["meta"];
+  score: RankedCandidateRow["score"];
+  explain: RankedCandidateRow["explain"];
+  /** Job-side inputs used for this line (same as GET .../job-requirements). */
+  job_requirements: RankingJobRequirementsJson;
+};
+
+export function pickCandidateScoringDetailsFromRanking(
+  ranking: RequisitionItemRankingJson,
+  candidateId: number,
+  jobRequirements: RankingJobRequirementsJson,
+): CandidateScoringDetailsJson | null {
+  const row = ranking.ranked_candidates.find((r) => r.candidate_id === candidateId);
+  if (!row) return null;
+  return {
+    requisition_item_id: ranking.requisition_item_id,
+    req_id: ranking.req_id,
+    candidate_id: candidateId,
+    full_name: row.full_name,
+    email: row.email,
+    current_stage: row.current_stage,
+    meta: row.meta,
+    generated_at: ranking.generated_at,
+    ranking_version: ranking.ranking_version,
+    weights: ranking.weights,
+    total_candidates: ranking.total_candidates,
+    ranking_meta: ranking.meta,
+    score: row.score,
+    explain: row.explain,
+    job_requirements: jobRequirements,
+  };
+}
+
+export async function getCandidateScoringDetailsForRequisitionItem(
+  itemId: number,
+  candidateId: number,
+  options?: { strictSnapshot?: boolean },
+): Promise<CandidateScoringDetailsJson | null> {
+  const [ranking, jobCtx] = await Promise.all([
+    rankCandidatesForRequisitionItem(itemId, options),
+    loadRankingRequiredContextForItem(itemId).then(buildRankingJobRequirementsFromContext),
+  ]);
+  return pickCandidateScoringDetailsFromRanking(ranking, candidateId, jobCtx);
+}
 
 /** Bump when ranking JSON shape changes (invalidates stored snapshots). */
 const RANKING_VERSION = "phase6-v5-ai-eval";
@@ -492,6 +552,8 @@ export async function loadRankingRequiredContextForItem(itemId: number): Promise
   item: typeof requisitionItems.$inferSelect;
   requiredText: string;
   requiredSkillsList: string[];
+  /** Text from requisition JD PDF/DOC or pipeline JD only (before item field merge). */
+  jdNarrativeExtracted: string;
 }> {
   const db = getDb();
   const [item] = await db
@@ -532,7 +594,186 @@ export async function loadRankingRequiredContextForItem(itemId: number): Promise
         "requirements / JD narrative on this requisition item, or set RANKING_ALLOW_EMPTY_REQUIRED_SKILLS=true for legacy data.",
     );
   }
-  return { item, requiredText, requiredSkillsList };
+  return { item, requiredText, requiredSkillsList, jdNarrativeExtracted: jdExtractedText };
+}
+
+const JOB_REQUIREMENTS_EXCERPT = 2500;
+
+export type RequiredSkillsResolutionPath =
+  | "ranking_required_skills_json"
+  | "requirements_primary_secondary"
+  | "composite_text_primary_secondary"
+  | "jd_token_extraction";
+
+function explainRequiredSkillsResolution(
+  item: typeof requisitionItems.$inferSelect,
+  requiredText: string,
+): { path: RequiredSkillsResolutionPath } {
+  const fromJson = item.rankingRequiredSkills;
+  if (Array.isArray(fromJson) && fromJson.length > 0) {
+    return { path: "ranking_required_skills_json" };
+  }
+  const fromReqField = resolveRequiredSkillsFromItem({
+    rankingRequiredSkills: null,
+    requirements: item.requirements,
+  });
+  if (fromReqField.length > 0) {
+    return { path: "requirements_primary_secondary" };
+  }
+  const fromComposite = resolveRequiredSkillsFromItem({
+    rankingRequiredSkills: null,
+    requirements: requiredText,
+  });
+  if (fromComposite.length > 0) {
+    return { path: "composite_text_primary_secondary" };
+  }
+  return { path: "jd_token_extraction" };
+}
+
+/**
+ * What the ranker uses as the "job side" (JD narrative, required skills, ATS job fields, engine config).
+ * Use for audits and integrations; change inputs via PATCH pipeline-ranking-jd + item fields, then recompute ranking.
+ */
+export type RankingJobRequirementsJson = {
+  requisition_item_id: number;
+  req_id: number;
+  jd_narrative: {
+    source: "requisition_jd" | "pipeline_jd";
+    use_requisition_jd: boolean;
+    has_pipeline_jd_file: boolean;
+    char_length: number;
+    excerpt: string;
+  };
+  composite_scoring_text: {
+    char_length: number;
+    excerpt: string;
+    /** Fields concatenated in order before the cap. */
+    parts_included: string[];
+  };
+  required_skills: {
+    normalized_tokens: string[];
+    resolution_path: RequiredSkillsResolutionPath;
+  };
+  ats_job_profile: {
+    required_experience_years: number | null;
+    job_skill_level: string | null;
+    job_education_requirement: string | null;
+  };
+  scoring_config: {
+    ranking_engine: AtsRankingEngineMode;
+    ats_v1_hybrid_weight: number;
+    phase5_weights: {
+      keyword: number;
+      semantic: number;
+      business: number;
+    };
+    allow_empty_required_skills_env: boolean;
+  };
+  item_snapshot: {
+    role_position: string;
+    requirements_excerpt: string | null;
+    job_description_excerpt: string | null;
+  };
+  control: {
+    update_ranking_inputs: {
+      method: string;
+      path: string;
+      body: Record<string, string>;
+    };
+    recompute_ranking: {
+      method: string;
+      path: string;
+    };
+    notes: string[];
+  };
+};
+
+export function buildRankingJobRequirementsFromContext(ctx: {
+  item: typeof requisitionItems.$inferSelect;
+  requiredText: string;
+  requiredSkillsList: string[];
+  jdNarrativeExtracted: string;
+}): RankingJobRequirementsJson {
+  const { item, requiredText, requiredSkillsList, jdNarrativeExtracted } = ctx;
+  const useReqJd = item.pipelineRankingUseRequisitionJd !== false;
+  const { path: resolutionPath } = explainRequiredSkillsResolution(item, requiredText);
+  const partsIncluded = [
+    item.rolePosition ? "role_position" : null,
+    item.skillLevel ? "skill_level" : null,
+    item.educationRequirement ? "education_requirement" : null,
+    item.requirements ? "requirements" : null,
+    item.jobDescription ? "job_description" : null,
+    jdNarrativeExtracted.trim() ? "jd_narrative_extracted" : null,
+  ].filter(Boolean) as string[];
+
+  return {
+    requisition_item_id: item.itemId,
+    req_id: item.reqId,
+    jd_narrative: {
+      source: useReqJd ? "requisition_jd" : "pipeline_jd",
+      use_requisition_jd: useReqJd,
+      has_pipeline_jd_file: Boolean(item.pipelineJdFileKey?.trim()),
+      char_length: jdNarrativeExtracted.length,
+      excerpt: jdNarrativeExtracted.slice(0, JOB_REQUIREMENTS_EXCERPT),
+    },
+    composite_scoring_text: {
+      char_length: requiredText.length,
+      excerpt: requiredText.slice(0, JOB_REQUIREMENTS_EXCERPT),
+      parts_included: partsIncluded,
+    },
+    required_skills: {
+      normalized_tokens: requiredSkillsList.map((s) => normalizeSkill(s)).filter(Boolean),
+      resolution_path: resolutionPath,
+    },
+    ats_job_profile: {
+      required_experience_years: item.experienceYears ?? null,
+      job_skill_level: item.skillLevel ?? null,
+      job_education_requirement: item.educationRequirement ?? null,
+    },
+    scoring_config: {
+      ranking_engine: resolveAtsRankingEngineMode(),
+      ats_v1_hybrid_weight: resolveAtsV1HybridWeight(),
+      phase5_weights: resolveRankingWeights(),
+      allow_empty_required_skills_env: resolveRankingAllowEmptyRequiredSkills(),
+    },
+    item_snapshot: {
+      role_position: item.rolePosition,
+      requirements_excerpt: item.requirements
+        ? item.requirements.slice(0, JOB_REQUIREMENTS_EXCERPT)
+        : null,
+      job_description_excerpt: item.jobDescription
+        ? item.jobDescription.slice(0, JOB_REQUIREMENTS_EXCERPT)
+        : null,
+    },
+    control: {
+      update_ranking_inputs: {
+        method: "PATCH",
+        path: `/api/requisitions/items/${item.itemId}/pipeline-ranking-jd`,
+        body: {
+          use_requisition_jd: "boolean — when true, ranking JD text comes from requisition/manager JD files",
+          pipeline_jd_text: "string | null — free-text JD used when use_requisition_jd is false",
+          ranking_required_skills:
+            "string[] | null — explicit required skills (highest priority for skill gate + ATS V1 alignment)",
+        },
+      },
+      recompute_ranking: {
+        method: "POST",
+        path: `/api/ranking/requisition-items/${item.itemId}`,
+      },
+      notes: [
+        "ATS V1 compares candidate merged signals (experience_years, notice, education_raw) to item experience_years, skill_level, and education_requirement.",
+        "Phase 5 blends keyword + semantic (embeddings) + business scores using composite_scoring_text and required skill terms.",
+        "After changing inputs, run POST recompute so snapshots and scores match.",
+      ],
+    },
+  };
+}
+
+export async function getRankingJobRequirementsForItem(
+  itemId: number,
+): Promise<RankingJobRequirementsJson> {
+  const ctx = await loadRankingRequiredContextForItem(itemId);
+  return buildRankingJobRequirementsFromContext(ctx);
 }
 
 function mergeResumeDerivedBatches(

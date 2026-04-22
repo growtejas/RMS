@@ -53,6 +53,28 @@ export interface Interview {
   candidate_email?: string | null;
 }
 
+/** Present on GET /api/candidates/:id — local resume parser output / cache. */
+export interface ResumeParseRecord {
+  v: number | null;
+  parser_provider: string | null;
+  parser_version: string | null;
+  status: string | null;
+  source_resume_ref: string | null;
+  raw_text: string | null;
+  parsed_data: Record<string, unknown> | null;
+  error_message: string | null;
+  stored_resume_path: string | null;
+}
+
+/** Present on GET /api/candidates/:id when `resume_structured_profile` exists in DB. */
+export interface ResumeStructuredSummary {
+  schema_version: number;
+  extractor: string;
+  confidence_overall: number;
+  warnings: string[];
+  issue_tags: string[];
+}
+
 export interface Candidate {
   candidate_id: number;
   person_id?: number;
@@ -63,10 +85,15 @@ export interface Candidate {
   email: string;
   phone: string | null;
   resume_path: string | null;
+  /** Filled when loading a single candidate from the API (not always on list payloads). */
+  resume_parse?: ResumeParseRecord | null;
+  /** Rules/LLM structured resume summary for parse-quality UI. */
+  resume_structured?: ResumeStructuredSummary | null;
   total_experience_years?: number | null;
   notice_period_days?: number | null;
   is_referral?: boolean;
   candidate_skills?: string[] | null;
+  education_raw?: string | null;
   current_stage:
     | "Sourced"
     | "Shortlisted"
@@ -218,6 +245,72 @@ export interface RequisitionItemRankingResponse {
     required_skills_count?: number;
     ai_eval_enriched?: boolean;
   };
+}
+
+/** GET /api/ranking/requisition-items/{itemId}/job-requirements */
+export interface RankingJobRequirementsResponse {
+  requisition_item_id: number;
+  req_id: number;
+  jd_narrative: {
+    source: "requisition_jd" | "pipeline_jd";
+    use_requisition_jd: boolean;
+    has_pipeline_jd_file: boolean;
+    char_length: number;
+    excerpt: string;
+  };
+  composite_scoring_text: {
+    char_length: number;
+    excerpt: string;
+    parts_included: string[];
+  };
+  required_skills: {
+    normalized_tokens: string[];
+    resolution_path: string;
+  };
+  ats_job_profile: {
+    required_experience_years: number | null;
+    job_skill_level: string | null;
+    job_education_requirement: string | null;
+  };
+  scoring_config: {
+    ranking_engine: string;
+    ats_v1_hybrid_weight: number;
+    phase5_weights: RequisitionItemRankingResponse["weights"];
+    allow_empty_required_skills_env: boolean;
+  };
+  item_snapshot: {
+    role_position: string;
+    requirements_excerpt: string | null;
+    job_description_excerpt: string | null;
+  };
+  control: {
+    update_ranking_inputs: {
+      method: string;
+      path: string;
+      body: Record<string, string>;
+    };
+    recompute_ranking: { method: string; path: string };
+    notes: string[];
+  };
+}
+
+/** GET /api/ranking/requisition-items/{itemId}/candidates/{candidateId}/scoring-details */
+export interface CandidateScoringDetailsResponse {
+  requisition_item_id: number;
+  req_id: number;
+  candidate_id: number;
+  full_name: string;
+  email: string;
+  current_stage: string;
+  meta?: RequisitionItemRankingCandidate["meta"];
+  generated_at: string;
+  ranking_version: string;
+  weights: RequisitionItemRankingResponse["weights"];
+  total_candidates: number;
+  ranking_meta?: RequisitionItemRankingResponse["meta"];
+  score: RequisitionItemRankingCandidate["score"];
+  explain: RequisitionItemRankingCandidate["explain"];
+  job_requirements: RankingJobRequirementsResponse;
 }
 
 export interface CandidateCreate {
@@ -439,6 +532,34 @@ export async function fetchRequisitionItemRanking(
       timeout: RANKING_CLIENT_TIMEOUT_MS,
       params: options?.aiEval ? { ai_eval: 1 } : undefined,
     },
+  );
+  return data;
+}
+
+export async function fetchCandidateScoringDetails(
+  itemId: number,
+  candidateId: number,
+  options?: { aiEval?: boolean; strictSnapshot?: boolean },
+): Promise<CandidateScoringDetailsResponse> {
+  const params: Record<string, string | number> = {};
+  if (options?.aiEval) params.ai_eval = 1;
+  if (options?.strictSnapshot) params.strict_snapshot = 1;
+  const { data } = await apiClient.get<CandidateScoringDetailsResponse>(
+    `/ranking/requisition-items/${itemId}/candidates/${candidateId}/scoring-details`,
+    {
+      timeout: RANKING_CLIENT_TIMEOUT_MS,
+      params: Object.keys(params).length > 0 ? params : undefined,
+    },
+  );
+  return data;
+}
+
+export async function fetchRankingJobRequirements(
+  itemId: number,
+): Promise<RankingJobRequirementsResponse> {
+  const { data } = await apiClient.get<RankingJobRequirementsResponse>(
+    `/ranking/requisition-items/${itemId}/job-requirements`,
+    { timeout: RANKING_CLIENT_TIMEOUT_MS },
   );
   return data;
 }

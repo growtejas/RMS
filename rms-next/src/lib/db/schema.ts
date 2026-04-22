@@ -216,6 +216,9 @@ export const requisitionItems = pgTable(
     rolePosition: varchar("role_position", { length: 50 }).notNull(),
     jobDescription: text("job_description").notNull(),
     jdFileKey: text("jd_file_key"),
+    /** TA-uploaded Position CV used as a gate for shortlisting (Phase 4). */
+    cvFileKey: text("cv_file_key"),
+    cvFileName: text("cv_file_name"),
     skillLevel: varchar("skill_level", { length: 30 }),
     experienceYears: integer("experience_years"),
     educationRequirement: varchar("education_requirement", { length: 100 }),

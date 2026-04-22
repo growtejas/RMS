@@ -1,6 +1,9 @@
 import type { ParsedResumeArtifact } from "@/lib/queue/inbound-events-queue";
 import { normalizeSkill } from "@/lib/services/ats-v1-scoring";
-import type { ResumeStructuredDocumentV1 } from "@/lib/services/resume-structure/resume-structure.schema";
+import {
+  RESUME_STRUCTURE_SCHEMA_VERSION,
+  type ResumeStructuredDocumentV1,
+} from "@/lib/services/resume-structure/resume-structure.schema";
 
 /** Where an ATS-facing field value came from after DB + parser + structured merge. */
 export type SignalFieldSource = "db" | "structured" | "parser" | "none";
@@ -109,6 +112,18 @@ function dbExperienceYears(totalExperienceYears: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Structured document is trusted for ranking merge when parse succeeded and schema matches. */
+function structuredRankingUsable(
+  doc: ResumeStructuredDocumentV1 | null | undefined,
+  parse_status: ParsedResumeArtifact["status"] | "skipped",
+): boolean {
+  return (
+    doc != null &&
+    parse_status === "processed" &&
+    doc.schema_version === RESUME_STRUCTURE_SCHEMA_VERSION
+  );
+}
+
 export function buildCandidateRankingSignals(input: {
   candidate: {
     candidateSkills: unknown;
@@ -135,20 +150,29 @@ export function buildCandidateRankingSignals(input: {
         .map((s) => normalizeSkill(s))
         .filter(Boolean)
     : [];
-  const skills_normalized = Array.from(
-    new Set([...dbSkills, ...structSkills, ...p.skills]),
-  );
+  const rankingUsable = structuredRankingUsable(input.structuredDocument, parse_status);
+  const skills_normalized =
+    rankingUsable && structSkills.length > 0
+      ? Array.from(new Set(structSkills))
+      : Array.from(new Set([...dbSkills, ...structSkills, ...p.skills]));
 
-  const dbExp = dbExperienceYears(input.candidate.totalExperienceYears);
-  let experience_years = dbExp;
-  let experience_source: SignalFieldSource = dbExp != null ? "db" : "none";
-  if (experience_years == null && struct?.experience_years != null) {
+  let experience_years: number | null = null;
+  let experience_source: SignalFieldSource = "none";
+  if (rankingUsable && struct?.experience_years != null) {
     experience_years = struct.experience_years;
     experience_source = "structured";
-  }
-  if (experience_years == null && p.experience_years != null) {
-    experience_years = p.experience_years;
-    experience_source = "parser";
+  } else {
+    const dbExp = dbExperienceYears(input.candidate.totalExperienceYears);
+    if (dbExp != null) {
+      experience_years = dbExp;
+      experience_source = "db";
+    } else if (struct?.experience_years != null) {
+      experience_years = struct.experience_years;
+      experience_source = "structured";
+    } else if (p.experience_years != null) {
+      experience_years = p.experience_years;
+      experience_source = "parser";
+    }
   }
 
   const dbNotice = input.candidate.noticePeriodDays;
@@ -165,13 +189,18 @@ export function buildCandidateRankingSignals(input: {
   }
 
   const dbEdu = input.candidate.educationRaw?.trim() ?? "";
-  let education_raw: string | null = dbEdu ? dbEdu : null;
-  let education_source: SignalFieldSource = education_raw ? "db" : "none";
-  if (!education_raw && struct?.education?.trim()) {
+  let education_raw: string | null = null;
+  let education_source: SignalFieldSource = "none";
+  if (rankingUsable && struct?.education?.trim()) {
     education_raw = struct.education.trim().slice(0, 2000);
     education_source = "structured";
-  }
-  if (!education_raw && p.education_raw) {
+  } else if (dbEdu) {
+    education_raw = dbEdu;
+    education_source = "db";
+  } else if (struct?.education?.trim()) {
+    education_raw = struct.education.trim().slice(0, 2000);
+    education_source = "structured";
+  } else if (p.education_raw) {
     education_raw = p.education_raw;
     education_source = "parser";
   }

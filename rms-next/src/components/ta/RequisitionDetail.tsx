@@ -199,6 +199,8 @@ interface BackendRequisitionItem {
   education_requirement?: string | null;
   job_description: string;
   jd_file_key?: string | null;
+  cv_file_key?: string | null;
+  cv_file_name?: string | null;
   requirements?: string | null;
   item_status: string;
   assigned_ta?: number | null; // Phase 7: Item-level TA assignment
@@ -694,6 +696,10 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
           approvedBudget: item.approved_budget ?? null,
           currency: item.currency ?? "INR",
           jdFileKey: (item as BackendRequisitionItem).jd_file_key ?? null,
+          cvFileUrl: (item as BackendRequisitionItem).cv_file_key
+            ? `/api/requisitions/items/${item.item_id}/cv`
+            : undefined,
+          cvFileName: (item as BackendRequisitionItem).cv_file_name ?? undefined,
           pipelineRankingUseRequisitionJd:
             item.pipeline_ranking_use_requisition_jd !== false,
           pipelineJdText: item.pipeline_jd_text ?? null,
@@ -1361,34 +1367,37 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       setTransitionError(null);
 
       try {
-        // Simulate CV upload - in production, this would upload to storage
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        const fileUrl = `https://storage.example.com/cv/${itemId}_${file.name}`;
-
-        // Update local state with CV info
-        setTicket((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            items: prev.items.map((item) =>
-              item.id === itemId
-                ? { ...item, cvFileUrl: fileUrl, cvFileName: file.name }
-                : item,
-            ),
-          };
+        const numericId = Number.parseInt(itemId.replace("ITEM-", ""), 10);
+        if (!Number.isFinite(numericId)) {
+          throw new Error("Invalid item id");
+        }
+        const form = new FormData();
+        form.append("cv_file", file);
+        await apiClient.post(`/requisitions/items/${numericId}/cv`, form, {
+          headers: { "Content-Type": "multipart/form-data" },
         });
 
         setTransitionSuccess(`CV uploaded: ${file.name}`);
         setTimeout(() => setTransitionSuccess(null), 3000);
+        const reqId = parseReqId(effectiveTicketId);
+        if (reqId) {
+          const response = await apiClient.get<BackendRequisition>(
+            `/requisitions/${reqId}`,
+          );
+          const built = buildTicket(response.data);
+          setTicket(built);
+        }
       } catch (err) {
         setTransitionError(
           err instanceof Error ? err.message : "Failed to upload CV",
         );
       } finally {
         setCvUploading(null);
+        // allow re-uploading the same file
+        event.target.value = "";
       }
     },
-    [],
+    [effectiveTicketId],
   );
 
   // Phase 4: Refresh requisition data

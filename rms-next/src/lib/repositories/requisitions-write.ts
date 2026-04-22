@@ -148,6 +148,22 @@ export async function setItemJdKey(
     .where(eq(requisitionItems.itemId, itemId));
 }
 
+export async function setItemCvFields(
+  itemId: number,
+  organizationId: string,
+  patch: { cvFileKey: string | null; cvFileName: string | null },
+) {
+  const db = getDb();
+  const item = await findItemById(itemId, organizationId);
+  if (!item) {
+    return;
+  }
+  await db
+    .update(requisitionItems)
+    .set(patch)
+    .where(eq(requisitionItems.itemId, itemId));
+}
+
 export async function updateItemPipelineRankingJd(
   itemId: number,
   organizationId: string,

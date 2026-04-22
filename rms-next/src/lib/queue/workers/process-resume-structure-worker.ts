@@ -94,6 +94,15 @@ async function processJob(payload: RefineResumeStructurePayload): Promise<void> 
     return;
   }
 
+  const mergedFieldConfidence =
+    refined.fieldConfidenceOverride &&
+    Object.keys(refined.fieldConfidenceOverride).length > 0
+      ? {
+          ...parsed.data.field_confidence,
+          ...refined.fieldConfidenceOverride,
+        }
+      : parsed.data.field_confidence;
+
   const nextDoc: ResumeStructuredDocumentV1 = {
     ...parsed.data,
     extractor: "rules_v2+llm",
@@ -105,6 +114,7 @@ async function processJob(payload: RefineResumeStructurePayload): Promise<void> 
         Math.max(parsed.data.confidence.overall, 0.55),
       ),
     },
+    field_confidence: mergedFieldConfidence,
     extracted_at: new Date().toISOString(),
   };
 

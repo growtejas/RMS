@@ -950,7 +950,7 @@ const ManagerRequisitionDetails: React.FC = () => {
         id: item.item_id,
         role_position: item.role_position,
         skill_level: item.skill_level || "Mid",
-        experience_years: item.experience_years || 3,
+        experience_years: item.experience_years ?? 3,
         education_requirement: item.education_requirement || "",
         job_description: item.job_description,
         requirements: item.requirements || "",
@@ -1018,7 +1018,7 @@ const ManagerRequisitionDetails: React.FC = () => {
       id: "new",
       role_position: "",
       skill_level: "Mid",
-      experience_years: 3,
+      experience_years: 0,
       education_requirement: "",
       job_description: "",
       requirements: "",
@@ -2088,7 +2088,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                                   {item.skill_level || "Not specified"}
                                 </span>
                                 <span className="text-sm text-gray-500">
-                                  {item.experience_years || "—"} years
+                                  {item.experience_years ?? "—"} years
                                   experience
                                 </span>
                                 <span className="text-sm text-gray-500">

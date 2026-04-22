@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Native/CommonJS parsers must not be bundled for API routes / server actions.
+  serverExternalPackages: ["pdf-parse", "word-extractor"],
   // Reduces duplicate network calls in development caused by React 18 StrictMode
   // intentionally double-invoking effects. Production behavior is unaffected.
   reactStrictMode: false,

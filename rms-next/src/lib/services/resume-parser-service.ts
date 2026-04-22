@@ -4,49 +4,135 @@ import path from "node:path";
 import type { NormalizedInboundCandidate, ParsedResumeArtifact } from "@/lib/queue/inbound-events-queue";
 
 const PARSER_PROVIDER = "fallback-local";
-const PARSER_VERSION = "v1";
+const PARSER_VERSION = "v2";
 const MAX_RAW_TEXT_CHARS = 12000;
+/** Below this length we try other extractors (mislabeled files, weak PDF text layers). */
+const MIN_MEANINGFUL_EXTRACT_CHARS = 40;
 
 function clamp(n: number, min: number, max: number): number {
   if (!Number.isFinite(n)) return min;
   return Math.max(min, Math.min(max, n));
 }
 
+/** Extension from a local path or file URL; strips query/hash so `.pdf?x=1` → `.pdf`. */
+export function normalizedResumeExtension(resumeRef: string): string {
+  const trimmed = resumeRef.trim();
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const u = new URL(trimmed);
+      return path.extname(u.pathname).toLowerCase();
+    } catch {
+      return "";
+    }
+  }
+  const noQuery = trimmed.replace(/[?#].*$/, "");
+  return path.extname(noQuery).toLowerCase();
+}
+
+function sniffBufferKind(buffer: Buffer): "pdf" | "zip" | "ole" | "unknown" {
+  if (buffer.length < 8) return "unknown";
+  const sig4 = buffer.subarray(0, 4).toString("latin1");
+  if (sig4.startsWith("%PDF")) return "pdf";
+  if (buffer[0] === 0xd0 && buffer[1] === 0xcf) return "ole";
+  if (buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04) {
+    return "zip";
+  }
+  return "unknown";
+}
+
+function needleMatchesResume(paddedLower: string, needle: string): boolean {
+  const n = needle.toLowerCase();
+  if (n.includes(" ")) {
+    return paddedLower.includes(n);
+  }
+  const escaped = n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(paddedLower);
+}
+
 function extractSkills(text: string): string[] {
-  const known = [
-    "javascript",
-    "typescript",
-    "react",
-    "node",
-    "next.js",
-    "python",
-    "java",
-    "sql",
-    "postgresql",
-    "aws",
-    "docker",
-    "redis",
+  const known: { needle: string; canonical: string }[] = [
+    { needle: "javascript", canonical: "javascript" },
+    { needle: "typescript", canonical: "typescript" },
+    { needle: "react native", canonical: "react native" },
+    { needle: "react.js", canonical: "react" },
+    { needle: "reactjs", canonical: "react" },
+    { needle: "react", canonical: "react" },
+    { needle: "next.js", canonical: "next.js" },
+    { needle: "nextjs", canonical: "next.js" },
+    { needle: "node.js", canonical: "node" },
+    { needle: "nodejs", canonical: "node" },
+    { needle: "node", canonical: "node" },
+    { needle: "express", canonical: "express" },
+    { needle: "vue", canonical: "vue" },
+    { needle: "angular", canonical: "angular" },
+    { needle: "svelte", canonical: "svelte" },
+    { needle: "python", canonical: "python" },
+    { needle: "django", canonical: "django" },
+    { needle: "flask", canonical: "flask" },
+    { needle: "fastapi", canonical: "fastapi" },
+    { needle: "java", canonical: "java" },
+    { needle: "spring", canonical: "spring" },
+    { needle: "kotlin", canonical: "kotlin" },
+    { needle: "golang", canonical: "go" },
+    { needle: "rust", canonical: "rust" },
+    { needle: "c#", canonical: "c#" },
+    { needle: "sql", canonical: "sql" },
+    { needle: "postgresql", canonical: "postgresql" },
+    { needle: "postgres", canonical: "postgresql" },
+    { needle: "mysql", canonical: "mysql" },
+    { needle: "mongodb", canonical: "mongodb" },
+    { needle: "redis", canonical: "redis" },
+    { needle: "aws", canonical: "aws" },
+    { needle: "azure", canonical: "azure" },
+    { needle: "gcp", canonical: "gcp" },
+    { needle: "docker", canonical: "docker" },
+    { needle: "kubernetes", canonical: "kubernetes" },
+    { needle: "kafka", canonical: "kafka" },
+    { needle: "graphql", canonical: "graphql" },
+    { needle: "html", canonical: "html" },
+    { needle: "css", canonical: "css" },
+    { needle: "tailwind", canonical: "tailwind" },
+    { needle: "sass", canonical: "sass" },
   ];
-  const lower = text.toLowerCase();
-  return known.filter((skill) => lower.includes(skill)).slice(0, 15);
+
+  const spaced = ` ${text.toLowerCase().replace(/\s+/g, " ")} `;
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const { needle, canonical } of known) {
+    if (!needleMatchesResume(spaced, needle)) continue;
+    if (seen.has(canonical)) continue;
+    seen.add(canonical);
+    out.push(canonical);
+    if (out.length >= 20) break;
+  }
+  return out;
 }
 
 function extractExperienceYears(text: string): number | null {
   const lower = text.toLowerCase();
-  // Common patterns: "X years", "X+ years", "X.Y years", "experience: X years"
-  const matches =
-    lower.match(/(\d{1,2}(?:\.\d)?)\s*\+?\s*(?:years|yrs)\b/g) ?? [];
-  const nums = matches
-    .map((m) => Number.parseFloat(m.replace(/[^0-9.]/g, "")))
-    .filter((n) => Number.isFinite(n) && n >= 0 && n <= 80);
+  const patterns: RegExp[] = [
+    /(\d{1,2}(?:\.\d)?)\s*\+\s*(?:years|yrs)\b/g,
+    /(\d{1,2}(?:\.\d)?)\s*(?:years|yrs)(?:\s+of)?\s+(?:experience|exp)\b/g,
+    /(?:experience|exp)(?:\s*[:,-])?\s*(\d{1,2}(?:\.\d)?)\s*(?:years|yrs)\b/g,
+    /(?:over|more than|above|approximately|around)\s+(\d{1,2}(?:\.\d)?)\s*(?:years|yrs)\b/g,
+    /(\d{1,2}(?:\.\d)?)\s*\+?\s*(?:years|yrs)\b/g,
+  ];
+  const nums: number[] = [];
+  for (const re of patterns) {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(lower)) !== null) {
+      const raw = m[1] ?? m[0];
+      const n = Number.parseFloat(String(raw).replace(/[^0-9.]/g, ""));
+      if (Number.isFinite(n) && n >= 0 && n <= 80) nums.push(n);
+    }
+  }
   if (nums.length === 0) return null;
-  // Take max as a conservative estimate for total experience.
   return clamp(Math.max(...nums), 0, 80);
 }
 
 function extractNoticePeriodDays(text: string): number | null {
   const lower = text.toLowerCase();
-  // Look for explicit notice period mentions first.
   const noticeLine =
     lower.match(/notice\s*period[^0-9]{0,20}(\d{1,3})\s*(days|day|weeks|week|months|month)\b/) ??
     lower.match(/(\d{1,3})\s*(days|day|weeks|week|months|month)\s*notice\b/);
@@ -87,6 +173,10 @@ function extractEmails(text: string): string[] {
 function extractPhones(text: string): string[] {
   const matches = text.match(/(?:\+?\d[\d\s-]{7,}\d)/g) ?? [];
   return Array.from(new Set(matches.map((m) => m.replace(/\s+/g, " ").trim()))).slice(0, 5);
+}
+
+function meaningfulExtract(text: string): boolean {
+  return text.trim().length >= MIN_MEANINGFUL_EXTRACT_CHARS;
 }
 
 function toParsedData(text: string, fallback: NormalizedInboundCandidate): Record<string, unknown> {
@@ -136,37 +226,78 @@ async function parseDocx(buffer: Buffer): Promise<string> {
   return out.value.trim();
 }
 
+async function parseWordOleOrOpenXml(buffer: Buffer): Promise<string> {
+  const mod = await import("word-extractor");
+  const WordExtractor = mod.default;
+  const extractor = new WordExtractor();
+  const doc = await extractor.extract(buffer);
+  return doc.getBody().trim();
+}
+
 /**
- * Extract plain text from a PDF or DOCX buffer (JD uploads, etc.).
- * Unknown extensions try PDF first (JD pipeline is PDF-first), then DOCX.
+ * Best-effort plain text from resume bytes. Uses magic-byte sniffing, not only the filename.
+ */
+export async function extractResumePlainText(
+  buffer: Buffer,
+  extensionHint: string,
+): Promise<{ text: string; extractor_chain: string[] }> {
+  const ext = extensionHint.toLowerCase();
+  const kind = sniffBufferKind(buffer);
+  const chain: string[] = [];
+  const tried = new Set<string>();
+
+  const run = async (label: string, fn: () => Promise<string>): Promise<string> => {
+    if (tried.has(label)) return "";
+    tried.add(label);
+    chain.push(label);
+    try {
+      return (await fn()).trim();
+    } catch {
+      return "";
+    }
+  };
+
+  let order: ("pdf" | "docx" | "word")[];
+  if (kind === "pdf" || ext === ".pdf") {
+    order = ["pdf", "docx", "word"];
+  } else if (kind === "zip" || ext === ".docx") {
+    order = ["docx", "word", "pdf"];
+  } else if (kind === "ole" || ext === ".doc") {
+    order = ["word", "docx", "pdf"];
+  } else {
+    order = ["pdf", "docx", "word"];
+  }
+
+  let best = "";
+  for (const step of order) {
+    let t = "";
+    if (step === "pdf") {
+      t = await run("pdf-parse", () => parsePdf(buffer));
+    } else if (step === "docx") {
+      t = await run("mammoth-docx", () => parseDocx(buffer));
+    } else {
+      t = await run("word-extractor", () => parseWordOleOrOpenXml(buffer));
+    }
+    if (t.length > best.length) best = t;
+    if (meaningfulExtract(t)) {
+      return { text: t, extractor_chain: chain };
+    }
+  }
+
+  return { text: best.trim(), extractor_chain: chain };
+}
+
+/**
+ * Extract plain text from a PDF, DOC, or DOCX buffer (JD uploads, etc.).
+ * Unknown extensions try PDF first, then DOCX / word-extractor.
  */
 export async function extractOfficeDocumentText(
   buffer: Buffer,
   filenameHint: string,
 ): Promise<string> {
-  const ext = path.extname(filenameHint).toLowerCase();
-  if (ext === ".docx") {
-    return (await parseDocx(buffer)).trim();
-  }
-  if (ext === ".pdf") {
-    return (await parsePdf(buffer)).trim();
-  }
-  const asPdf = (await parsePdf(buffer)).trim();
-  if (asPdf.length > 0) {
-    return asPdf;
-  }
-  try {
-    const asDocx = (await parseDocx(buffer)).trim();
-    if (asDocx.length > 0) {
-      return asDocx;
-    }
-  } catch {
-    // not a docx
-  }
-  if (ext) {
-    throw new Error(`Unsupported document extension '${ext}'`);
-  }
-  return "";
+  const ext = normalizedResumeExtension(filenameHint || "file.bin");
+  const { text } = await extractResumePlainText(buffer, ext || ".pdf");
+  return text;
 }
 
 export async function parseResumeArtifact(params: {
@@ -189,25 +320,40 @@ export async function parseResumeArtifact(params: {
 
   try {
     const buffer = await readResumeBuffer(resumeRef);
-    const ext = path.extname(resumeRef).toLowerCase();
-    let text = "";
+    const ext = normalizedResumeExtension(resumeRef);
+    const { text: fullText, extractor_chain } = await extractResumePlainText(buffer, ext);
 
-    if (ext === ".pdf") {
-      text = await parsePdf(buffer);
-    } else if (ext === ".docx") {
-      text = await parseDocx(buffer);
-    } else {
-      throw new Error(`Unsupported resume extension '${ext || "unknown"}'`);
+    if (!fullText.trim()) {
+      return {
+        parserProvider: PARSER_PROVIDER,
+        parserVersion: PARSER_VERSION,
+        status: "failed",
+        sourceResumeRef: resumeRef,
+        rawText: null,
+        parsedData: {
+          reason: "No text could be extracted from resume (empty PDF layer, unsupported format, or corrupt file)",
+          resume_extension: ext || null,
+          buffer_kind: sniffBufferKind(buffer),
+          extractor_chain,
+        },
+        errorMessage: "Resume text extraction returned empty body",
+      };
     }
 
-    const limitedText = text.slice(0, MAX_RAW_TEXT_CHARS);
+    const limitedText = fullText.slice(0, MAX_RAW_TEXT_CHARS);
+    const parsedData = toParsedData(limitedText, params.normalizedCandidate);
     return {
       parserProvider: PARSER_PROVIDER,
       parserVersion: PARSER_VERSION,
       status: "processed",
       sourceResumeRef: resumeRef,
       rawText: limitedText,
-      parsedData: toParsedData(limitedText, params.normalizedCandidate),
+      parsedData: {
+        ...parsedData,
+        resume_extension: ext || null,
+        buffer_kind: sniffBufferKind(buffer),
+        extractor_chain,
+      },
       errorMessage: null,
     };
   } catch (e) {

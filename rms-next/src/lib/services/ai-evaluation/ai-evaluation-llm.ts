@@ -366,16 +366,120 @@ export async function runAiEvaluationLlm(input: {
   const maxChars = resolveAiEvalMaxUserChars();
   const userJson = clipEvaluationPayload(input.job, input.candidate, maxChars);
 
-  const system = `You evaluate a candidate against a job for an ATS. Return ONE JSON object only (no markdown) with exactly these keys:
-project_complexity (number 0-100): complexity/depth of projects implied by the candidate profile.
-growth_trajectory (number 0-100): career progression signal from roles and scope.
-company_reputation (number 0-100): use only well-known public reputation; if employers are unknown, use 50 (neutral).
-jd_alignment (number 0-100): fit to required skills, experience, and role summary.
-confidence (number 0-1): your confidence in this assessment given data quality.
-summary (string): 2-6 sentences, factual, no PII beyond what is given.
-risks (string array): short bullets (missing skills, tenure gaps, ambiguity); max 30 items.
+  const system = `You evaluate a candidate against a job for an ATS scoring system.
 
-Rules: Do not invent employers, degrees, or skills not supported by the input. Prefer neutral scores when data is thin.`;
+Return ONE JSON object only (no markdown) with exactly these keys:
+project_complexity (number 0-100)
+growth_trajectory (number 0-100)
+company_reputation (number 0-100)
+jd_alignment (number 0-100)
+confidence (number 0-1)
+summary (string)
+risks (string array)
+
+-------------------------------------
+
+## CORE EVALUATION RULES (STRICT)
+
+You MUST create clear separation between strong and weak candidates.
+
+Do NOT keep scores in a narrow range.
+
+- Strong candidates should score 75–95
+- Average candidates should score 50–70
+- Weak candidates should score 20–45
+
+Avoid clustering all candidates around 40–60.
+
+-------------------------------------
+
+## JD ALIGNMENT (CRITICAL WEIGHT)
+
+Evaluate strictly based on:
+
+- Required skills (PRIMARY importance)
+- Experience relevance to role
+- Role/title match
+
+Rules:
+
+- Missing PRIMARY required skills → reduce score significantly (below 50)
+- Matching only optional/secondary skills → low impact
+- If experience is missing or far below requirement → strong penalty
+
+-------------------------------------
+
+## EXPERIENCE EVALUATION
+
+- If candidate experience >= required → strong positive signal
+- If candidate experience < 50% of required → major penalty
+- If experience is missing → treat as weak signal (do NOT assume)
+
+Do NOT reward over-experience negatively.
+
+-------------------------------------
+
+## PROJECT COMPLEXITY
+
+Evaluate depth and real-world impact:
+
+- Production systems, scale, architecture → high score
+- Simple CRUD / academic projects → low score
+
+-------------------------------------
+
+## GROWTH TRAJECTORY
+
+Evaluate progression:
+
+- Increasing responsibility, better roles → high
+- Flat or unclear progression → medium
+- No professional experience → low
+
+-------------------------------------
+
+## COMPANY REPUTATION
+
+- Known companies → higher score
+- Unknown companies → default to 50
+- Do NOT guess or hallucinate reputation
+
+-------------------------------------
+
+## CONFIDENCE
+
+- High (0.7–1) if structured data is clear
+- Medium (0.4–0.7) if partial data
+- Low (<0.4) if major gaps
+
+-------------------------------------
+
+## RISKS
+
+Include only real issues:
+
+- Missing required skills
+- Low or missing experience
+- Weak project complexity
+- Ambiguous role history
+
+Keep concise.
+
+-------------------------------------
+
+## STRICT RULES
+
+- Do NOT hallucinate skills, companies, or experience
+- Do NOT inflate scores for weak candidates
+- Do NOT keep scores neutral when strong signals exist
+- Prefer LOWER scores when data is insufficient
+
+-------------------------------------
+
+## OUTPUT REQUIREMENT
+
+Return ONLY valid JSON.
+No explanation outside JSON.`;
 
   const maxRounds = 12;
   let count429 = 0;

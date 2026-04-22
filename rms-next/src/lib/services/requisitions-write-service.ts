@@ -19,6 +19,7 @@ import {
   patchRequisitionFields,
   setHeaderJdKey,
   setItemJdKey,
+  setItemCvFields,
   updateItemPipelineRankingJd,
 } from "@/lib/repositories/requisitions-write";
 import { requisitionItemToJson } from "@/lib/services/requisitions-read-service";
@@ -619,6 +620,70 @@ export async function deleteItemJd(
   }
   await setItemJdKey(itemId, organizationId, null);
   return { message: "JD removed" };
+}
+
+export async function uploadItemCv(
+  itemId: number,
+  organizationId: string,
+  file: UploadBody,
+  userId: number,
+) {
+  const size = "buffer" in file ? file.buffer.length : file.size;
+  // CV is treated as a PDF for now (matches the Shortlist gate + preview logic).
+  assertPdf(file.filename, file.mime, size);
+  const item = await findItemById(itemId, organizationId);
+  if (!item) {
+    throw new HttpError(404, "Requisition item not found");
+  }
+  const header = await selectRequisitionById(item.reqId, organizationId);
+  if (!header) {
+    throw new HttpError(404, "Requisition not found");
+  }
+  assertRequisitionActiveForPipelineJd(header);
+
+  if (item.cvFileKey && !jdIsRemoteUrl(item.cvFileKey)) {
+    await jdDeleteFile(item.cvFileKey);
+  }
+  const ts = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+  const key =
+    "buffer" in file
+      ? await jdSaveBuffer(`cv_item_${itemId}_${ts}.pdf`, file.buffer)
+      : await jdSaveStream(`cv_item_${itemId}_${ts}.pdf`, file.stream);
+
+  await setItemCvFields(itemId, organizationId, {
+    cvFileKey: key,
+    cvFileName: file.filename || "upload.pdf",
+  });
+  return {
+    message: "CV uploaded",
+    cv_file_key: key,
+    cv_file_name: file.filename || "upload.pdf",
+  };
+}
+
+export async function deleteItemCv(
+  itemId: number,
+  organizationId: string,
+  userId: number,
+) {
+  const item = await findItemById(itemId, organizationId);
+  if (!item) {
+    throw new HttpError(404, "Requisition item not found");
+  }
+  const header = await selectRequisitionById(item.reqId, organizationId);
+  if (!header) {
+    throw new HttpError(404, "Requisition not found");
+  }
+  assertRequisitionActiveForPipelineJd(header);
+
+  if (!item.cvFileKey) {
+    throw new HttpError(404, "CV file not available for this item");
+  }
+  if (!jdIsRemoteUrl(item.cvFileKey)) {
+    await jdDeleteFile(item.cvFileKey);
+  }
+  await setItemCvFields(itemId, organizationId, { cvFileKey: null, cvFileName: null });
+  return { message: "CV removed" };
 }
 
 function assertRequisitionActiveForPipelineJd(header: { overallStatus: string }) {

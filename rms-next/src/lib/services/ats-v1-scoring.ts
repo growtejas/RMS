@@ -52,6 +52,10 @@ export function normalizeSkillToken(raw: string): string {
     ts: "typescript",
     "next js": "nextjs",
     "next.js": "nextjs",
+    sklearn: "scikit learn",
+    "power bi": "power bi",
+    powerbi: "power bi",
+    beautifulsoup: "beautiful soup",
   };
   return builtin[k] ?? k;
 }

@@ -630,7 +630,10 @@ const App: React.FC = () => {
 
       const payloadItem: RequisitionItemPayload = {
         role_position: pos.roleTitle.trim(),
-        job_description: `${pos.roleTitle} position requiring ${pos.yearsOfExperience}+ years experience`,
+        job_description:
+          pos.yearsOfExperience > 0
+            ? `${pos.roleTitle} position requiring ${pos.yearsOfExperience}+ years experience`
+            : `${pos.roleTitle} fresher position`,
         skill_level:
           pos.yearsOfExperience >= 20
             ? "Lead"
@@ -656,7 +659,7 @@ const App: React.FC = () => {
         currency: pos.currency || DEFAULT_CURRENCY,
       };
 
-      const quantity = Math.max(pos.quantity || 1, 1);
+      const quantity = Math.max(pos.quantity ?? 1, 1);
       return Array.from({ length: quantity }, () => payloadItem);
     });
   };
@@ -797,7 +800,7 @@ const App: React.FC = () => {
       primarySkills: [],
       secondarySkills: [],
       education: "",
-      yearsOfExperience: 3,
+      yearsOfExperience: 0,
       quantity: 1,
       isReplacement: false,
       replacedEmpId: "",
@@ -924,7 +927,7 @@ const App: React.FC = () => {
                 primarySkills:
                   skillNames.length > 0 ? skillNames : p.primarySkills,
                 education: educationStr || p.education,
-                yearsOfExperience: maxYears || p.yearsOfExperience,
+                yearsOfExperience: maxYears ?? p.yearsOfExperience,
               }
             : p,
         ),
@@ -1498,7 +1501,7 @@ const App: React.FC = () => {
                               parseInt(e.target.value) || 0,
                             )
                           }
-                          min="1"
+                          min="0"
                           max="20"
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />

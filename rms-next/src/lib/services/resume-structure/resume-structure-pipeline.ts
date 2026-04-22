@@ -8,6 +8,7 @@ import {
 } from "@/lib/services/resume-structure/resume-structure.schema";
 import { extractRulesStructuredResume } from "@/lib/services/resume-structure/rules-extractor-v2";
 import { tryRefineStructuredProfileWithLlm } from "@/lib/services/resume-structure/llm-refiner";
+import { buildResumeStructureIssueTags } from "@/lib/services/resume-structure/resume-structure-audit";
 
 export function resolveResumeStructureEnabled(): boolean {
   const v = process.env.RESUME_STRUCTURE_ENABLED?.trim().toLowerCase();
@@ -21,6 +22,12 @@ export function resolveResumeStructureForceRebuild(): boolean {
 
 export function resolveResumeStructureLlmSync(): boolean {
   const v = process.env.RESUME_STRUCTURE_LLM_SYNC?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+/** When true, always run sync LLM refine if LLM is enabled and resume text exists (ignores rules confidence gate). */
+export function resolveResumeStructureLlmAlways(): boolean {
+  const v = process.env.RESUME_STRUCTURE_LLM_ALWAYS?.trim().toLowerCase();
   return v === "1" || v === "true" || v === "yes";
 }
 
@@ -110,9 +117,27 @@ export async function runResumeStructurePipeline(input: {
   let finalProfile = profile;
   let warnings = [...rules.warnings];
   let overallConfidence = rules.confidence_overall;
+  let fieldConfidence = rules.field_confidence;
   const threshold = resolveResumeStructureLlmConfidenceThreshold();
   const wantLlm =
-    rules.suggest_llm_refinement || rules.confidence_overall < threshold;
+    resolveResumeStructureLlmAlways() ||
+    rules.suggest_llm_refinement ||
+    rules.confidence_overall < threshold;
+
+  const llmEnvOn =
+    process.env.RESUME_STRUCTURE_LLM_ENABLED?.trim().toLowerCase() === "true" ||
+    process.env.RESUME_STRUCTURE_LLM_ENABLED?.trim() === "1";
+
+  if (!wantLlm && llmEnvOn && resolveResumeStructureLlmSync()) {
+    log("info", "resume_structure_llm_skipped_want_llm_false", {
+      ...ctx,
+      confidence_overall: rules.confidence_overall,
+      threshold,
+      suggest_llm_refinement: rules.suggest_llm_refinement,
+      llm_always: resolveResumeStructureLlmAlways(),
+      hint: "Set RESUME_STRUCTURE_LLM_ALWAYS=true to run the resume LLM on every parse (when sync is on).",
+    });
+  }
 
   if (wantLlm && resolveResumeStructureLlmSync()) {
     const refined = await tryRefineStructuredProfileWithLlm({
@@ -126,6 +151,15 @@ export async function runResumeStructurePipeline(input: {
       warnings = refined.warnings.length > 0 ? refined.warnings : warnings;
       extractor = "rules_v2+llm";
       overallConfidence = Math.min(1, Math.max(overallConfidence, 0.55));
+      if (
+        refined.fieldConfidenceOverride &&
+        Object.keys(refined.fieldConfidenceOverride).length > 0
+      ) {
+        fieldConfidence = {
+          ...rules.field_confidence,
+          ...refined.fieldConfidenceOverride,
+        };
+      }
     }
   }
 
@@ -136,7 +170,7 @@ export async function runResumeStructurePipeline(input: {
     source_hash: input.sourceHash,
     profile: finalProfile,
     confidence: { overall: overallConfidence },
-    field_confidence: rules.field_confidence,
+    field_confidence: fieldConfidence,
     warnings,
   };
 
@@ -158,10 +192,14 @@ export async function runResumeStructurePipeline(input: {
     duration_ms: Date.now() - started,
   });
 
-  const llmOn =
-    process.env.RESUME_STRUCTURE_LLM_ENABLED?.trim().toLowerCase() === "true" ||
-    process.env.RESUME_STRUCTURE_LLM_ENABLED?.trim() === "1";
-  const enqueueLlmRefine = wantLlm && !resolveResumeStructureLlmSync() && llmOn;
+  log("info", "resume_structure_parse_audit", {
+    ...ctx,
+    issue_tags: buildResumeStructureIssueTags(validated.data),
+    confidence_overall: validated.data.confidence.overall,
+    warnings_sample: validated.data.warnings.slice(0, 12),
+  });
+
+  const enqueueLlmRefine = wantLlm && !resolveResumeStructureLlmSync() && llmEnvOn;
 
   return {
     document: validated.data,

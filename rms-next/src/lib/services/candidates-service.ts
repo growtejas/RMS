@@ -22,11 +22,14 @@ import {
   contentHashFromArtifact,
   parsedArtifactToCacheRecord,
   resolveResumeRefForFilesystem,
+  resumeParseCacheToApiRecord,
   tryStatLocalResumeFile,
 } from "@/lib/services/resume-parse-cache";
 import { parseResumeArtifact } from "@/lib/services/resume-parser-service";
 import { enqueueResumeStructureRefineJob } from "@/lib/queue/resume-structure-queue";
 import { mergeStructuredProfileForPersist } from "@/lib/services/resume-structure/merge-candidate-profile";
+import { buildResumeStructureIssueTags } from "@/lib/services/resume-structure/resume-structure-audit";
+import { parseResumeStructuredDocument } from "@/lib/services/resume-structure/resume-structure.schema";
 import {
   resolveResumeStructureEnabled,
   runResumeStructurePipeline,
@@ -228,7 +231,29 @@ export async function getCandidateJson(
     throw new HttpError(404, "Candidate not found");
   }
   const ivs = await repo.selectInterviewsForCandidate(candidateId);
-  return candidateToJson(row, ivs);
+  let resume_structured: {
+    schema_version: number;
+    extractor: string;
+    confidence_overall: number;
+    warnings: string[];
+    issue_tags: string[];
+  } | null = null;
+  const structuredParsed = parseResumeStructuredDocument(row.resumeStructuredProfile);
+  if (structuredParsed.ok) {
+    const doc = structuredParsed.data;
+    resume_structured = {
+      schema_version: doc.schema_version,
+      extractor: doc.extractor,
+      confidence_overall: doc.confidence.overall,
+      warnings: doc.warnings.slice(0, 20),
+      issue_tags: buildResumeStructureIssueTags(doc),
+    };
+  }
+  return {
+    ...candidateToJson(row, ivs),
+    resume_parse: resumeParseCacheToApiRecord(row.resumeParseCache),
+    resume_structured,
+  };
 }
 
 export async function createCandidateJson(

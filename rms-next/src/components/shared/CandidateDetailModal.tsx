@@ -131,6 +131,7 @@ export default function CandidateDetailModal({
   const modalBodyRef = useRef<HTMLDivElement>(null);
   const [showScheduler, setShowScheduler] = useState(false);
   const [showResume, setShowResume] = useState(false);
+  const [showResumeParse, setShowResumeParse] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resumeBlobUrl, setResumeBlobUrl] = useState<string | null>(null);
@@ -1026,6 +1027,190 @@ export default function CandidateDetailModal({
               </div>
             )}
           </div>
+
+          {/* ---- Resume parser (API / cache) ---- */}
+          {(candidate.resume_parse != null || candidate.resume_path) && (
+            <div style={{ marginBottom: "24px" }}>
+              <button
+                type="button"
+                onClick={() => setShowResumeParse(!showResumeParse)}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "12px 16px",
+                  borderRadius: "10px",
+                  backgroundColor: "var(--bg-secondary)",
+                }}
+              >
+                <span
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    fontWeight: 600,
+                    fontSize: "14px",
+                  }}
+                >
+                  <FileText size={16} /> Resume parser output
+                  {candidate.resume_parse?.status ? (
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 500,
+                        padding: "2px 8px",
+                        borderRadius: "999px",
+                        background:
+                          candidate.resume_parse.status === "processed"
+                            ? "rgba(16,185,129,0.15)"
+                            : candidate.resume_parse.status === "failed"
+                              ? "rgba(239,68,68,0.12)"
+                              : "rgba(100,116,139,0.15)",
+                        color:
+                          candidate.resume_parse.status === "processed"
+                            ? "#059669"
+                            : candidate.resume_parse.status === "failed"
+                              ? "#b91c1c"
+                              : "#64748b",
+                      }}
+                    >
+                      {candidate.resume_parse.status}
+                    </span>
+                  ) : null}
+                  {candidate.resume_structured &&
+                  (candidate.resume_structured.confidence_overall < 0.45 ||
+                    candidate.resume_structured.issue_tags.includes(
+                      "low_confidence_skills",
+                    ) ||
+                    candidate.resume_structured.issue_tags.includes(
+                      "low_overall_confidence",
+                    )) ? (
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 500,
+                        padding: "2px 8px",
+                        borderRadius: "999px",
+                        background: "rgba(245,158,11,0.18)",
+                        color: "#b45309",
+                      }}
+                      title="Structured resume extraction confidence is low; verify skills and experience."
+                    >
+                      Low confidence parse
+                    </span>
+                  ) : null}
+                  {candidate.resume_structured?.issue_tags.includes(
+                    "missing_contact",
+                  ) ? (
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 500,
+                        padding: "2px 8px",
+                        borderRadius: "999px",
+                        background: "rgba(100,116,139,0.15)",
+                        color: "#475569",
+                      }}
+                      title="No email or phone was extracted from the resume text."
+                    >
+                      Missing contact on resume
+                    </span>
+                  ) : null}
+                  {candidate.resume_structured?.issue_tags.includes(
+                    "sparse_skills",
+                  ) ? (
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 500,
+                        padding: "2px 8px",
+                        borderRadius: "999px",
+                        background: "rgba(59,130,246,0.12)",
+                        color: "#1d4ed8",
+                      }}
+                      title="Few skills were detected in the resume."
+                    >
+                      Sparse skills
+                    </span>
+                  ) : null}
+                </span>
+                {showResumeParse ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              </button>
+              {showResumeParse && (
+                <div
+                  style={{
+                    marginTop: "8px",
+                    borderRadius: "10px",
+                    border: "1px solid var(--border-subtle)",
+                    padding: "12px 14px",
+                    background: "var(--bg-primary, #fff)",
+                  }}
+                >
+                  {candidate.resume_parse == null ? (
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: "13px",
+                        color: "var(--text-tertiary)",
+                      }}
+                    >
+                      No parser cache for this candidate yet. It is filled when a resume
+                      is uploaded and parsed (create candidate or ranking refresh).
+                    </p>
+                  ) : (
+                    <>
+                      <p
+                        style={{
+                          margin: "0 0 8px 0",
+                          fontSize: "12px",
+                          color: "var(--text-secondary)",
+                        }}
+                      >
+                        Same payload as{" "}
+                        <code style={{ fontSize: "11px" }}>GET /api/candidates/</code>
+                        <code style={{ fontSize: "11px" }}>
+                          {candidate.candidate_id}
+                        </code>{" "}
+                        field <code style={{ fontSize: "11px" }}>resume_parse</code>.
+                      </p>
+                      {candidate.resume_parse.error_message ? (
+                        <p
+                          style={{
+                            margin: "0 0 8px 0",
+                            fontSize: "12px",
+                            color: "var(--error, #b91c1c)",
+                          }}
+                        >
+                          {candidate.resume_parse.error_message}
+                        </p>
+                      ) : null}
+                      <pre
+                        style={{
+                          margin: 0,
+                          maxHeight: "360px",
+                          overflow: "auto",
+                          fontSize: "11px",
+                          lineHeight: 1.45,
+                          padding: "10px",
+                          borderRadius: "8px",
+                          background: "var(--bg-secondary, #f8fafc)",
+                          border: "1px solid var(--border-subtle)",
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
+                        }}
+                      >
+                        {JSON.stringify(candidate.resume_parse, null, 2)}
+                      </pre>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ---- Interview Timeline ---- */}
           {(!isEvaluateWorkspace || candidate.interviews.length > 0) && (

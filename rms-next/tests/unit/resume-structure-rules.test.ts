@@ -38,8 +38,35 @@ describe("resume-structure rules v2", () => {
     });
     assert.ok(r.profile.skills.includes("typescript") || r.profile.skills.includes("react"));
     assert.ok(r.profile.email === "jane.doe@example.com" || r.profile.email != null);
+    assert.ok(r.profile.phone && /^\d{10,}$/.test(r.profile.phone));
     assert.ok(r.confidence_overall > 0);
     assert.ok(Array.isArray(r.warnings));
+  });
+
+  it("picks first valid email when fallback is invalid", () => {
+    const text = `
+John Smith
+john@valid.com
+SKILLS
+Python
+`;
+    const r = extractRulesStructuredResume(text, {
+      fallbackEmail: "not-an-email",
+    });
+    assert.equal(r.profile.email, "john@valid.com");
+  });
+
+  it("infers internship experience when no years phrase", () => {
+    const text = `
+Alex Lee
+alex@x.com
+
+SUMMARY
+Software intern building internal tools with Python.
+`;
+    const r = extractRulesStructuredResume(text, {});
+    assert.equal(r.profile.experience_years, 0.5);
+    assert.ok(r.warnings.includes("EXPERIENCE_INFERRED_HEURISTIC"));
   });
 
   it("produces a valid v1 envelope when wrapped", () => {

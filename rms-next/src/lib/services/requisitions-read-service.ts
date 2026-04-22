@@ -20,6 +20,8 @@ export type RequisitionItemJson = {
   education_requirement: string | null;
   job_description: string;
   jd_file_key: string | null;
+  cv_file_key: string | null;
+  cv_file_name: string | null;
   pipeline_ranking_use_requisition_jd: boolean;
   pipeline_jd_text: string | null;
   pipeline_jd_file_key: string | null;
@@ -108,6 +110,8 @@ export function requisitionItemToJson(row: RequisitionItemRow): RequisitionItemJ
     education_requirement: row.educationRequirement ?? null,
     job_description: row.jobDescription,
     jd_file_key: row.jdFileKey ?? null,
+    cv_file_key: row.cvFileKey ?? null,
+    cv_file_name: row.cvFileName ?? null,
     pipeline_ranking_use_requisition_jd: row.pipelineRankingUseRequisitionJd !== false,
     pipeline_jd_text: row.pipelineJdText ?? null,
     pipeline_jd_file_key: row.pipelineJdFileKey ?? null,

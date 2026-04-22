@@ -1,3 +1,8 @@
+import {
+  isPlausibleResumeEmail,
+  pickFirstValidResumeEmail,
+  pickFirstValidResumePhone,
+} from "@/lib/services/resume-structure/resume-contact-normalize";
 import type { ParsedCandidateProfile } from "@/lib/services/resume-structure/resume-structure.schema";
 import type { FieldConfidence } from "@/lib/services/resume-structure/resume-structure.schema";
 
@@ -71,6 +76,30 @@ const KNOWN_TECH = [
 
 const TITLE_HINTS =
   /\b(engineer|developer|architect|manager|lead|consultant|analyst|scientist|designer|specialist|director|head|vp|intern|associate)\b/i;
+
+/** Substrings that suggest a line is a title/skill line, not a person name. */
+const NAME_LINE_BLACKLIST = [
+  "developer",
+  "engineer",
+  "stack",
+  "react",
+  "node",
+  "javascript",
+  "typescript",
+  "python",
+  "java",
+  "software",
+  "frontend",
+  "front-end",
+  "backend",
+  "back-end",
+  "devops",
+  "fullstack",
+  "full-stack",
+  "architect",
+  "consultant",
+  "analyst",
+];
 
 const CERT_PATTERNS = [
   /\baws\s+certified\b[^.\n]{0,80}/gi,
@@ -245,20 +274,38 @@ function extractLocationHeader(lines: string[]): string | null {
   return null;
 }
 
+function lineLooksLikePersonName(line: string): boolean {
+  const clean = line.trim();
+  if (clean.length < 2 || clean.length >= 80) return false;
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (words.length < 2 || words.length > 4) return false;
+  const low = clean.toLowerCase();
+  if (NAME_LINE_BLACKLIST.some((k) => low.includes(k))) return false;
+  return true;
+}
+
 function headerNameAndTitle(lines: string[]): { name: string | null; title: string | null } {
   const nonEmpty = lines.map((l) => l.trim()).filter(Boolean);
+  const headerWindow = nonEmpty.slice(0, 5);
   let name: string | null = null;
-  let title: string | null = null;
-  for (let i = 0; i < Math.min(12, nonEmpty.length); i++) {
-    const line = nonEmpty[i];
+  let nameIdx = -1;
+  for (let i = 0; i < headerWindow.length; i++) {
+    const line = headerWindow[i];
     if (/@/.test(line) || /\d{3}[-.\s]\d{3}/.test(line)) {
       continue;
     }
-    if (!name && line.length >= 2 && line.length < 80 && !TITLE_HINTS.test(line)) {
+    if (!name && lineLooksLikePersonName(line) && !TITLE_HINTS.test(line)) {
       name = line.slice(0, 200);
-      continue;
+      nameIdx = i;
+      break;
     }
-    if (name && !title && TITLE_HINTS.test(line) && line.length < 120) {
+  }
+  let title: string | null = null;
+  const start = nameIdx >= 0 ? nameIdx + 1 : 0;
+  for (let i = start; i < Math.min(12, nonEmpty.length); i++) {
+    const line = nonEmpty[i];
+    if (/@/.test(line)) continue;
+    if (TITLE_HINTS.test(line) && line.length < 120) {
       title = line.slice(0, 200);
       break;
     }
@@ -349,11 +396,16 @@ export function extractRulesStructuredResume(
   const { name: hdrName, title: hdrTitle } = headerNameAndTitle(lines);
   const location = extractLocationHeader(lines);
 
-  const email = context?.fallbackEmail?.trim() || emails[0] || null;
-  const phone = phones[0] ? phones[0].slice(0, 60) : null;
-  const name =
-    (context?.fallbackName?.trim() || hdrName || null)
-      ? (context?.fallbackName?.trim() || hdrName || "").slice(0, 200)
+  const fbEmail = context?.fallbackEmail?.trim() ?? "";
+  const email = fbEmail && isPlausibleResumeEmail(fbEmail)
+    ? fbEmail.slice(0, 255)
+    : pickFirstValidResumeEmail(emails, 255);
+  const phone = pickFirstValidResumePhone(phones);
+  const fbName = context?.fallbackName?.trim() ?? "";
+  const name = fbName
+    ? fbName.slice(0, 200)
+    : hdrName
+      ? hdrName.slice(0, 200)
       : null;
 
   const techSkills = extractSkillsFromTechList(text);
@@ -415,6 +467,11 @@ export function extractRulesStructuredResume(
     }
   }
 
+  if (experience_years == null && /\bintern(ship)?\b/i.test(text)) {
+    experience_years = 0.5;
+    warnings.push("EXPERIENCE_INFERRED_HEURISTIC");
+  }
+
   const education =
     eduLines.length > 0 ? eduLines.join(" | ").slice(0, 2000) : extractEducationSnippet(text);
 
@@ -459,6 +516,10 @@ export function extractRulesStructuredResume(
     education: education ? "high" : "low",
     employment: employment.length >= 2 ? "medium" : employment.length === 1 ? "low" : "low",
   };
+
+  if (field_confidence.skills === "low" && skills.length < 5) {
+    warnings.push("LOW_CONFIDENCE_SKILLS");
+  }
 
   let overall =
     (field_confidence.skills === "high" ? 0.35 : field_confidence.skills === "medium" ? 0.22 : 0.12) +

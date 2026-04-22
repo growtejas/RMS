@@ -11,6 +11,42 @@ export const RESUME_PARSE_CACHE_MAX_RAW_CHARS = 12000;
 
 export type ResumeParseLocalStat = { size: number; mtimeMs: number };
 
+/** API shape for GET /api/candidates/:id (snake_case JSON). */
+export type ResumeParseApiRecord = {
+  v: number | null;
+  parser_provider: string | null;
+  parser_version: string | null;
+  status: string | null;
+  source_resume_ref: string | null;
+  raw_text: string | null;
+  parsed_data: Record<string, unknown> | null;
+  error_message: string | null;
+  stored_resume_path: string | null;
+};
+
+/** Map DB/cache JSON to a stable API record; returns null if missing or invalid. */
+export function resumeParseCacheToApiRecord(
+  cache: unknown,
+): ResumeParseApiRecord | null {
+  if (!cache || typeof cache !== "object") {
+    return null;
+  }
+  const o = cache as Record<string, unknown>;
+  const pd = o.parsedData;
+  return {
+    v: typeof o.v === "number" && Number.isFinite(o.v) ? o.v : null,
+    parser_provider: typeof o.parserProvider === "string" ? o.parserProvider : null,
+    parser_version: typeof o.parserVersion === "string" ? o.parserVersion : null,
+    status: typeof o.status === "string" ? o.status : null,
+    source_resume_ref: typeof o.sourceResumeRef === "string" ? o.sourceResumeRef : null,
+    raw_text: typeof o.rawText === "string" ? o.rawText : null,
+    parsed_data:
+      typeof pd === "object" && pd !== null ? (pd as Record<string, unknown>) : null,
+    error_message: typeof o.errorMessage === "string" ? o.errorMessage : null,
+    stored_resume_path: typeof o.storedResumePath === "string" ? o.storedResumePath : null,
+  };
+}
+
 export type ResumeParseCacheRecord = {
   v: number;
   parserProvider: string;
