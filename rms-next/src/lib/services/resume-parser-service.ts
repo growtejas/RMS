@@ -165,6 +165,38 @@ function extractEducationRaw(text: string): string | null {
   return null;
 }
 
+function extractProjects(text: string): string[] {
+  const lines = text.split(/\r?\n/).map((l) => l.trim());
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let inProjects = false;
+  const projectHeader = /^(projects|personal projects|key projects)\b/i;
+  const sectionHeader =
+    /^(skills|technical skills|experience|work experience|employment|education|certifications|courses|profile summary|summary)\b/i;
+
+  for (const line of lines) {
+    if (!line) continue;
+    if (projectHeader.test(line)) {
+      inProjects = true;
+      continue;
+    }
+    if (!inProjects) continue;
+    if (sectionHeader.test(line)) break;
+    const cleaned = line
+      .replace(/^[-•*▪·]\s*/, "")
+      .replace(/^\d+[.)]\s*/, "")
+      .trim();
+    if (!cleaned || cleaned.length > 220) continue;
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(cleaned);
+    if (out.length >= 40) break;
+  }
+
+  return out;
+}
+
 function extractEmails(text: string): string[] {
   const matches = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-z]{2,}/g) ?? [];
   return Array.from(new Set(matches.map((m) => m.toLowerCase()))).slice(0, 5);
@@ -186,6 +218,7 @@ function toParsedData(text: string, fallback: NormalizedInboundCandidate): Recor
     emails: extractEmails(excerpt),
     phones: extractPhones(excerpt),
     skills: extractSkills(excerpt),
+    projects: extractProjects(excerpt),
     experience_years: extractExperienceYears(excerpt),
     notice_period_days: extractNoticePeriodDays(excerpt),
     education_raw: extractEducationRaw(excerpt),

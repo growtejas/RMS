@@ -473,10 +473,42 @@ Avoid clustering.
 
 -------------------------------------
 
-## 🧪 PROJECT COMPLEXITY
+## PROJECT COMPLEXITY (ADAPTIVE ANALYSIS)
 
-- Real-world systems → high
-- Basic CRUD / academic → low
+Evaluate project depth relative to job type:
+
+Evaluate whether the candidate provides REAL proof of technical work.
+
+HIGH (70–90):
+- Clear project descriptions with multiple technologies
+- Backend + frontend OR ML pipeline
+- Specific functionality example: (auth, APIs, scraping, ML models)
+
+MEDIUM (45–70):
+- Some technologies mentioned
+- Limited detail
+- Basic full-stack or internship-level work
+
+LOW (20–45):
+- Vague projects ("website", "app")
+- No tech stack mentioned
+- Academic-only work
+
+CRITICAL RULES:
+- Presence of named tools increases score ONLY if tied to real usage
+- Multiple tools without explanation → do NOT inflate score
+- No projects → score MUST be below 30
+
+
+
+SCORING GUIDE (SOFT, NOT STRICT):
+- 75–90 → Strong depth relative to level
+- 50–70 → Adequate for level
+- 30–50 → Below expectations
+
+IMPORTANT:
+- Evaluate complexity relative to candidate experience level, NOT absolute scale
+- Do NOT over-penalize freshers for lack of enterprise-grade systems
 
 -------------------------------------
 

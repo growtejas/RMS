@@ -22,6 +22,7 @@ import type { Candidate, Interview } from "@/lib/api/candidateApi";
 import {
   updateInterview,
   deleteInterview,
+  deleteCandidate,
   getCandidateWithApplication,
   getCandidateActionErrorMessage,
   updateCandidateStageCompatible,
@@ -118,6 +119,7 @@ export default function CandidateDetailView({
   const [evaluationNotInSnapshot, setEvaluationNotInSnapshot] = useState(false);
   const [evaluationRefreshKey, setEvaluationRefreshKey] = useState(0);
   const [aiEvalWorking, setAiEvalWorking] = useState(false);
+  const [deletingCandidate, setDeletingCandidate] = useState(false);
 
   /** Bumped when opening / hydrating or when user mutates candidate so stale fetches cannot overwrite. */
   const candidateHydrateGenRef = useRef(0);
@@ -418,6 +420,26 @@ export default function CandidateDetailView({
     }
   };
 
+  const handleDeleteCandidate = async () => {
+    if (deletingCandidate) return;
+    const confirmed = window.confirm(
+      `Delete candidate "${candidate.full_name}" from this requisition? This cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    setError(null);
+    setDeletingCandidate(true);
+    try {
+      await deleteCandidate(candidate.candidate_id);
+      onDismiss();
+    } catch (err: unknown) {
+      setError(
+        getCandidateActionErrorMessage(err, "Failed to delete candidate"),
+      );
+      setDeletingCandidate(false);
+    }
+  };
+
   useEffect(() => {
     if (!showResume || !candidate.resume_path) return;
     if (candidate.resume_path.startsWith("http")) return;
@@ -709,6 +731,32 @@ export default function CandidateDetailView({
                 </div>
               </div>
             )}
+
+          {canEdit && (
+            <div style={{ marginBottom: "20px" }}>
+              <div
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  color: "var(--text-tertiary)",
+                  marginBottom: "8px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.5px",
+                }}
+              >
+                Danger Zone
+              </div>
+              <button
+                type="button"
+                disabled={deletingCandidate}
+                onClick={() => void handleDeleteCandidate()}
+                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Trash2 size={14} />
+                {deletingCandidate ? "Deleting..." : "Delete Candidate"}
+              </button>
+            </div>
+          )}
 
           {/* ---- Application Stage History (Phase 4) ---- */}
           {candidate.stage_history && candidate.stage_history.length > 0 && (

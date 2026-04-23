@@ -147,7 +147,19 @@ export async function runResumeStructurePipeline(input: {
       logContext: input.logContext,
     });
     if (refined) {
-      finalProfile = refined.profile;
+      const keepRulesProjects =
+        refined.profile.projects.length > 0
+          ? refined.profile.projects
+          : profile.projects;
+      const keepRulesExperienceDetails =
+        refined.profile.experience_details.length > 0
+          ? refined.profile.experience_details
+          : profile.experience_details;
+      finalProfile = {
+        ...refined.profile,
+        projects: keepRulesProjects,
+        experience_details: keepRulesExperienceDetails,
+      };
       warnings = refined.warnings.length > 0 ? refined.warnings : warnings;
       extractor = "rules_v2+llm";
       overallConfidence = Math.min(1, Math.max(overallConfidence, 0.55));

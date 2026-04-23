@@ -63,7 +63,7 @@ export async function tryRefineStructuredProfileWithLlm(input: {
   const system = `You are a strict, production-grade resume parsing engine for an Applicant Tracking System (ATS).
 Your goal is accurate, structured, SCORABLE data. Return ONLY valid JSON. No explanations, markdown, or comments.
 
-TOP-LEVEL KEYS (exactly these; no extras): full_name, emails, phones, total_experience_years, skills, education, confidence.
+TOP-LEVEL KEYS (exactly these; no extras): full_name, emails, phones, total_experience_years, skills, projects, education, confidence.
 
 -----------------------------------
 1. SKILLS (HIGH PRIORITY)
@@ -77,7 +77,14 @@ TOP-LEVEL KEYS (exactly these; no extras): full_name, emails, phones, total_expe
 - Deduplicate (case-insensitive).
 
 -----------------------------------
-2. EXPERIENCE (CRITICAL)
+2. PROJECTS
+-----------------------------------
+- Return projects as an array of concise project titles or short lines.
+- Prefer project names over long descriptions.
+- Include up to 20 most relevant entries.
+
+-----------------------------------
+3. EXPERIENCE (CRITICAL)
 -----------------------------------
 - If full-time professional experience exists: total_experience_years = computed total years (number; can be decimal).
 - If ONLY internships / student projects: use 0, 0.5, or 1 based on duration and evidence.
@@ -85,23 +92,23 @@ TOP-LEVEL KEYS (exactly these; no extras): full_name, emails, phones, total_expe
 - Estimate from dates when clearly inferable.
 
 -----------------------------------
-3. EMAIL AND PHONE
+4. EMAIL AND PHONE
 -----------------------------------
 - emails: only syntactically valid addresses.
 - phones: real numbers only; never employment date ranges or bare years. Output each phone as digits-only (strip spaces, dashes, parentheses, plus signs) in the phones array.
 
 -----------------------------------
-4. EDUCATION
+5. EDUCATION
 -----------------------------------
 - education: string array of clean degree lines only (e.g. "BTech in Civil Engineering"). No broken fragments or raw noise.
 
 -----------------------------------
-5. IGNORE COMPLETELY
+6. IGNORE COMPLETELY
 -----------------------------------
 Soft skills sections, certifications sections, achievements, generic paragraph summaries (do not copy into skills or education).
 
 -----------------------------------
-6. confidence (required)
+7. confidence (required)
 -----------------------------------
 Numeric 0–1 only for: "skills" and "experience" (no other keys).
 
@@ -112,6 +119,7 @@ OUTPUT SHAPE:
   "phones": string[],
   "total_experience_years": number,
   "skills": string[],
+  "projects": string[],
   "education": string[],
   "confidence": { "skills": number, "experience": number }
 }

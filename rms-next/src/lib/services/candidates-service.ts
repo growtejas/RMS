@@ -250,6 +250,7 @@ export async function getCandidateJson(
     confidence_overall: number;
     warnings: string[];
     issue_tags: string[];
+    profile: Record<string, unknown>;
   } | null = null;
   const structuredParsed = parseResumeStructuredDocument(row.resumeStructuredProfile);
   if (structuredParsed.ok) {
@@ -260,6 +261,7 @@ export async function getCandidateJson(
       confidence_overall: doc.confidence.overall,
       warnings: doc.warnings.slice(0, 20),
       issue_tags: buildResumeStructureIssueTags(doc),
+      profile: doc.profile as unknown as Record<string, unknown>,
     };
   }
   return {
