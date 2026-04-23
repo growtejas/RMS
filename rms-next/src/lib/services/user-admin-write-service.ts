@@ -102,6 +102,9 @@ export async function adminUpdateUser(
     employee_id?: string | null;
   },
 ) {
+  if (patch.is_active === false && actorUserId === userId) {
+    throw new HttpError(400, "You cannot deactivate your own account.");
+  }
   const user = await findUserById(userId);
   if (!user) {
     throw new HttpError(404, "User not found");
@@ -112,6 +115,15 @@ export async function adminUpdateUser(
   const oldEmployeeId = user.employeeId ?? null;
 
   if (patch.roles !== undefined) {
+    if (actorUserId === userId) {
+      const next = normalizeRoleList(patch.roles);
+      if (!next.some((r) => r === "Admin" || r === "Owner")) {
+        throw new HttpError(
+          400,
+          "You cannot remove Admin/Owner from your own account.",
+        );
+      }
+    }
     await ensureAssignableRoles();
     const roleIds: number[] = [];
     for (const roleName of patch.roles) {
@@ -210,6 +222,9 @@ export async function adminUpdateUser(
 }
 
 export async function adminDeactivateUser(actorUserId: number, userId: number) {
+  if (actorUserId === userId) {
+    throw new HttpError(400, "You cannot deactivate your own account.");
+  }
   const user = await findUserById(userId);
   if (!user) {
     throw new HttpError(404, "User not found");

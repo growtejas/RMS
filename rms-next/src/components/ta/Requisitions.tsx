@@ -21,6 +21,7 @@ import { useAuth } from "@/contexts/useAuth";
 import { normalizeStatus } from "@/types/workflow";
 import { PlainStatusText } from "@/components/common/PlainStatusText";
 import { PlainPriorityText } from "@/components/common/PlainPriorityText";
+import { Table, TBody, THead, TH, TR } from "@/components/ui/Table";
 
 /* ======================================================
    Types
@@ -892,22 +893,22 @@ const Requisitions: React.FC<RequisitionsProps> = ({
 
       {/* Table */}
       <div className="ticket-table-container">
-        <table className="ticket-table">
-          <thead>
-            <tr>
-              <th>Req ID</th>
-              <th>Project & Client</th>
-              <th>Positions</th>
-              <th>Priority</th>
-              <th>Status</th>
-              <th>Raised By</th>
-              <th>Aging</th>
-              <th>Assigned TA</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
+        <Table className="[&_th]:py-3.5 [&_td]:py-4 [&_td]:align-top [&_tbody_tr:hover]:bg-slate-50/70">
+          <THead>
+            <TR>
+              <TH>Req ID</TH>
+              <TH>Project &amp; Client</TH>
+              <TH>Positions</TH>
+              <TH>Priority</TH>
+              <TH>Status</TH>
+              <TH>Raised By</TH>
+              <TH>Aging</TH>
+              <TH>Assigned TA</TH>
+              <TH>Actions</TH>
+            </TR>
+          </THead>
 
-          <tbody>
+          <TBody>
             {isLoading && (
               <tr>
                 <td colSpan={9}>
@@ -1233,7 +1234,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                           ) : isAssignedToMe ? (
                             <>
                               {/* Assigned to current TA: Full access */}
-                              <button
+                              {/* <button
                                 className="action-button primary"
                                 onClick={() => onManageItems?.(req.id)}
                                 style={{
@@ -1243,7 +1244,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                                 title="Manage items: Upload CV, Map Resource, Update Progress"
                               >
                                 Manage Items
-                              </button>
+                              </button> */}
                               <button
                                 className="action-button"
                                 onClick={() => onViewRequisition?.(req.id)}
@@ -1315,8 +1316,8 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                 </td>
               </tr>
             )}
-          </tbody>
-        </table>
+          </TBody>
+        </Table>
       </div>
 
       {!isLoading && !error && filteredRequisitions.length > visibleCount && (

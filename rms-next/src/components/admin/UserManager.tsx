@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Users, Edit, Plus, Power, Search } from "lucide-react";
+import { Edit, Plus, Power, Search } from "lucide-react";
 
 import {
   fetchUsers,
@@ -12,6 +12,9 @@ import {
 } from "@/lib/api/users";
 import { fetchEmployees, EmployeeOption } from "@/lib/api/employees";
 import { useAuth } from "@/contexts/useAuth";
+import { Avatar } from "@/components/ui/Avatar";
+import { Badge } from "@/components/ui/Badge";
+import { Table, TBody, THead, TD, TH, TR } from "@/components/ui/Table";
 
 /** Shown if catalog API fails; backend should seed these on successful catalog load. */
 const FALLBACK_ROLE_OPTIONS = [
@@ -293,94 +296,88 @@ const UserManager: React.FC = () => {
       </div>
 
       <div className="data-table-container">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Username</th>
-              <th>Employee</th>
-              <th>Roles</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading && (
-              <tr>
-                <td colSpan={6} className="table-loading">
-                  Loading users...
+        <Table>
+          <THead>
+            <TR>
+              <TH>ID</TH>
+              <TH>Username</TH>
+              <TH>Employee</TH>
+              <TH>Roles</TH>
+              <TH>Status</TH>
+              <TH>Actions</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {isLoading ? (
+              <TR>
+                <td
+                  colSpan={6}
+                  className="px-4 py-10 text-center text-sm text-[--color-text-muted]"
+                >
+                  Loading users…
                 </td>
-              </tr>
+              </TR>
+            ) : (
+              users.map((user) => (
+                <TR key={user.user_id} hover>
+                  <TD className="font-mono text-xs text-[--color-text-subtle]">
+                    {user.user_id}
+                  </TD>
+                  <TD>
+                    <div className="flex items-center gap-2.5">
+                      <Avatar name={user.username} size={32} />
+                      <span className="font-medium text-[--color-text]">
+                        {user.username}
+                      </span>
+                    </div>
+                  </TD>
+                  <TD className="text-[--color-text-muted]">
+                    {user.employee ? (
+                      <div className="leading-tight">
+                        <div className="font-medium text-[--color-text]">
+                          {user.employee.id}
+                        </div>
+                        <div className="text-xs text-[--color-text-subtle]">
+                          {user.employee.name ?? "-"}
+                        </div>
+                      </div>
+                    ) : (
+                      "-"
+                    )}
+                  </TD>
+                  <TD className="text-[--color-text-muted]">
+                    {user.roles.join(", ") || "-"}
+                  </TD>
+                  <TD>
+                    <Badge variant={user.is_active ? "success" : "neutral"}>
+                      {user.is_active ? "Active" : "Inactive"}
+                    </Badge>
+                  </TD>
+                  <TD>
+                    <div className="action-buttons">
+                      <button
+                        className="action-button edit"
+                        title="Edit User"
+                        onClick={() => handleEdit(user)}
+                      >
+                        <Edit size={16} />
+                      </button>
+                      <button
+                        className="action-button"
+                        title={
+                          user.is_active ? "Deactivate User" : "Activate User"
+                        }
+                        onClick={() => handleToggleStatus(user)}
+                      >
+                        <Power size={16} />
+                      </button>
+                    </div>
+                  </TD>
+                </TR>
+              ))
             )}
-            {users.map((user) => (
-              <tr key={user.user_id}>
-                <td>{user.user_id}</td>
-                <td>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: "32px",
-                        height: "32px",
-                        borderRadius: "50%",
-                        background: "#e5e7eb",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Users size={16} color="#6b7280" />
-                    </div>
-                    {user.username}
-                  </div>
-                </td>
-                <td>
-                  {user.employee ? (
-                    <div>
-                      <div>{user.employee.id}</div>
-                      <small>{user.employee.name ?? "-"}</small>
-                    </div>
-                  ) : (
-                    "-"
-                  )}
-                </td>
-                <td>{user.roles.join(", ") || "-"}</td>
-                <td>
-                  <span
-                    className={`status-badge ${user.is_active ? "active" : "inactive"}`}
-                  >
-                    {user.is_active ? "Active" : "Inactive"}
-                  </span>
-                </td>
-                <td>
-                  <div className="action-buttons">
-                    <button
-                      className="action-button edit"
-                      title="Edit User"
-                      onClick={() => handleEdit(user)}
-                    >
-                      <Edit size={16} />
-                    </button>
-                    <button
-                      className="action-button"
-                      title={
-                        user.is_active ? "Deactivate User" : "Activate User"
-                      }
-                      onClick={() => handleToggleStatus(user)}
-                    >
-                      <Power size={16} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          </TBody>
+        </Table>
         {!isLoading && users.length === 0 && (
           <div className="empty-state">
             <p>No users found.</p>

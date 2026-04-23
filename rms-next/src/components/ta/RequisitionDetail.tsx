@@ -85,6 +85,7 @@ import {
 } from "@/lib/api/candidateApi";
 import { InterviewStatusBadge } from "@/components/interviews/InterviewStatusBadge";
 import { interviewUi } from "@/components/interviews/interview-ui-theme";
+import { Table, TBody, THead, TD, TH, TR } from "@/components/ui/Table";
 import "../../styles/hr/hr-dashboard.css";
 
 interface RequisitionDetailsProps {
@@ -5560,180 +5561,67 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   open a profile to change stage.
                 </div>
               ) : (
-                <div
-                  style={{
-                    overflowX: "auto",
-                    borderRadius: interviewUi.radiusMd,
-                    border: `1px solid ${interviewUi.border}`,
-                    overflow: "hidden",
-                  }}
-                >
-                  <table
-                    style={{
-                      width: "100%",
-                      borderCollapse: "collapse",
-                      fontSize: "12px",
-                      color: interviewUi.text,
-                    }}
-                  >
-                    <thead>
-                      <tr
-                        style={{
-                          textAlign: "left",
-                          color: interviewUi.textSubtle,
-                          backgroundColor: interviewUi.surfaceElevated,
-                        }}
-                      >
-                        <th
-                          style={{
-                            padding: "8px 10px",
-                            borderBottom: `1px solid ${interviewUi.border}`,
-                          }}
-                        >
-                          Name
-                        </th>
-                        <th
-                          style={{
-                            padding: "8px 10px",
-                            borderBottom: `1px solid ${interviewUi.border}`,
-                          }}
-                        >
-                          Email
-                        </th>
-                        <th
-                          style={{
-                            padding: "8px 10px",
-                            borderBottom: `1px solid ${interviewUi.border}`,
-                          }}
-                        >
-                          Position
-                        </th>
-                        <th
-                          style={{
-                            padding: "8px 10px",
-                            borderBottom: `1px solid ${interviewUi.border}`,
-                          }}
-                        >
-                          Stage
-                        </th>
-                        <th
-                          style={{
-                            padding: "8px 10px",
-                            borderBottom: `1px solid ${interviewUi.border}`,
-                          }}
-                        >
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...interviewingCandidatesForTable]
-                        .sort((a, b) =>
-                          a.full_name.localeCompare(b.full_name, undefined, {
-                            sensitivity: "base",
-                          }),
-                        )
-                        .map((c, rowIdx) => {
-                          const linkedItem = ticket.items.find(
-                            (it) => it.numericItemId === c.requisition_item_id,
-                          );
-                          return (
-                            <tr
-                              key={`int-pipeline-${c.application_id ?? c.candidate_id}-${c.requisition_item_id}`}
-                              style={{
-                                backgroundColor:
-                                  rowIdx % 2 === 0 ? interviewUi.surface : interviewUi.bg,
-                              }}
-                            >
-                              <td
-                                style={{
-                                  padding: "10px",
-                                  borderBottom: `1px solid ${interviewUi.border}`,
-                                  fontWeight: 600,
-                                }}
-                              >
-                                {c.full_name}
-                              </td>
-                              <td
-                                style={{
-                                  padding: "10px",
-                                  borderBottom: `1px solid ${interviewUi.border}`,
-                                  color: interviewUi.textMuted,
-                                }}
-                              >
-                                {c.email}
-                              </td>
-                              <td
-                                style={{
-                                  padding: "10px",
-                                  borderBottom: `1px solid ${interviewUi.border}`,
-                                }}
-                              >
-                                {linkedItem
-                                  ? `${linkedItem.skill} — ${linkedItem.level}`
-                                  : `Item #${c.requisition_item_id}`}
-                              </td>
-                              <td
-                                style={{
-                                  padding: "10px",
-                                  borderBottom: `1px solid ${interviewUi.border}`,
-                                }}
-                              >
-                                {c.current_stage}
-                              </td>
-                              <td
-                                style={{
-                                  padding: "10px",
-                                  borderBottom: `1px solid ${interviewUi.border}`,
-                                }}
-                              >
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    flexWrap: "wrap",
-                                    gap: "8px",
-                                    alignItems: "center",
-                                  }}
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>Name</TH>
+                      <TH>Email</TH>
+                      <TH>Position</TH>
+                      <TH>Stage</TH>
+                      <TH>Actions</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {[...interviewingCandidatesForTable]
+                      .sort((a, b) =>
+                        a.full_name.localeCompare(b.full_name, undefined, {
+                          sensitivity: "base",
+                        }),
+                      )
+                      .map((c) => {
+                        const linkedItem = ticket.items.find(
+                          (it) => it.numericItemId === c.requisition_item_id,
+                        );
+                        return (
+                          <TR
+                            key={`int-pipeline-${c.application_id ?? c.candidate_id}-${c.requisition_item_id}`}
+                            hover
+                          >
+                            <TD className="font-medium text-[--color-text]">
+                              {c.full_name}
+                            </TD>
+                            <TD className="text-[--color-text-muted]">{c.email}</TD>
+                            <TD className="text-[--color-text]">
+                              {linkedItem
+                                ? `${linkedItem.skill} — ${linkedItem.level}`
+                                : `Item #${c.requisition_item_id}`}
+                            </TD>
+                            <TD className="text-[--color-text-muted]">
+                              {c.current_stage}
+                            </TD>
+                            <TD>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  className="rounded-lg bg-[--color-accent] px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:opacity-95"
+                                  onClick={() => openCandidateModal(c, "execute")}
                                 >
-                                  <button
-                                    type="button"
-                                    style={{
-                                      fontSize: "11px",
-                                      padding: "6px 12px",
-                                      borderRadius: interviewUi.radiusSm,
-                                      border: "none",
-                                      cursor: "pointer",
-                                      fontWeight: 600,
-                                      backgroundColor: interviewUi.accent,
-                                      color: interviewUi.onAccent,
-                                    }}
-                                    onClick={() => openCandidateModal(c, "execute")}
-                                  >
-                                    Schedule interview
-                                  </button>
-                                  <button
-                                    type="button"
-                                    style={{
-                                      fontSize: "11px",
-                                      padding: "6px 12px",
-                                      borderRadius: interviewUi.radiusSm,
-                                      cursor: "pointer",
-                                      backgroundColor: "transparent",
-                                      color: interviewUi.textMuted,
-                                      border: `1px solid ${interviewUi.border}`,
-                                    }}
-                                    onClick={() => openCandidateModal(c, "execute")}
-                                  >
-                                    Profile
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                    </tbody>
-                  </table>
-                </div>
+                                  Schedule interview
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded-lg border border-[--color-border] bg-white px-3 py-1.5 text-xs font-semibold text-[--color-text-muted] hover:bg-slate-50"
+                                  onClick={() => openCandidateModal(c, "execute")}
+                                >
+                                  Profile
+                                </button>
+                              </div>
+                            </TD>
+                          </TR>
+                        );
+                      })}
+                  </TBody>
+                </Table>
               )}
             </div>
 

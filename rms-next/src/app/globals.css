@@ -2,22 +2,59 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Token system (semantic) — supports light/dark from day one */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --color-accent: #dc2626; /* crimson */
+  --color-accent-subtle: rgba(220, 38, 38, 0.12);
+  --color-danger: #dc2626;
+  --color-warning: #f59e0b;
+  --color-success: #16a34a;
+
+  --color-bg: #f8fafc; /* slate-50 */
+  --color-surface: #ffffff;
+  --color-surface-2: #f1f5f9; /* slate-100 */
+  --color-border: #e2e8f0; /* slate-200 */
+
+  --color-text: #0f172a; /* slate-900 */
+  --color-text-muted: #475569; /* slate-600 */
+  --color-text-subtle: #64748b; /* slate-500 */
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 10px 25px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 20px 45px rgba(15, 23, 42, 0.12);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+[data-theme="dark"] {
+  --color-accent: #dc2626;
+  --color-accent-subtle: rgba(220, 38, 38, 0.18);
+  --color-danger: #f87171;
+  --color-warning: #fbbf24;
+  --color-success: #4ade80;
+
+  --color-bg: #0b1220; /* deep slate */
+  --color-surface: #0f172a; /* slate-900 */
+  --color-surface-2: #111c33;
+  --color-border: rgba(148, 163, 184, 0.22);
+
+  --color-text: #e2e8f0;
+  --color-text-muted: #cbd5e1;
+  --color-text-subtle: #94a3b8;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 12px 28px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 26px 60px rgba(0, 0, 0, 0.55);
+}
+
+[data-theme="light"] {
+  /* Explicit light theme (mirrors :root). */
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  color: var(--color-text);
+  background: var(--color-bg);
+  font-family: var(--font-sans), var(--font-geist-sans), ui-sans-serif,
+    system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans",
+    "Apple Color Emoji", "Segoe UI Emoji";
 }
 
 @layer utilities {
