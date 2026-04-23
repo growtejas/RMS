@@ -39,6 +39,16 @@ export function resolveAiEvalEnabled(): boolean {
   return v === "1" || v === "true" || v === "yes";
 }
 
+export function resolveAiEvalConfigured(): boolean {
+  if (!resolveAiEvalEnabled()) return false;
+  const provider = resolveAiEvalLlmProvider();
+  const apiKey =
+    provider === "groq"
+      ? process.env.AI_EVAL_GROQ_API_KEY?.trim()
+      : process.env.AI_EVAL_GEMINI_API_KEY?.trim();
+  return Boolean(apiKey);
+}
+
 /** Active LLM backend for AI evaluation. */
 export function resolveAiEvalLlmProvider(): AiEvalLlmProvider {
   const explicit = process.env.AI_EVAL_LLM_PROVIDER?.trim().toLowerCase();
@@ -379,107 +389,136 @@ risks (string array)
 
 -------------------------------------
 
-## CORE EVALUATION RULES (STRICT)
+## 🧠 JOB TYPE DETECTION (MANDATORY)
+
+Determine job type using required experience:
+
+- If required_experience_years <= 1 → FRESHER ROLE
+- If required_experience_years between 2–5 → MID-LEVEL ROLE
+- If required_experience_years >= 6 → SENIOR ROLE
+
+You MUST adjust scoring strategy accordingly.
+
+-------------------------------------
+
+## 🎯 CORE EVALUATION RULES
 
 You MUST create clear separation between strong and weak candidates.
 
-Do NOT keep scores in a narrow range.
+- Strong → 75–95
+- Average → 50–70
+- Weak → 20–45
 
-- Strong candidates should score 75–95
-- Average candidates should score 50–70
-- Weak candidates should score 20–45
-
-Avoid clustering all candidates around 40–60.
+Avoid clustering.
 
 -------------------------------------
 
-## JD ALIGNMENT (CRITICAL WEIGHT)
+## 🔄 DYNAMIC EVALUATION LOGIC
 
-Evaluate strictly based on:
+### 🔹 FRESHER ROLE (<=1 year)
 
-- Required skills (PRIMARY importance)
-- Experience relevance to role
-- Role/title match
+- PRIORITIZE:
+  - project_complexity (VERY HIGH weight)
+  - jd_alignment (skills)
 
-Rules:
+- IGNORE:
+  - growth_trajectory (low importance)
+  - company reputation (low importance)
 
-- Missing PRIMARY required skills → reduce score significantly (below 50)
-- Matching only optional/secondary skills → low impact
-- If experience is missing or far below requirement → strong penalty
+- Penalize:
+  - No real projects
+  - Only academic/basic work
 
--------------------------------------
+👉 Experience should NOT dominate scoring here.
 
-## EXPERIENCE EVALUATION
+---
 
-- If candidate experience >= required → strong positive signal
-- If candidate experience < 50% of required → major penalty
-- If experience is missing → treat as weak signal (do NOT assume)
+### 🔹 MID-LEVEL ROLE (2–5 years)
 
-Do NOT reward over-experience negatively.
+- BALANCED evaluation:
+  - skills + experience + project depth
 
--------------------------------------
+- Penalize:
+  - weak progression
+  - shallow project work
 
-## PROJECT COMPLEXITY
+---
 
-Evaluate depth and real-world impact:
+### 🔹 SENIOR ROLE (>=6 years)
 
-- Production systems, scale, architecture → high score
-- Simple CRUD / academic projects → low score
+- PRIORITIZE:
+  - growth_trajectory (VERY HIGH)
+  - project_complexity (architecture, scale)
+  - jd_alignment (must be strong)
 
--------------------------------------
+- STRONG PENALTY:
+  - experience < 50% required
+  - lack of leadership or ownership
 
-## GROWTH TRAJECTORY
-
-Evaluate progression:
-
-- Increasing responsibility, better roles → high
-- Flat or unclear progression → medium
-- No professional experience → low
-
--------------------------------------
-
-## COMPANY REPUTATION
-
-- Known companies → higher score
-- Unknown companies → default to 50
-- Do NOT guess or hallucinate reputation
+👉 Skills alone are NOT enough.
 
 -------------------------------------
 
-## CONFIDENCE
+## 🎯 JD ALIGNMENT (CRITICAL)
 
-- High (0.7–1) if structured data is clear
-- Medium (0.4–0.7) if partial data
-- Low (<0.4) if major gaps
+- Required skills = PRIMARY signal
+- Missing core skills → strong penalty (<50)
 
 -------------------------------------
 
-## RISKS
+## 📊 EXPERIENCE RULES
+
+- For fresher roles → do NOT heavily penalize low experience
+- For mid/senior roles → enforce strict experience validation
+
+-------------------------------------
+
+## 🧪 PROJECT COMPLEXITY
+
+- Real-world systems → high
+- Basic CRUD / academic → low
+
+-------------------------------------
+
+## 📈 GROWTH TRAJECTORY
+
+- Increasing responsibility → high
+- Flat → medium
+- No experience → low (only relevant for non-fresher roles)
+
+-------------------------------------
+
+## 🏢 COMPANY REPUTATION
+
+- Known → higher
+- Unknown → 50
+- Do NOT guess
+
+-------------------------------------
+
+## ⚠️ RISKS
 
 Include only real issues:
-
 - Missing required skills
-- Low or missing experience
-- Weak project complexity
-- Ambiguous role history
-
-Keep concise.
+- Low experience (only if relevant to job type)
+- Weak projects
+- Role mismatch
 
 -------------------------------------
 
-## STRICT RULES
+## 🔒 STRICT RULES
 
-- Do NOT hallucinate skills, companies, or experience
-- Do NOT inflate scores for weak candidates
-- Do NOT keep scores neutral when strong signals exist
-- Prefer LOWER scores when data is insufficient
+- Do NOT hallucinate
+- Do NOT inflate weak candidates
+- Prefer LOWER score when uncertain
+- Do NOT treat all job types equally
 
 -------------------------------------
 
-## OUTPUT REQUIREMENT
+## OUTPUT
 
 Return ONLY valid JSON.
-No explanation outside JSON.`;
+No explanation outside JSON.`;      
 
   const maxRounds = 12;
   let count429 = 0;

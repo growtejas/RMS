@@ -29,9 +29,14 @@ import {
   resolveRankingAllowEmptyRequiredSkills,
   resolveRequiredSkillsForRanking,
   resolveRequiredSkillsFromItem,
-  type AtsRankingEngineMode,
   type AtsV1Breakdown,
 } from "@/lib/services/ats-v1-scoring";
+import { computeFinalScore } from "@/lib/services/scoring/final-score";
+import {
+  resolveRankingEngine,
+  type DeterministicEngineMode,
+  type RankingEngineMode,
+} from "@/lib/services/scoring/ranking-engine";
 import {
   cosineSimilarity,
   ensureCandidateEmbedding,
@@ -64,49 +69,20 @@ import type { ParsedResumeArtifact } from "@/lib/queue/inbound-events-queue";
 import { jdIsRemoteUrl, jdLocalFilePath } from "@/lib/storage/jd-local-storage";
 
 type RankedCandidateScore = {
-  keyword_score: number;
-  semantic_score: number;
-  business_score: number;
-  /** Rule-based ATS score (0–100) when engine is hybrid or ats_v1. */
-  ats_v1_score?: number;
-  final_score: number;
-  /** Deterministic score after skill gate (before optional AI blend). Set when AI enrich is applied. */
-  deterministic_final_score?: number;
+  final_score: number | null;
+  ai_status: "OK" | "PENDING" | "UNAVAILABLE";
+  ai_confidence?: number;
+  ai_summary?: string;
+  ai_risks?: string[];
 };
 
 export type RankedCandidateExplain = {
   reasons: string[];
-  matched_terms: string[];
-  missing_terms: string[];
-  /** Skill-centric view derived from structured required skills list. */
-  matched_skills?: string[];
-  missing_skills?: string[];
-  /** Present when GET used `?ai_eval=1` and a cached row matched `input_hash`. */
-  deterministic_final_score?: number;
   ai_score?: number;
-  ai_breakdown?: {
-    project_complexity: number;
-    growth_trajectory: number;
-    company_reputation: number;
-    jd_alignment: number;
-  };
+  ai_breakdown?: Record<string, unknown>;
   ai_confidence?: number;
   ai_summary?: string;
   ai_risks?: string[];
-  /** Blend weight applied to `ai_score` (0 if no cached eval). */
-  ai_blend_weight?: number;
-  ats_v1?: {
-    skills?: number;
-    experience: number;
-    notice: number;
-    education: number;
-    seniority: number;
-    bonus?: number;
-    matched_skills?: number;
-    required_skills?: number;
-    partial_data: boolean;
-    flags: string[];
-  };
   /**
    * Same `parseResumeArtifact` output used for keyword/semantic signals in this ranking run
    * (truncated raw text for JSON size).
@@ -122,8 +98,6 @@ export type RankedCandidateExplain = {
   };
   /** DB + parser merged fields actually used for scoring this run. */
   ranking_signals: ReturnType<typeof rankingSignalsToExplain>;
-  /** Applied to final_score when structured skill match is weak (1 = no penalty). */
-  skill_gate_multiplier?: number;
 };
 
 export type RankedCandidateRow = {
@@ -132,6 +106,7 @@ export type RankedCandidateRow = {
   full_name: string;
   email: string;
   current_stage: string;
+  flags?: string[];
   meta?: {
     skill_match_ratio?: number;
     notice_period_days?: number | null;
@@ -155,6 +130,7 @@ export type RequisitionItemRankingJson = {
   ranked_candidates: RankedCandidateRow[];
   meta?: {
     ranking_engine: string;
+    deterministic_engine?: string;
     ats_v1_weight: number;
     ranking_version_id: number;
     required_skills_count?: number;
@@ -179,6 +155,7 @@ export type CandidateScoringDetailsJson = {
   ranking_meta?: RequisitionItemRankingJson["meta"];
   score: RankedCandidateRow["score"];
   explain: RankedCandidateRow["explain"];
+  flags?: string[];
   /** Job-side inputs used for this line (same as GET .../job-requirements). */
   job_requirements: RankingJobRequirementsJson;
 };
@@ -205,6 +182,7 @@ export function pickCandidateScoringDetailsFromRanking(
     ranking_meta: ranking.meta,
     score: row.score,
     explain: row.explain,
+    ...(row.flags ? { flags: row.flags } : {}),
     job_requirements: jobRequirements,
   };
 }
@@ -660,7 +638,8 @@ export type RankingJobRequirementsJson = {
     job_education_requirement: string | null;
   };
   scoring_config: {
-    ranking_engine: AtsRankingEngineMode;
+    ranking_engine: RankingEngineMode;
+    deterministic_engine: DeterministicEngineMode;
     ats_v1_hybrid_weight: number;
     phase5_weights: {
       keyword: number;
@@ -731,7 +710,8 @@ export function buildRankingJobRequirementsFromContext(ctx: {
       job_education_requirement: item.educationRequirement ?? null,
     },
     scoring_config: {
-      ranking_engine: resolveAtsRankingEngineMode(),
+      ranking_engine: resolveRankingEngine().engine,
+      deterministic_engine: resolveRankingEngine().deterministicSubmode,
       ats_v1_hybrid_weight: resolveAtsV1HybridWeight(),
       phase5_weights: resolveRankingWeights(),
       allow_empty_required_skills_env: resolveRankingAllowEmptyRequiredSkills(),
@@ -845,6 +825,13 @@ async function buildRankingForRequisitionItem(
   const db = getDb();
   const { item, requiredText, requiredSkillsList } = await loadRankingRequiredContextForItem(itemId);
 
+  const resolvedEngine = resolveRankingEngine();
+  if (resolvedEngine.engine !== "ai_only") {
+    throw new HttpError(
+      500,
+      `Ranking engine misconfigured: expected ai_only, got ${resolvedEngine.engine}`,
+    );
+  }
   const engineMode = resolveAtsRankingEngineMode();
   const hybridV1Weight = resolveAtsV1HybridWeight();
 
@@ -885,11 +872,7 @@ async function buildRankingForRequisitionItem(
   }
 
   const requiredTerms = toTerms([requiredText]).slice(0, 40);
-  const itemEmbedding = await ensureRequisitionItemEmbedding({
-    requisitionItemId: item.itemId,
-    requisitionId: item.reqId,
-    sourceText: requiredText,
-  });
+  const itemEmbedding = null;
 
   const ranked: RankedCandidateRow[] = [];
   const jobScoreRows: {
@@ -1009,189 +992,227 @@ async function buildRankingForRequisitionItem(
       structuredDocument,
     });
     const resumeStatus = signals.parse_status;
-    const resumeTerms = toTerms([
-      signals.resume_plain_text ?? "",
-      signals.skills_normalized.join(" "),
-    ]);
-
-    const emailLocal = candidate.email.split("@")[0] ?? candidate.email;
-    const candidateTerms = toTerms([
-      candidate.fullName,
-      emailLocal,
-      candidate.currentCompany,
-      candidate.resumePath,
-      resumeTerms.join(" "),
-      ...ivTexts,
-    ]);
-    const struct = structuredDocument?.profile;
-    const structuredExtra = struct
-      ? [...(struct.projects ?? []), ...(struct.experience_details ?? [])].join(" ")
-      : "";
-
-    const candidateSemanticText = [
-      candidate.fullName,
-      candidate.currentCompany,
-      candidate.resumePath,
-      signals.resume_plain_text ?? "",
-      resumeTerms.join(" "),
-      structuredExtra,
-      ...ivTexts,
-    ]
-      .filter(Boolean)
-      .join(" ");
-
-    const matchedTermsRaw = requiredTerms.filter((t) => candidateTerms.includes(t));
-    const missingTermsRaw = requiredTerms.filter((t) => !candidateTerms.includes(t));
-
-    const matchedTerms = filterExplainTerms(matchedTermsRaw);
-    const missingTerms = filterExplainTerms(missingTermsRaw);
 
     // Skill-centric explainability: compare structured required skills against structured candidate skills.
     const reqSkillsNorm = requiredSkillsList.map((s) => normalizeSkill(s));
     const candSkillsNorm = new Set(signals.skills_normalized);
     const matchedSkills = Array.from(new Set(reqSkillsNorm.filter((s) => candSkillsNorm.has(s))));
     const missingSkills = Array.from(new Set(reqSkillsNorm.filter((s) => !candSkillsNorm.has(s))));
-
-    const keywordScore =
-      requiredTerms.length === 0
-        ? 50
-        : clamp((matchedTermsRaw.length / requiredTerms.length) * 100);
-    const lexicalSemanticScore = semanticScoreForCandidate(
-      requiredText,
-      candidateSemanticText,
-      requiredTerms,
-      candidateTerms,
-    );
-    const candidateEmbedding = await ensureCandidateEmbedding({
-      candidateId: candidate.candidateId,
-      requisitionItemId: candidate.requisitionItemId,
-      requisitionId: candidate.requisitionId,
-      sourceText: candidateSemanticText,
-    });
-    const vectorSemanticScore = clamp(
-      cosineSimilarity(itemEmbedding, candidateEmbedding) * 100,
-    );
-    const semanticScore = clamp(vectorSemanticScore * 0.8 + lexicalSemanticScore * 0.2);
-
-    const passCount = ivs.filter((i) => i.result === "Pass").length;
-    const failCount = ivs.filter((i) => i.result === "Fail").length;
-    const holdCount = ivs.filter((i) => i.result === "Hold").length;
-
-    let businessScore = stageBaseScore(candidate.currentStage);
-    businessScore += Math.min(passCount * 8, 16);
-    businessScore -= failCount * 12;
-    businessScore += holdCount * 2;
-    if (candidate.phone) {
-      businessScore += 2;
-    }
-    if (candidate.resumePath) {
-      businessScore += 4;
-    }
-    if (candidate.currentCompany) {
-      businessScore += 3;
-    }
-    businessScore = clamp(businessScore);
-
-    const phase5Final = clamp(
-      keywordScore * weights.keyword +
-        semanticScore * weights.semantic +
-        businessScore * weights.business,
-    );
-
-    const atsBreakdown = computeAtsV1ScoreFromSignals(
-      {
-        experience_years: signals.ats.experience_years,
-        notice_period_days: signals.ats.notice_period_days,
-        education_raw: signals.ats.education_raw,
-      },
-      {
-        requiredExperienceYears: item.experienceYears ?? null,
-        jobSkillLevel: item.skillLevel ?? null,
-        jobEducationRequirement: item.educationRequirement ?? null,
-      },
-      reqSkillsNorm.length > 0
-        ? {
-            requiredCount: reqSkillsNorm.length,
-            matchedCount: matchedSkills.length,
-          }
-        : null,
-    );
-    const atsV1ScoreNum = Number(atsBreakdown.score_0_100.toFixed(2));
-
-    let finalScore = phase5Final;
-    if (engineMode === "ats_v1") {
-      finalScore = atsV1ScoreNum;
-    } else if (engineMode === "hybrid") {
-      finalScore = clamp(
-        (1 - hybridV1Weight) * phase5Final + hybridV1Weight * atsV1ScoreNum,
-      );
-    }
-
-    finalScore = Number(finalScore.toFixed(2));
-
-    let skillGateMultiplier = 1;
     const skillMatchRatio =
       reqSkillsNorm.length > 0 ? matchedSkills.length / reqSkillsNorm.length : 1;
-    if (reqSkillsNorm.length > 0) {
-      if (matchedSkills.length === 0) {
-        skillGateMultiplier = 0.7;
-      } else if (skillMatchRatio < 0.3) {
-        skillGateMultiplier = 0.8;
-      }
-    }
-    finalScore = Number(clamp(finalScore * skillGateMultiplier).toFixed(2));
+
+    const isAiOnly = true;
+    let keywordScore = 0;
+    let semanticScore = 0;
+    let businessScore = 0;
+    let phase5Final = 0;
+    let atsBreakdown: AtsV1Breakdown | null = null;
+    let atsV1ScoreNum = 0;
+    let skillGateMultiplier = 1;
+    let deterministicFinalScore: number | undefined = undefined;
 
     const reasons: string[] = [];
-    if (requiredTerms.length > 0) {
-      reasons.push(
-        `Keyword match: ${matchedTerms.length}/${requiredTerms.length} required terms`,
-      );
+
+    if (isAiOnly) {
+      // Strict ai_only: do not compute deterministic scoring layers. Keep deprecated fields stable (zeros).
+      reasons.push("AI-only scoring: deterministic layers are deprecated for final score.");
+      if (reqSkillsNorm.length > 0) {
+        reasons.push(
+          `Required skills match: ${matchedSkills.length}/${reqSkillsNorm.length} (${(skillMatchRatio * 100).toFixed(0)}%)`,
+        );
+      }
+      reasons.push(`Stage signal: ${candidate.currentStage}`);
+      reasons.push(`Resume parse status: ${resumeStatus}`);
     } else {
-      reasons.push("Keyword match: no structured required terms found on item");
-    }
-    reasons.push(`Semantic fit score: ${semanticScore.toFixed(2)} / 100`);
-    reasons.push(
-      `Vector similarity: ${vectorSemanticScore.toFixed(2)} / 100 (provider: local-hash)`,
-    );
-    reasons.push(
-      `ATS V1: exp=${(atsBreakdown.experience * 100).toFixed(0)}%, notice=${(atsBreakdown.notice * 100).toFixed(0)}%, edu=${(atsBreakdown.education * 100).toFixed(0)}%, seniority=${(atsBreakdown.seniority * 100).toFixed(0)}% => ${atsV1ScoreNum.toFixed(2)}`,
-    );
-    if (atsBreakdown.flags.includes("partial_data")) {
-      reasons.push("ATS V1: multi-field partial data penalty applied");
-    } else if (atsBreakdown.flags.includes("partial_candidate_data")) {
-      reasons.push("ATS V1: single-field gap penalty applied");
-    } else if (atsBreakdown.partial_data) {
-      reasons.push("ATS V1: partial candidate data (some fields missing)");
-    }
-    if (atsBreakdown.flags.includes("extreme_mismatch")) {
-      reasons.push("ATS V1: extreme mismatch penalty applied");
-    }
-    reasons.push(`Stage signal: ${candidate.currentStage}`);
-    reasons.push(`Resume parse status: ${resumeStatus}`);
-    if (passCount > 0 || failCount > 0 || holdCount > 0) {
-      reasons.push(
-        `Interview outcomes: pass=${passCount}, hold=${holdCount}, fail=${failCount}`,
+      // Legacy deterministic computation (still used for deterministic/hybrid engine modes).
+      const resumeTerms = toTerms([
+        signals.resume_plain_text ?? "",
+        signals.skills_normalized.join(" "),
+      ]);
+
+      const emailLocal = candidate.email.split("@")[0] ?? candidate.email;
+      const candidateTerms = toTerms([
+        candidate.fullName,
+        emailLocal,
+        candidate.currentCompany,
+        candidate.resumePath,
+        resumeTerms.join(" "),
+        ...ivTexts,
+      ]);
+      const struct = structuredDocument?.profile;
+      const structuredExtra = struct
+        ? [...(struct.projects ?? []), ...(struct.experience_details ?? [])].join(" ")
+        : "";
+
+      const candidateSemanticText = [
+        candidate.fullName,
+        candidate.currentCompany,
+        candidate.resumePath,
+        signals.resume_plain_text ?? "",
+        resumeTerms.join(" "),
+        structuredExtra,
+        ...ivTexts,
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      const matchedTermsRaw = requiredTerms.filter((t) => candidateTerms.includes(t));
+      const missingTermsRaw = requiredTerms.filter((t) => !candidateTerms.includes(t));
+
+      const matchedTerms = filterExplainTerms(matchedTermsRaw);
+      const missingTerms = filterExplainTerms(missingTermsRaw);
+
+      keywordScore =
+        requiredTerms.length === 0
+          ? 50
+          : clamp((matchedTermsRaw.length / requiredTerms.length) * 100);
+
+      const lexicalSemanticScore = semanticScoreForCandidate(
+        requiredText,
+        candidateSemanticText,
+        requiredTerms,
+        candidateTerms,
       );
-    } else {
-      reasons.push("Interview outcomes: no completed interview results yet");
-    }
-    if (engineMode === "hybrid") {
-      reasons.push(
-        `Hybrid: Phase5 ${phase5Final.toFixed(2)} × ${(1 - hybridV1Weight).toFixed(2)} + ATS V1 ${atsV1ScoreNum.toFixed(2)} × ${hybridV1Weight.toFixed(2)}`,
+      const candidateEmbedding = await ensureCandidateEmbedding({
+        candidateId: candidate.candidateId,
+        requisitionItemId: candidate.requisitionItemId,
+        requisitionId: candidate.requisitionId,
+        sourceText: candidateSemanticText,
+      });
+      const vectorSemanticScore = clamp(
+        cosineSimilarity(itemEmbedding!, candidateEmbedding) * 100,
       );
-    }
-    if (skillGateMultiplier < 1) {
-      reasons.push(
-        `Skill gate: final score × ${skillGateMultiplier} (structured match ${(skillMatchRatio * 100).toFixed(0)}%)`,
+      semanticScore = clamp(vectorSemanticScore * 0.8 + lexicalSemanticScore * 0.2);
+
+      const passCount = ivs.filter((i) => i.result === "Pass").length;
+      const failCount = ivs.filter((i) => i.result === "Fail").length;
+      const holdCount = ivs.filter((i) => i.result === "Hold").length;
+
+      businessScore = stageBaseScore(candidate.currentStage);
+      businessScore += Math.min(passCount * 8, 16);
+      businessScore -= failCount * 12;
+      businessScore += holdCount * 2;
+      if (candidate.phone) {
+        businessScore += 2;
+      }
+      if (candidate.resumePath) {
+        businessScore += 4;
+      }
+      if (candidate.currentCompany) {
+        businessScore += 3;
+      }
+      businessScore = clamp(businessScore);
+
+      phase5Final = clamp(
+        keywordScore * weights.keyword +
+          semanticScore * weights.semantic +
+          businessScore * weights.business,
       );
-    }
-    if (candidate.duplicateResumeOfCandidateId != null) {
-      reasons.push(
-        `Resume duplicate flag: same content as candidate_id ${candidate.duplicateResumeOfCandidateId}`,
+
+      atsBreakdown = computeAtsV1ScoreFromSignals(
+        {
+          experience_years: signals.ats.experience_years,
+          notice_period_days: signals.ats.notice_period_days,
+          education_raw: signals.ats.education_raw,
+        },
+        {
+          requiredExperienceYears: item.experienceYears ?? null,
+          jobSkillLevel: item.skillLevel ?? null,
+          jobEducationRequirement: item.educationRequirement ?? null,
+        },
+        reqSkillsNorm.length > 0
+          ? {
+              requiredCount: reqSkillsNorm.length,
+              matchedCount: matchedSkills.length,
+            }
+          : null,
       );
+      atsV1ScoreNum = Number(atsBreakdown.score_0_100.toFixed(2));
+
+      let det = phase5Final;
+      if (engineMode === "ats_v1") {
+        det = atsV1ScoreNum;
+      } else if (engineMode === "hybrid") {
+        det = clamp((1 - hybridV1Weight) * phase5Final + hybridV1Weight * atsV1ScoreNum);
+      }
+      det = Number(det.toFixed(2));
+
+      const skillMatchRatioDet =
+        reqSkillsNorm.length > 0 ? matchedSkills.length / reqSkillsNorm.length : 1;
+      if (reqSkillsNorm.length > 0) {
+        if (matchedSkills.length === 0) {
+          skillGateMultiplier = 0.7;
+        } else if (skillMatchRatioDet < 0.3) {
+          skillGateMultiplier = 0.8;
+        }
+      }
+      det = Number(clamp(det * skillGateMultiplier).toFixed(2));
+      deterministicFinalScore = det;
+
+      // Deterministic explainability
+      if (requiredTerms.length > 0) {
+        reasons.push(`Keyword match: ${matchedTerms.length}/${requiredTerms.length} required terms`);
+      } else {
+        reasons.push("Keyword match: no structured required terms found on item");
+      }
+      reasons.push(`Semantic fit score: ${semanticScore.toFixed(2)} / 100`);
+      reasons.push(`Vector similarity: ${vectorSemanticScore.toFixed(2)} / 100 (provider: local-hash)`);
+      reasons.push(
+        `ATS V1: exp=${(atsBreakdown.experience * 100).toFixed(0)}%, notice=${(atsBreakdown.notice * 100).toFixed(0)}%, edu=${(atsBreakdown.education * 100).toFixed(0)}%, seniority=${(atsBreakdown.seniority * 100).toFixed(0)}% => ${atsV1ScoreNum.toFixed(2)}`,
+      );
+      if (atsBreakdown.flags.includes("partial_data")) {
+        reasons.push("ATS V1: multi-field partial data penalty applied");
+      } else if (atsBreakdown.flags.includes("partial_candidate_data")) {
+        reasons.push("ATS V1: single-field gap penalty applied");
+      } else if (atsBreakdown.partial_data) {
+        reasons.push("ATS V1: partial candidate data (some fields missing)");
+      }
+      if (atsBreakdown.flags.includes("extreme_mismatch")) {
+        reasons.push("ATS V1: extreme mismatch penalty applied");
+      }
+      reasons.push(`Stage signal: ${candidate.currentStage}`);
+      reasons.push(`Resume parse status: ${resumeStatus}`);
+      if (passCount > 0 || failCount > 0 || holdCount > 0) {
+        reasons.push(`Interview outcomes: pass=${passCount}, hold=${holdCount}, fail=${failCount}`);
+      } else {
+        reasons.push("Interview outcomes: no completed interview results yet");
+      }
+      if (engineMode === "hybrid") {
+        reasons.push(
+          `Hybrid: Phase5 ${phase5Final.toFixed(2)} × ${(1 - hybridV1Weight).toFixed(2)} + ATS V1 ${atsV1ScoreNum.toFixed(2)} × ${hybridV1Weight.toFixed(2)}`,
+        );
+      }
+      if (skillGateMultiplier < 1) {
+        reasons.push(`Skill gate: final score × ${skillGateMultiplier} (structured match ${(skillMatchRatioDet * 100).toFixed(0)}%)`);
+      }
+
+      // Keep term arrays for deterministic modes.
+      // (Set later in explain block)
+      (reasons as any)._matchedTerms = matchedTerms.slice(0, 15);
+      (reasons as any)._missingTerms = missingTerms.slice(0, 15);
     }
 
-    const explainAts = atsBreakdownToExplain(atsBreakdown);
+    const finalDecision = computeFinalScore({
+      engine: resolvedEngine.engine,
+      deterministicSubmode: resolvedEngine.deterministicSubmode,
+      deterministicFinalScore: deterministicFinalScore ?? 0,
+      aiScore: null,
+      aiConfidence: null,
+      aiCacheHit: false,
+      requiredSkillsCount: reqSkillsNorm.length,
+      matchedRequiredSkillsCount: matchedSkills.length,
+      requiredExperienceYears: item.experienceYears ?? null,
+      candidateExperienceYears: signals.ats.experience_years ?? null,
+    });
+    const finalScore =
+      finalDecision.finalScore == null ? null : Number(finalDecision.finalScore.toFixed(2));
+
+    // Note: AI status is represented in `score.ai_status` and should not be duplicated as a string.
+    if (candidate.duplicateResumeOfCandidateId != null) {
+      reasons.push(`Resume duplicate flag: same content as candidate_id ${candidate.duplicateResumeOfCandidateId}`);
+    }
+
+    const explainAts = atsBreakdown ? atsBreakdownToExplain(atsBreakdown) : undefined;
     const resumeParserExplain = resumeParserForRankingResponse(
       parsedArtifact,
       "no_resume_reference",
@@ -1214,22 +1235,13 @@ async function buildRankingForRequisitionItem(
           applicationCreatedByCandidate.get(candidate.candidateId) ?? 0,
       },
       score: {
-        keyword_score: Number(keywordScore.toFixed(2)),
-        semantic_score: Number(semanticScore.toFixed(2)),
-        business_score: Number(businessScore.toFixed(2)),
-        ats_v1_score: atsV1ScoreNum,
         final_score: finalScore,
+        ai_status: "PENDING",
       },
       explain: {
         reasons,
-        matched_terms: matchedTerms.slice(0, 15),
-        missing_terms: missingTerms.slice(0, 15),
-        matched_skills: matchedSkills.slice(0, 15),
-        missing_skills: missingSkills.slice(0, 15),
-        ats_v1: explainAts,
         resume_parser: resumeParserExplain,
         ranking_signals: rankingSignalsExplain,
-        skill_gate_multiplier: skillGateMultiplier,
       },
     });
 
@@ -1237,22 +1249,14 @@ async function buildRankingForRequisitionItem(
       candidateId: candidate.candidateId,
       requisitionItemId: itemId,
       rankingVersionId,
-      score: finalScore.toFixed(2),
+      score: finalScore == null ? "0.00" : finalScore.toFixed(2),
       breakdown: {
-        phase5: {
-          keyword: keywordScore,
-          semantic: semanticScore,
-          business: businessScore,
-          composite: phase5Final,
+        engine: {
+          ranking_engine: "ai_only",
         },
-        ats_v1: explainAts,
-        ats_v1_score: atsV1ScoreNum,
-        engine: engineMode,
-        hybrid_weight: hybridV1Weight,
         final: finalScore,
         resume_parser: resumeParserExplain,
         ranking_signals: rankingSignalsExplain,
-        skill_gate_multiplier: skillGateMultiplier,
       },
     });
   }
@@ -1272,9 +1276,17 @@ async function buildRankingForRequisitionItem(
   }
 
   ranked.sort((a, b) => {
-    const d = b.score.final_score - a.score.final_score;
-    if (Math.abs(d) > TIE_EPSILON) {
-      return d;
+    const af = a.score.final_score;
+    const bf = b.score.final_score;
+    if (af == null && bf == null) {
+      // fall through to tie-breakers
+    } else if (af == null) {
+      return 1;
+    } else if (bf == null) {
+      return -1;
+    } else {
+      const d = bf - af;
+      if (Math.abs(d) > TIE_EPSILON) return d;
     }
     // Tie-breaker 1: higher structured skill match ratio
     const ar = a.meta?.skill_match_ratio ?? -1;
@@ -1314,7 +1326,8 @@ async function buildRankingForRequisitionItem(
     total_candidates: ranked.length,
     ranked_candidates: ranked,
     meta: {
-      ranking_engine: engineMode,
+      ranking_engine: resolvedEngine.engine,
+      deterministic_engine: resolvedEngine.deterministicSubmode,
       ats_v1_weight: hybridV1Weight,
       ranking_version_id: rankingVersionId,
       required_skills_count: requiredSkillsList.length,
@@ -1342,8 +1355,17 @@ function snapshotMatchesCurrentConfig(
   if (!meta || payload.ranking_version !== RANKING_VERSION) {
     return false;
   }
-  if (meta.ranking_engine !== resolveAtsRankingEngineMode()) {
-    return false;
+  const current = resolveRankingEngine();
+  const metaEngine = meta.ranking_engine as unknown;
+  const metaDet = (meta as { deterministic_engine?: unknown }).deterministic_engine;
+
+  // Back-compat: older snapshots stored deterministic submode in `ranking_engine`.
+  if (metaDet == null && (metaEngine === "hybrid" || metaEngine === "ats_v1" || metaEngine === "phase5_only")) {
+    if (current.engine !== "deterministic") return false;
+    if (current.deterministicSubmode !== metaEngine) return false;
+  } else {
+    if (metaEngine !== current.engine) return false;
+    if (metaDet !== current.deterministicSubmode) return false;
   }
   if (Math.abs(meta.ats_v1_weight - resolveAtsV1HybridWeight()) > 0.0001) {
     return false;
@@ -1411,7 +1433,7 @@ export async function recomputeRankingForRequisitionItem(
   const weights = resolveRankingWeights();
   await deactivateRankingVersionsForItem(itemId);
   const nextVer = (await selectMaxRankingVersionNumber(itemId)) + 1;
-  const engine = resolveAtsRankingEngineMode();
+  const engine = resolveRankingEngine();
   const v1w = resolveAtsV1HybridWeight();
   const rankingVersionId = await insertRankingVersionRow({
     requisitionItemId: itemId,
@@ -1420,7 +1442,8 @@ export async function recomputeRankingForRequisitionItem(
       ranking_version_label: RANKING_VERSION,
       phase5_weights: weights,
       ats_v1_weight: v1w,
-      ranking_engine: engine,
+      ranking_engine: engine.engine,
+      deterministic_engine: engine.deterministicSubmode,
     },
   });
   if (rankingVersionId == null) {
@@ -1435,7 +1458,10 @@ export async function recomputeRankingForRequisitionItem(
   const organizationId = await resolveOrganizationIdForRequisitionItem(itemId);
   const candidateBuckets = new Map<number, AtsBucket>();
   for (const r of ranking.ranked_candidates) {
-    candidateBuckets.set(r.candidate_id, getAtsBucketFromFinalScore(r.score.final_score));
+    candidateBuckets.set(
+      r.candidate_id,
+      getAtsBucketFromFinalScore(r.score.final_score ?? Number.NaN),
+    );
   }
   await replaceApplicationAtsBucketsForRequisitionItem({
     requisitionItemId: itemId,

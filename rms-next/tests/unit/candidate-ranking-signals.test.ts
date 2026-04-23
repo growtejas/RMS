@@ -106,7 +106,7 @@ test("ranking signals: no artifact => skipped and no ATS from parser", () => {
   assert.equal(s.ats.experience_source, "none");
 });
 
-test("ranking signals: structured wins experience over DB when parse processed and skills non-empty", () => {
+test("ranking signals: DB wins experience over structured and parser", () => {
   const s = buildCandidateRankingSignals({
     candidate: {
       ...baseCandidate,
@@ -122,8 +122,8 @@ test("ranking signals: structured wins experience over DB when parse processed a
       experience_years: 5,
     }),
   });
-  assert.equal(s.ats.experience_years, 5);
-  assert.equal(s.ats.experience_source, "structured");
+  assert.equal(s.ats.experience_years, 8);
+  assert.equal(s.ats.experience_source, "db");
   assert.ok(s.skills_normalized.includes("typescript"));
   assert.ok(s.skills_normalized.includes("react"));
   assert.ok(!s.skills_normalized.includes("java"));

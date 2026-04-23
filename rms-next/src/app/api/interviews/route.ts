@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
+import { envelopeCatch, envelopeFail, envelopeOk } from "@/lib/http/api-envelope";
 import { parseFastapiJsonBody } from "@/lib/http/parse-fastapi-body";
+import { interviewCreateBody } from "@/lib/validators/interviews";
 import {
   createInterviewJson,
   listInterviewsJson,
 } from "@/lib/services/interviews-service";
-import { interviewCreateBody } from "@/lib/validators/candidates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,33 +37,24 @@ export async function GET(req: Request) {
     const requisitionId =
       optInt(url.searchParams.get("requisition_id")) ??
       optInt(url.searchParams.get("requisitionId"));
-    if (
-      url.searchParams.has("candidate_id") &&
-      candidateId == null
-    ) {
-      return NextResponse.json(
-        { detail: "candidate_id must be an integer" },
-        { status: 422 },
-      );
+    if (url.searchParams.has("candidate_id") && candidateId == null) {
+      return envelopeFail("candidate_id must be an integer", 422);
     }
     if (
       (url.searchParams.has("requisition_id") ||
         url.searchParams.has("requisitionId")) &&
       requisitionId == null
     ) {
-      return NextResponse.json(
-        { detail: "requisition_id / requisitionId must be an integer" },
-        { status: 422 },
-      );
+      return envelopeFail("requisition_id / requisitionId must be an integer", 422);
     }
 
-    const data = await listInterviewsJson(user.organizationId, {
+    const rows = await listInterviewsJson(user.organizationId, {
       candidateId: candidateId ?? undefined,
       requisitionId: requisitionId ?? undefined,
     });
-    return NextResponse.json(data);
+    return envelopeOk({ interviews: rows });
   } catch (e) {
-    return referenceWriteCatch(e, "[GET /api/interviews]");
+    return envelopeCatch(e, "[GET /api/interviews]");
   }
 }
 
@@ -81,12 +72,16 @@ export async function POST(req: Request) {
 
     const parsed = await parseFastapiJsonBody(req, interviewCreateBody);
     if (!parsed.ok) {
-      return parsed.response;
+      const errBody = await parsed.response.json();
+      return envelopeFail(
+        typeof errBody.detail === "string" ? errBody.detail : "Invalid request body",
+        422,
+      );
     }
 
     const data = await createInterviewJson(parsed.data, user);
-    return NextResponse.json(data, { status: 201 });
+    return envelopeOk(data, { status: 201 });
   } catch (e) {
-    return referenceWriteCatch(e, "[POST /api/interviews]");
+    return envelopeCatch(e, "[POST /api/interviews]");
   }
 }

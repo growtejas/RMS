@@ -12,6 +12,7 @@ import {
   History,
   Menu,
   X,
+  Calendar,
 } from "lucide-react";
 
 interface TASidebarProps {
@@ -46,6 +47,11 @@ const TASidebar: React.FC<TASidebarProps> = ({
       href: "/ta/my-requisitions",
       label: "My Requisitions",
       icon: <ClipboardList size={20} />,
+    },
+    {
+      href: "/ta/interviews",
+      label: "Interviews",
+      icon: <Calendar size={20} />,
     },
     {
       href: "/ta/candidates",

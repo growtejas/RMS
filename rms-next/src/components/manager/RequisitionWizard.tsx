@@ -557,7 +557,7 @@ const App: React.FC = () => {
         (pos) =>
           pos.roleTitle.trim() !== "" &&
           pos.primarySkills.length > 0 &&
-          pos.yearsOfExperience > 0 &&
+          pos.yearsOfExperience >= 0 &&
           pos.quantity > 0 &&
           // Budget validation: estimated_budget must be > 0
           pos.estimatedBudget.trim() !== "" &&

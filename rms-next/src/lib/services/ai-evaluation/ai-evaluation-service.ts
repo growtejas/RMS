@@ -8,11 +8,11 @@ import {
 } from "@/lib/repositories/candidate-ai-evaluations-repo";
 import { assertRequisitionItemInOrganization } from "@/lib/tenant/org-assert";
 import {
-  blendDeterministicWithAi,
-  resolveAiBlendWeight,
   type CandidateEvaluationInput,
   type JobEvaluationInput,
 } from "@/lib/services/ai-evaluation/ai-evaluation.schema";
+import { computeFinalScore } from "@/lib/services/scoring/final-score";
+import { resolveRankingEngine } from "@/lib/services/scoring/ranking-engine";
 import {
   buildCandidateEvaluationInputFromSignals,
   buildJobEvaluationInput,
@@ -21,6 +21,7 @@ import {
 } from "@/lib/services/ai-evaluation/build-ai-evaluation-payload";
 import {
   resolveAiEvalEnabled,
+  resolveAiEvalConfigured,
   resolveAiEvalMinIntervalMs,
   resolveAiEvalActiveModel,
   resolveAiEvalPromptVersion,
@@ -28,12 +29,16 @@ import {
 } from "@/lib/services/ai-evaluation/ai-evaluation-llm";
 import { buildCandidateRankingSignals } from "@/lib/services/candidate-ranking-signals";
 import { parseResumeStructuredDocument } from "@/lib/services/resume-structure/resume-structure.schema";
+import { getAtsBucketFromFinalScore } from "@/lib/services/ats-buckets";
+import { normalizeSkill } from "@/lib/services/ats-v1-scoring";
 import {
   loadRankingRequiredContextForItem,
   rankCandidatesForRequisitionItem,
   type RankedCandidateRow,
   type RequisitionItemRankingJson,
 } from "@/lib/services/ranking-service";
+import { upsertCandidateJobScore, selectLatestRankingVersionIdForRequisitionItem } from "@/lib/repositories/ranking-metadata-repo";
+import { updateApplicationAtsBucketForCandidate } from "@/lib/repositories/applications-repo";
 
 const SCORE_TIE_EPS = 0.01;
 
@@ -70,6 +75,7 @@ export async function enrichRankingWithCachedAiEvaluations(params: {
   itemId: number;
   ranking: RequisitionItemRankingJson;
 }): Promise<RequisitionItemRankingJson> {
+  const engine = resolveRankingEngine();
   const { item, requiredText, requiredSkillsList } = await loadRankingRequiredContextForItem(
     params.itemId,
   );
@@ -138,13 +144,18 @@ export async function enrichRankingWithCachedAiEvaluations(params: {
     const p = pairByCandidateId.get(row.candidate_id);
     if (!p) return row;
     const ev = evalMap.get(`${row.candidate_id}\0${p.inputHash}`);
-    if (!ev) return row;
-
-    const det = row.score.final_score;
+    if (!ev) {
+      return {
+        ...row,
+        score: {
+          ...row.score,
+          final_score: null,
+          ai_status: "PENDING",
+        },
+      };
+    }
     const aiScore = Number(ev.aiScore);
     const conf = Number(ev.confidence);
-    const w = resolveAiBlendWeight(conf);
-    const display = blendDeterministicWithAi(det, aiScore, conf);
     const breakdown = ev.breakdown as {
       project_complexity: number;
       growth_trajectory: number;
@@ -152,29 +163,68 @@ export async function enrichRankingWithCachedAiEvaluations(params: {
       jd_alignment: number;
     };
 
+    const reqCount = requiredSkillsList.length;
+    const ratio = row.meta?.skill_match_ratio;
+    const matchedCount =
+      ratio != null && Number.isFinite(ratio) && reqCount > 0
+        ? Math.round(ratio * reqCount)
+        : 0;
+    const candExpYears =
+      row.explain.ranking_signals?.ats?.experience_years ?? null;
+
+    const finalDecision = computeFinalScore({
+      engine: engine.engine,
+      deterministicSubmode: engine.deterministicSubmode,
+      deterministicFinalScore: 0,
+      aiScore,
+      aiConfidence: conf,
+      aiCacheHit: true,
+      requiredSkillsCount: reqCount,
+      matchedRequiredSkillsCount: matchedCount,
+      requiredExperienceYears: item.experienceYears ?? null,
+      candidateExperienceYears: candExpYears,
+    });
+
+    const flags: string[] = [];
+    if (conf < 0.6) {
+      flags.push("LOW_CONFIDENCE");
+    }
+
     return {
       ...row,
+      ...(flags.length > 0 ? { flags } : {}),
       score: {
         ...row.score,
-        deterministic_final_score: det,
-        final_score: display,
+        final_score: finalDecision.finalScore,
+        ai_status: finalDecision.finalScore == null ? "UNAVAILABLE" : "OK",
+        ai_confidence: conf,
+        ai_summary: ev.summary,
+        ai_risks: ev.risks,
       },
       explain: {
         ...row.explain,
-        deterministic_final_score: det,
         ai_score: aiScore,
         ai_breakdown: breakdown,
         ai_confidence: conf,
         ai_summary: ev.summary,
         ai_risks: ev.risks,
-        ai_blend_weight: w,
       },
     };
   });
 
   nextRanked.sort((a, b) => {
-    const d = b.score.final_score - a.score.final_score;
-    if (Math.abs(d) > SCORE_TIE_EPS) return d;
+    const af = a.score.final_score;
+    const bf = b.score.final_score;
+    if (af == null && bf == null) {
+      // fall through to tie-breakers
+    } else if (af == null) {
+      return 1;
+    } else if (bf == null) {
+      return -1;
+    } else {
+      const d = bf - af;
+      if (Math.abs(d) > SCORE_TIE_EPS) return d;
+    }
     const ar = a.meta?.skill_match_ratio ?? -1;
     const br = b.meta?.skill_match_ratio ?? -1;
     if (br !== ar) return br - ar;
@@ -236,6 +286,7 @@ export async function executeAiEvaluationsForItem(input: {
   const { item, requiredText, requiredSkillsList } = await loadRankingRequiredContextForItem(
     input.itemId,
   );
+  const rankingVersionId = await selectLatestRankingVersionIdForRequisitionItem(input.itemId);
   const job = buildJobEvaluationInput({
     item,
     requiredSkillsList,
@@ -374,6 +425,54 @@ export async function executeAiEvaluationsForItem(input: {
         confidence: llm.output.confidence,
         rawError: null,
       });
+
+      // Persist score for the ATS evaluation board (applications endpoint reads `candidate_job_scores` + `applications.ats_bucket`).
+      if (rankingVersionId != null) {
+        const reqSkills = requiredSkillsList
+          .map((s) => normalizeSkill(String(s)))
+          .filter(Boolean);
+        const candSkills = candidateInput.skills;
+        const reqSet = new Set(reqSkills);
+        const matchedRequiredSkillsCount = candSkills.filter((s) => reqSet.has(s)).length;
+
+        const finalDecision = computeFinalScore({
+          engine: "ai_only",
+          deterministicSubmode: "hybrid",
+          deterministicFinalScore: 0,
+          aiScore: llm.aiScore,
+          aiConfidence: llm.output.confidence,
+          aiCacheHit: true,
+          requiredSkillsCount: reqSkills.length,
+          matchedRequiredSkillsCount,
+          requiredExperienceYears: item.experienceYears ?? null,
+          candidateExperienceYears: candidateInput.experience_years,
+        });
+
+        const finalScore = finalDecision.finalScore;
+        await upsertCandidateJobScore({
+          candidateId: cid,
+          requisitionItemId: input.itemId,
+          rankingVersionId,
+          score: finalScore == null ? "0.00" : finalScore.toFixed(2),
+          breakdown: {
+            engine: { ranking_engine: "ai_only" },
+            final: finalScore,
+            ai: {
+              ai_score: llm.aiScore,
+              ai_confidence: llm.output.confidence,
+              flags: finalDecision.explainFlags,
+            },
+          },
+        });
+
+        await updateApplicationAtsBucketForCandidate({
+          organizationId: input.organizationId,
+          requisitionItemId: input.itemId,
+          candidateId: cid,
+          atsBucket: finalScore == null ? null : getAtsBucketFromFinalScore(finalScore),
+        });
+      }
+
       results.push({
         candidate_id: cid,
         status: "ok",

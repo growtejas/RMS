@@ -21,37 +21,68 @@ export function getCandidateActionErrorMessage(
   fallback: string,
 ): string {
   const ax = err as {
-    response?: { status?: number; data?: { detail?: string } };
+    response?: { status?: number; data?: { detail?: string; error?: string } };
   };
-  const detail = ax?.response?.data?.detail;
+  const body = ax?.response?.data;
+  const message =
+    typeof body?.error === "string"
+      ? body.error
+      : typeof body?.detail === "string"
+        ? body.detail
+        : undefined;
   if (ax?.response?.status === 403) {
-    return typeof detail === "string" && detail.trim().length > 0
-      ? detail
+    return typeof message === "string" && message.trim().length > 0
+      ? message
       : TA_OWNERSHIP_DENIED_MESSAGE;
   }
-  return typeof detail === "string" ? detail : fallback;
+  return typeof message === "string" ? message : fallback;
 }
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
+export interface InterviewPanelist {
+  id: number;
+  user_id: number | null;
+  display_name: string;
+  role_label: string | null;
+}
+
 export interface Interview {
   id: number;
   candidate_id: number;
+  requisition_item_id?: number | null;
   round_number: number;
-  interviewer_name: string;
+  round_name?: string | null;
+  round_type?: string | null;
+  interview_mode?: string | null;
+  interviewer_name?: string | null;
   scheduled_at: string;
-  status: "Scheduled" | "Completed" | "Cancelled";
-  result: "Pass" | "Fail" | "Hold" | null;
+  end_time?: string;
+  timezone?: string;
+  meeting_link?: string | null;
+  location?: string | null;
+  notes?: string | null;
+  status: string;
+  result: string | null;
   feedback: string | null;
   conducted_by: number | null;
+  created_by?: number | null;
+  updated_by?: number | null;
   created_at: string | null;
   updated_at: string | null;
+  panelists?: InterviewPanelist[];
   /** Present on list responses joined with candidates. */
   candidate_name?: string | null;
   candidate_email?: string | null;
 }
+
+type InterviewApiEnvelope<T> = {
+  success: boolean;
+  data: T | null;
+  error: string | null;
+};
 
 /** Present on GET /api/candidates/:id — local resume parser output / cache. */
 export interface ResumeParseRecord {
@@ -189,66 +220,39 @@ export interface RequisitionItemRankingCandidate {
     application_created_at_ms?: number;
   };
   score: {
-    keyword_score: number;
-    semantic_score: number;
-    business_score: number;
-    ats_v1_score?: number;
-    final_score: number;
-    deterministic_final_score?: number;
+    final_score: number | null;
+    ai_status: "OK" | "PENDING" | "UNAVAILABLE";
+    ai_confidence?: number;
+    ai_summary?: string;
+    ai_risks?: string[];
   };
   explain: {
     reasons: string[];
-    matched_terms: string[];
-    missing_terms: string[];
-    matched_skills?: string[];
-    missing_skills?: string[];
-    deterministic_final_score?: number;
+    // In strict ai_only responses, deterministic explain fields are omitted.
     ai_score?: number;
     ai_summary?: string;
     ai_risks?: string[];
     ai_confidence?: number;
-    ai_blend_weight?: number;
-    ranking_signals?: {
-      ats?: { experience_years?: number | null };
-    };
-    ats_v1?: {
-      skills?: number;
-      experience: number;
-      notice: number;
-      education?: number;
-      seniority?: number;
-      bonus?: number;
-      matched_skills?: number;
-      required_skills?: number;
-      partial_data: boolean;
-      flags?: string[];
-    };
   };
 }
 
 export interface RequisitionItemRankingResponse {
+  ranking_engine: "ai_only";
   requisition_item_id: number;
   req_id: number;
   ranking_version: string;
-  weights: {
-    keyword: number;
-    semantic: number;
-    business: number;
-  };
   generated_at: string;
   total_candidates: number;
   ranked_candidates: RequisitionItemRankingCandidate[];
   meta?: {
-    ranking_engine: string;
-    ats_v1_weight: number;
-    ranking_version_id: number;
-    required_skills_count?: number;
-    ai_eval_enriched?: boolean;
+    ranking_engine: "ai_only";
+    ai_eval_enriched: boolean;
   };
 }
 
 /** GET /api/ranking/requisition-items/{itemId}/job-requirements */
 export interface RankingJobRequirementsResponse {
+  ranking_engine: "ai_only";
   requisition_item_id: number;
   req_id: number;
   jd_narrative: {
@@ -273,10 +277,7 @@ export interface RankingJobRequirementsResponse {
     job_education_requirement: string | null;
   };
   scoring_config: {
-    ranking_engine: string;
-    ats_v1_hybrid_weight: number;
-    phase5_weights: RequisitionItemRankingResponse["weights"];
-    allow_empty_required_skills_env: boolean;
+    ranking_engine: "ai_only";
   };
   item_snapshot: {
     role_position: string;
@@ -296,21 +297,24 @@ export interface RankingJobRequirementsResponse {
 
 /** GET /api/ranking/requisition-items/{itemId}/candidates/{candidateId}/scoring-details */
 export interface CandidateScoringDetailsResponse {
+  ranking_engine: "ai_only";
   requisition_item_id: number;
   req_id: number;
   candidate_id: number;
   full_name: string;
   email: string;
   current_stage: string;
-  meta?: RequisitionItemRankingCandidate["meta"];
   generated_at: string;
   ranking_version: string;
-  weights: RequisitionItemRankingResponse["weights"];
   total_candidates: number;
-  ranking_meta?: RequisitionItemRankingResponse["meta"];
   score: RequisitionItemRankingCandidate["score"];
   explain: RequisitionItemRankingCandidate["explain"];
   job_requirements: RankingJobRequirementsResponse;
+  flags?: string[];
+  meta?: RequisitionItemRankingCandidate["meta"] & {
+    ranking_engine?: "ai_only";
+    ai_eval_enriched?: boolean;
+  };
 }
 
 export interface CandidateCreate {
@@ -333,12 +337,44 @@ export interface InterviewCreate {
   scheduled_at: string; // ISO datetime
 }
 
+export interface InterviewCreateV2 {
+  candidate_id: number;
+  requisition_item_id: number;
+  round_name: string;
+  round_type: "TECHNICAL" | "HR" | "MANAGERIAL";
+  interview_mode: "ONLINE" | "OFFLINE";
+  scheduled_at: string;
+  end_time: string;
+  timezone: string;
+  interviewer_ids: number[];
+  meeting_link?: string | null;
+  location?: string | null;
+  notes?: string | null;
+}
+
+export type InterviewCreatePayload = InterviewCreate | InterviewCreateV2;
+
 export interface InterviewUpdate {
   interviewer_name?: string;
   scheduled_at?: string;
-  status?: "Scheduled" | "Completed" | "Cancelled";
-  result?: "Pass" | "Fail" | "Hold";
-  feedback?: string;
+  end_time?: string;
+  timezone?: string;
+  meeting_link?: string | null;
+  location?: string | null;
+  notes?: string | null;
+  round_name?: string | null;
+  round_type?: InterviewCreateV2["round_type"];
+  interview_mode?: InterviewCreateV2["interview_mode"];
+  interviewer_ids?: number[];
+  status?: string;
+  result?: string | null;
+  feedback?: string | null;
+  reschedule_reason?: string;
+}
+
+export interface InterviewMutationResult {
+  interview: Interview;
+  warnings: string[];
 }
 
 export interface CandidateStageUpdate {
@@ -705,32 +741,49 @@ export async function fetchInterviews(filters: {
   if (filters.requisitionId != null) {
     params.requisitionId = filters.requisitionId;
   }
-  const { data } = await apiClient.get<Interview[]>("/interviews/", {
+  const { data } = await apiClient.get<
+    InterviewApiEnvelope<{ interviews: Interview[] }>
+  >("/interviews/", {
     params,
   });
-  return data;
+  if (!data.success || !data.data) {
+    throw new Error(data.error ?? "Failed to load interviews");
+  }
+  return data.data.interviews;
 }
 
 export async function createInterview(
-  payload: InterviewCreate,
-): Promise<Interview> {
-  const { data } = await apiClient.post<Interview>("/interviews/", payload);
-  return data;
+  payload: InterviewCreatePayload,
+): Promise<InterviewMutationResult> {
+  const { data } = await apiClient.post<
+    InterviewApiEnvelope<InterviewMutationResult>
+  >("/interviews/", payload);
+  if (!data.success || !data.data) {
+    throw new Error(data.error ?? "Failed to create interview");
+  }
+  return data.data;
 }
 
 export async function updateInterview(
   interviewId: number,
   payload: InterviewUpdate,
-): Promise<Interview> {
-  const { data } = await apiClient.patch<Interview>(
-    `/interviews/${interviewId}`,
-    payload,
-  );
-  return data;
+): Promise<InterviewMutationResult> {
+  const { data } = await apiClient.patch<
+    InterviewApiEnvelope<InterviewMutationResult>
+  >(`/interviews/${interviewId}`, payload);
+  if (!data.success || !data.data) {
+    throw new Error(data.error ?? "Failed to update interview");
+  }
+  return data.data;
 }
 
 export async function deleteInterview(interviewId: number): Promise<void> {
-  await apiClient.delete(`/interviews/${interviewId}`);
+  const { data } = await apiClient.delete<
+    InterviewApiEnvelope<{ deleted: boolean }>
+  >(`/interviews/${interviewId}`);
+  if (!data.success) {
+    throw new Error(data.error ?? "Failed to delete interview");
+  }
 }
 
 // ============================================================================

@@ -27,6 +27,7 @@ import {
 } from "@/lib/services/resume-parse-cache";
 import { parseResumeArtifact } from "@/lib/services/resume-parser-service";
 import { enqueueResumeStructureRefineJob } from "@/lib/queue/resume-structure-queue";
+import { enqueueAiEvaluationJob } from "@/lib/queue/ai-evaluation-queue";
 import { mergeStructuredProfileForPersist } from "@/lib/services/resume-structure/merge-candidate-profile";
 import { buildResumeStructureIssueTags } from "@/lib/services/resume-structure/resume-structure-audit";
 import { parseResumeStructuredDocument } from "@/lib/services/resume-structure/resume-structure.schema";
@@ -52,15 +53,27 @@ function interviewToJson(row: repo.InterviewRow) {
   return {
     id: row.id,
     candidate_id: row.candidateId,
+    requisition_item_id: row.requisitionItemId ?? null,
     round_number: row.roundNumber,
-    interviewer_name: row.interviewerName,
+    round_name: row.roundName ?? null,
+    round_type: row.roundType ?? null,
+    interview_mode: row.interviewMode ?? null,
+    interviewer_name: row.interviewerName ?? null,
     scheduled_at: row.scheduledAt.toISOString(),
+    end_time: row.endTime.toISOString(),
+    timezone: row.timezone,
+    meeting_link: row.meetingLink ?? null,
+    location: row.location ?? null,
+    notes: row.notes ?? null,
     status: row.status,
     result: row.result ?? null,
     feedback: row.feedback ?? null,
     conducted_by: row.conductedBy ?? null,
+    created_by: row.createdBy ?? null,
+    updated_by: row.updatedBy ?? null,
     created_at: row.createdAt?.toISOString() ?? null,
     updated_at: row.updatedAt?.toISOString() ?? null,
+    panelists: [],
   };
 }
 
@@ -449,37 +462,57 @@ export async function createCandidateJson(
         `A candidate with this email already exists for this job (candidate_id=${existingLine})`,
       );
     }
-    const [row] = await tx
-      .insert(candidates)
-      .values({
-        organizationId: user.organizationId,
-        personId,
-        requisitionItemId: payload.requisition_item_id,
-        requisitionId: payload.requisition_id,
-        fullName: payload.full_name,
-        email: payload.email,
-        phone: payload.phone ?? null,
-        resumePath: payload.resume_path ?? null,
-        totalExperienceYears: mergedCreate.totalExperienceYears,
-        noticePeriodDays: mergedCreate.noticePeriodDays,
-        isReferral: payload.is_referral === true,
-        candidateSkills: mergedCreate.candidateSkills,
-        educationRaw: mergedCreate.educationRaw,
-        resumeContentHash: preResume?.hash ?? null,
-        resumeParseCache: preResume
-          ? ({ ...preResume.cache } as Record<string, unknown>)
-          : null,
-        ...(resolveResumeStructureEnabled()
-          ? {
-              resumeStructuredProfile: structuredProfileInsert,
-              resumeStructureStatus: structuredStatusInsert,
-            }
-          : {}),
-        duplicateResumeOfCandidateId: preResume?.dupId ?? null,
-        currentStage: "Sourced",
-        addedBy: user.userId,
-      })
-      .returning();
+    let row: (typeof candidates.$inferSelect) | undefined;
+    try {
+      [row] = await tx
+        .insert(candidates)
+        .values({
+          organizationId: user.organizationId,
+          personId,
+          requisitionItemId: payload.requisition_item_id,
+          requisitionId: payload.requisition_id,
+          fullName: payload.full_name,
+          email: payload.email,
+          phone: payload.phone ?? null,
+          resumePath: payload.resume_path ?? null,
+          totalExperienceYears: mergedCreate.totalExperienceYears,
+          noticePeriodDays: mergedCreate.noticePeriodDays,
+          isReferral: payload.is_referral === true,
+          candidateSkills: mergedCreate.candidateSkills,
+          educationRaw: mergedCreate.educationRaw,
+          resumeContentHash: preResume?.hash ?? null,
+          resumeParseCache: preResume
+            ? ({ ...preResume.cache } as Record<string, unknown>)
+            : null,
+          ...(resolveResumeStructureEnabled()
+            ? {
+                resumeStructuredProfile: structuredProfileInsert,
+                resumeStructureStatus: structuredStatusInsert,
+              }
+            : {}),
+          duplicateResumeOfCandidateId: preResume?.dupId ?? null,
+          currentStage: "Sourced",
+          addedBy: user.userId,
+        })
+        .returning();
+    } catch (e: unknown) {
+      const err = e as { code?: unknown; constraint?: unknown; cause?: unknown };
+      const cause = err?.cause as { code?: unknown; constraint?: unknown; cause?: unknown } | undefined;
+      const nested = (cause?.cause as { code?: unknown; constraint?: unknown } | undefined) ?? undefined;
+      const code =
+        (err?.code ?? cause?.code ?? nested?.code) != null
+          ? String(err.code ?? cause?.code ?? nested?.code)
+          : "";
+
+      // Postgres unique_violation (most commonly double-submit / same email on same job line).
+      if (code === "23505") {
+        throw new HttpError(
+          409,
+          "Candidate already exists for this job (duplicate submit). Refresh and search the candidate list.",
+        );
+      }
+      throw e;
+    }
     if (!row) {
       throw new HttpError(500, "Candidate create failed");
     }
@@ -524,6 +557,15 @@ export async function createCandidateJson(
       } catch {
         /* optional redis */
       }
+    }
+    try {
+      await enqueueAiEvaluationJob({
+        organizationId: user.organizationId,
+        itemId: row.requisitionItemId,
+        candidateId: row.candidateId,
+      });
+    } catch {
+      /* optional redis */
     }
     return candidateToJson(row, []);
   });
@@ -581,6 +623,15 @@ export async function patchCandidateJson(
       candidateSkills: row.candidateSkills ?? null,
     }),
   });
+  try {
+    await enqueueAiEvaluationJob({
+      organizationId: user.organizationId,
+      itemId: row.requisitionItemId,
+      candidateId: row.candidateId,
+    });
+  } catch {
+    /* optional redis */
+  }
   const ivs = await repo.selectInterviewsForCandidate(candidateId);
   return candidateToJson(row, ivs);
 }

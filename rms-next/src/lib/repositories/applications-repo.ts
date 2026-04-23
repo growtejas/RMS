@@ -156,3 +156,22 @@ export async function replaceApplicationAtsBucketsForRequisitionItem(params: {
     }
   });
 }
+
+export async function updateApplicationAtsBucketForCandidate(params: {
+  organizationId: string;
+  requisitionItemId: number;
+  candidateId: number;
+  atsBucket: AtsBucket | null;
+}): Promise<void> {
+  const db = getDb();
+  await db
+    .update(applications)
+    .set({ atsBucket: params.atsBucket, updatedAt: new Date() })
+    .where(
+      and(
+        eq(applications.organizationId, params.organizationId),
+        eq(applications.requisitionItemId, params.requisitionItemId),
+        eq(applications.candidateId, params.candidateId),
+      ),
+    );
+}

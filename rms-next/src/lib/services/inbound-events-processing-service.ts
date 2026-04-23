@@ -35,6 +35,7 @@ import * as candidatesRepo from "@/lib/repositories/candidates-repo";
 import { findOrCreatePersonTx } from "@/lib/repositories/candidate-persons-repo";
 import { ensureApplicationForCandidateTx } from "@/lib/services/application-sync-service";
 import { enqueueResumeStructureRefineJob } from "@/lib/queue/resume-structure-queue";
+import { enqueueAiEvaluationJob } from "@/lib/queue/ai-evaluation-queue";
 import { mergeStructuredProfileForPersist } from "@/lib/services/resume-structure/merge-candidate-profile";
 import {
   resolveResumeStructureEnabled,
@@ -744,6 +745,18 @@ export async function persistInboundEvent(params: {
         candidate_id: enqueueStructureRefineCandidateId,
         error: e instanceof Error ? e.message : String(e),
       });
+    }
+  }
+
+  if (enqueueStructureRefineCandidateId != null) {
+    try {
+      await enqueueAiEvaluationJob({
+        organizationId: meta.organizationId,
+        itemId,
+        candidateId: enqueueStructureRefineCandidateId,
+      });
+    } catch {
+      /* optional redis */
     }
   }
 

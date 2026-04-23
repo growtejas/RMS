@@ -158,21 +158,18 @@ export function buildCandidateRankingSignals(input: {
 
   let experience_years: number | null = null;
   let experience_source: SignalFieldSource = "none";
-  if (rankingUsable && struct?.experience_years != null) {
+  // Strict normalization priority for AI + scoring inputs:
+  // DB > structured profile > parser (never send conflicting values).
+  const dbExp = dbExperienceYears(input.candidate.totalExperienceYears);
+  if (dbExp != null) {
+    experience_years = dbExp;
+    experience_source = "db";
+  } else if (struct?.experience_years != null) {
     experience_years = struct.experience_years;
     experience_source = "structured";
-  } else {
-    const dbExp = dbExperienceYears(input.candidate.totalExperienceYears);
-    if (dbExp != null) {
-      experience_years = dbExp;
-      experience_source = "db";
-    } else if (struct?.experience_years != null) {
-      experience_years = struct.experience_years;
-      experience_source = "structured";
-    } else if (p.experience_years != null) {
-      experience_years = p.experience_years;
-      experience_source = "parser";
-    }
+  } else if (p.experience_years != null) {
+    experience_years = p.experience_years;
+    experience_source = "parser";
   }
 
   const dbNotice = input.candidate.noticePeriodDays;

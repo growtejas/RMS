@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   integer,
@@ -671,7 +672,7 @@ export const resumeParseArtifacts = pgTable(
   ],
 );
 
-/** `backend/db/models/interview.py` */
+/** `backend/db/models/interview.py` — extended for scheduling v2 (see drizzle/0019). */
 export const interviews = pgTable(
   "interviews",
   {
@@ -679,19 +680,63 @@ export const interviews = pgTable(
     candidateId: integer("candidate_id")
       .notNull()
       .references(() => candidates.candidateId, { onDelete: "cascade" }),
+    requisitionItemId: integer("requisition_item_id").references(
+      () => requisitionItems.itemId,
+      { onDelete: "cascade" },
+    ),
     roundNumber: integer("round_number").notNull(),
-    interviewerName: varchar("interviewer_name", { length: 150 }).notNull(),
+    roundName: varchar("round_name", { length: 100 }),
+    roundType: varchar("round_type", { length: 50 }),
+    interviewMode: varchar("interview_mode", { length: 20 }),
+    /** Legacy single-string interviewer; v2 uses `interview_panelists`. */
+    interviewerName: varchar("interviewer_name", { length: 150 }),
     scheduledAt: timestamp("scheduled_at", { mode: "date" }).notNull(),
-    status: varchar("status", { length: 20 }).notNull().default("Scheduled"),
+    endTime: timestamp("end_time", { mode: "date" }).notNull(),
+    timezone: varchar("timezone", { length: 50 }).notNull().default("UTC"),
+    meetingLink: text("meeting_link"),
+    location: text("location"),
+    notes: text("notes"),
+    status: varchar("status", { length: 20 }).notNull().default("SCHEDULED"),
     result: varchar("result", { length: 20 }),
     feedback: text("feedback"),
     conductedBy: integer("conducted_by").references(() => users.userId, {
       onDelete: "set null",
     }),
+    createdBy: integer("created_by").references(() => users.userId, {
+      onDelete: "set null",
+    }),
+    updatedBy: integer("updated_by").references(() => users.userId, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow(),
   },
-  (t) => [index("idx_interviews_candidate_round").on(t.candidateId, t.roundNumber)],
+  (t) => [
+    index("idx_interviews_candidate_round").on(t.candidateId, t.roundNumber),
+    index("idx_interviews_sched_end").on(t.scheduledAt, t.endTime),
+    index("idx_interviews_req_item_sched").on(t.requisitionItemId, t.scheduledAt),
+  ],
+);
+
+/** Audit log when an interview is rescheduled. */
+export const interviewReschedules = pgTable(
+  "interview_reschedules",
+  {
+    id: serial("id").primaryKey(),
+    interviewId: integer("interview_id")
+      .notNull()
+      .references(() => interviews.id, { onDelete: "cascade" }),
+    oldScheduledAt: timestamp("old_scheduled_at", { mode: "date" }),
+    newScheduledAt: timestamp("new_scheduled_at", { mode: "date" }),
+    oldEndTime: timestamp("old_end_time", { mode: "date" }),
+    newEndTime: timestamp("new_end_time", { mode: "date" }),
+    changedBy: integer("changed_by").references(() => users.userId, {
+      onDelete: "set null",
+    }),
+    reason: text("reason"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [index("idx_interview_reschedules_interview").on(t.interviewId)],
 );
 
 /** Configurable pipeline stage labels per org (requisition_item / application stages). */
@@ -745,7 +790,12 @@ export const interviewPanelists = pgTable(
     roleLabel: varchar("role_label", { length: 80 }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow(),
   },
-  (t) => [index("idx_interview_panelists_interview").on(t.interviewId)],
+  (t) => [
+    index("idx_interview_panelists_interview").on(t.interviewId),
+    uniqueIndex("uq_interview_panelists_interview_user")
+      .on(t.interviewId, t.userId)
+      .where(sql`${t.userId} IS NOT NULL`),
+  ],
 );
 
 export const interviewScorecards = pgTable(

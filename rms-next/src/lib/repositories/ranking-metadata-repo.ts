@@ -78,6 +78,35 @@ export async function insertCandidateJobScoresBatch(
   );
 }
 
+export async function upsertCandidateJobScore(params: {
+  candidateId: number;
+  requisitionItemId: number;
+  rankingVersionId: number;
+  score: string;
+  breakdown: Record<string, unknown>;
+}): Promise<void> {
+  const db = getDb();
+  const now = new Date();
+  await db
+    .insert(candidateJobScores)
+    .values({
+      candidateId: params.candidateId,
+      requisitionItemId: params.requisitionItemId,
+      rankingVersionId: params.rankingVersionId,
+      score: params.score,
+      breakdown: params.breakdown,
+      computedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [candidateJobScores.candidateId, candidateJobScores.rankingVersionId],
+      set: {
+        score: params.score,
+        breakdown: params.breakdown,
+        computedAt: now,
+      },
+    });
+}
+
 /** Latest version row for an item (highest `version_number`). */
 export async function selectLatestRankingVersionIdForRequisitionItem(
   itemId: number,

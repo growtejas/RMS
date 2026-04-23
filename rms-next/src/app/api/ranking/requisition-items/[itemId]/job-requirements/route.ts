@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
 import { getRankingJobRequirementsForItem } from "@/lib/services/ranking-service";
+import { resolveRankingEngine } from "@/lib/services/scoring/ranking-engine";
 import { assertRequisitionItemInOrganization } from "@/lib/tenant/org-assert";
 
 export const runtime = "nodejs";
@@ -43,8 +44,29 @@ export async function GET(req: Request, { params }: Ctx) {
 
     await assertRequisitionItemInOrganization(itemId, user.organizationId);
 
+    const engine = resolveRankingEngine();
+    if (engine.engine !== "ai_only") {
+      return NextResponse.json(
+        {
+          detail: `Ranking engine misconfigured: expected ai_only, got ${engine.engine} (env RANKING_ENGINE=${process.env.RANKING_ENGINE ?? ""})`,
+        },
+        { status: 500 },
+      );
+    }
+
     const data = await getRankingJobRequirementsForItem(itemId);
-    return NextResponse.json(data);
+    return NextResponse.json({
+      ranking_engine: "ai_only",
+      requisition_item_id: data.requisition_item_id,
+      req_id: data.req_id,
+      jd_narrative: data.jd_narrative,
+      composite_scoring_text: data.composite_scoring_text,
+      required_skills: data.required_skills,
+      ats_job_profile: data.ats_job_profile,
+      scoring_config: { ranking_engine: "ai_only" },
+      item_snapshot: data.item_snapshot,
+      control: data.control,
+    });
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/ranking/requisition-items/[itemId]/job-requirements]");
   }

@@ -42,7 +42,7 @@ import {
   RefreshCw,
   Eye,
 } from "lucide-react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { apiClient } from "@/lib/api/client";
 import { getUsersListCached } from "@/lib/api/users-list-cache";
 import { useAuth } from "@/contexts/useAuth";
@@ -83,8 +83,8 @@ import {
   type RequisitionItemRankingCandidate,
   type RequisitionItemRankingResponse,
 } from "@/lib/api/candidateApi";
-import CandidateDetailModal from "@/components/shared/CandidateDetailModal";
-import type { EvaluationCardContext } from "@/components/evaluation/mapRankedCandidateToEvaluationCard";
+import { InterviewStatusBadge } from "@/components/interviews/InterviewStatusBadge";
+import { interviewUi } from "@/components/interviews/interview-ui-theme";
 import "../../styles/hr/hr-dashboard.css";
 
 interface RequisitionDetailsProps {
@@ -274,6 +274,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const params = useParams();
   const id = params?.id as string | undefined;
   const router = useRouter();
+  const pathname = usePathname();
   const { user } = useAuth();
   const effectiveTicketId = requisitionId ?? id;
   const getTodayDate = () =>
@@ -355,9 +356,6 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   // ---- Candidate Pipeline state ----
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
-  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(
-    null,
-  );
   const [showAddCandidate, setShowAddCandidate] = useState(false);
   const [addCandidateItemId, setAddCandidateItemId] = useState<number | null>(
     null,
@@ -376,11 +374,10 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [candidateItemFilter, setCandidateItemFilter] = useState<
     number | "all"
   >("all");
-  const [modalPipelineWorkspace, setModalPipelineWorkspace] = useState<
-    "evaluate" | "execute"
-  >("execute");
   const [atsBoardItemId, setAtsBoardItemId] = useState<number | null>(null);
   const [atsBoardLoading, setAtsBoardLoading] = useState(false);
+  const [atsBoardRanking, setAtsBoardRanking] =
+    useState<RequisitionItemRankingResponse | null>(null);
   const [reqInterviews, setReqInterviews] = useState<Interview[]>([]);
   const [reqInterviewsLoading, setReqInterviewsLoading] = useState(false);
   const [shortlistBulkAppIds, setShortlistBulkAppIds] = useState<number[]>([]);
@@ -447,10 +444,17 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
 
   const openCandidateModal = useCallback(
     (c: Candidate, workspace: "evaluate" | "execute") => {
-      setModalPipelineWorkspace(workspace);
-      setSelectedCandidate(c);
+      const q = new URLSearchParams();
+      if (c.application_id != null) {
+        q.set("application_id", String(c.application_id));
+      }
+      q.set("workspace", workspace);
+      if (pathname) {
+        q.set("returnTo", pathname);
+      }
+      router.push(`/ta/candidates/${c.candidate_id}?${q.toString()}`);
     },
-    [],
+    [router, pathname],
   );
 
   const pipelineCountByStage = useMemo(() => {
@@ -477,6 +481,25 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const rankingItemId = useMemo(() => {
     return atsBoardItemId ?? ticket?.items?.[0]?.numericItemId ?? null;
   }, [atsBoardItemId, ticket?.items]);
+
+  const atsBoardScoreByCandidateId = useMemo(() => {
+    const m = new Map<
+      number,
+      {
+        final_score: number | null;
+        ai_status: "OK" | "PENDING" | "UNAVAILABLE";
+        ai_summary?: string;
+      }
+    >();
+    for (const rc of atsBoardRanking?.ranked_candidates ?? []) {
+      m.set(rc.candidate_id, {
+        final_score: rc.score.final_score,
+        ai_status: rc.score.ai_status,
+        ai_summary: rc.score.ai_summary,
+      });
+    }
+    return m;
+  }, [atsBoardRanking]);
 
   const candidateFromApplicationRecord = useCallback(
     (app: ApplicationRecord): Candidate => ({
@@ -950,36 +973,6 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     [loadRanking, rankingItemId],
   );
 
-  const modalEvaluationProps = useMemo(() => {
-    if (!selectedCandidate || !ticket) {
-      return {
-        evaluationContext: undefined as EvaluationCardContext | undefined,
-        evaluationShortlistBlocked: false,
-        evaluationShortlistBlockedReason: undefined as string | undefined,
-      };
-    }
-    const item = ticket.items.find(
-      (i) => i.numericItemId === selectedCandidate.requisition_item_id,
-    );
-    const skillsCount =
-      rankingData?.meta?.required_skills_count ??
-      (item?.rankingRequiredSkills?.length
-        ? item.rankingRequiredSkills.length
-        : undefined);
-    const evaluationContext: EvaluationCardContext = {
-      requiredExperienceYears: item?.experience ?? null,
-      requiredSkillsCount: skillsCount,
-    };
-    const evaluationShortlistBlocked = Boolean(item && !item.cvFileUrl);
-    return {
-      evaluationContext,
-      evaluationShortlistBlocked,
-      evaluationShortlistBlockedReason: evaluationShortlistBlocked
-        ? "CV must be on file for this position before shortlisting"
-        : undefined,
-    };
-  }, [selectedCandidate, ticket, rankingData]);
-
   const refetchRequisition = useCallback(async () => {
     const reqId = parseReqId(effectiveTicketId);
     if (!reqId) return;
@@ -1126,12 +1119,21 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     }
     let cancelled = false;
     setAtsBoardLoading(true);
-    void fetchApplicationsAtsBuckets(atsBoardItemId)
-      .then((ab) => {
-        if (!cancelled) setAtsBucketsData(ab);
+    void Promise.all([
+      fetchRequisitionItemRanking(atsBoardItemId),
+      fetchApplicationsAtsBuckets(atsBoardItemId),
+    ])
+      .then(([ranking, ab]) => {
+        if (!cancelled) {
+          setAtsBoardRanking(ranking);
+          setAtsBucketsData(ab);
+        }
       })
       .catch(() => {
-        if (!cancelled) setAtsBucketsData(null);
+        if (!cancelled) {
+          setAtsBoardRanking(null);
+          setAtsBucketsData(null);
+        }
       })
       .finally(() => {
         if (!cancelled) setAtsBoardLoading(false);
@@ -1140,6 +1142,67 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       cancelled = true;
     };
   }, [activeTab, atsBoardItemId]);
+
+  useEffect(() => {
+    if (activeTab !== "ats" || atsBoardItemId == null) {
+      return;
+    }
+    const itemId = atsBoardItemId;
+    // Non-blocking polling: keep refreshing ranking while any score is still pending.
+    if (!atsBucketsData) {
+      return;
+    }
+    const candidateIdsInBoard = new Set<number>();
+    for (const b of ["BEST", "VERY_GOOD", "GOOD", "AVERAGE", "NOT_SUITABLE", "UNRANKED"] as const) {
+      for (const app of atsBucketsData[b] ?? []) {
+        candidateIdsInBoard.add(app.candidate_id);
+      }
+    }
+    const hasPending = Array.from(candidateIdsInBoard).some((cid) => {
+      const s = atsBoardScoreByCandidateId.get(cid);
+      return !s || s.ai_status !== "OK" || s.final_score == null;
+    });
+    if (!hasPending) {
+      return;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 12;
+    const intervalMs = 4000;
+
+    async function tick() {
+      if (cancelled) return;
+      attempts += 1;
+      try {
+        const ranking = await fetchRequisitionItemRanking(itemId);
+        if (!cancelled) {
+          setAtsBoardRanking(ranking);
+        }
+      } catch {
+        // ignore transient errors; keep polling within budget
+      }
+      if (cancelled) return;
+      if (attempts >= maxAttempts) return;
+
+      const stillPending = Array.from(candidateIdsInBoard).some((cid) => {
+        const s = atsBoardScoreByCandidateId.get(cid);
+        return !s || s.ai_status !== "OK" || s.final_score == null;
+      });
+      if (!stillPending) return;
+      setTimeout(tick, intervalMs);
+    }
+
+    setTimeout(tick, intervalMs);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTab,
+    atsBoardItemId,
+    atsBucketsData,
+    atsBoardScoreByCandidateId,
+  ]);
 
   useEffect(() => {
     const reqId = parseReqId(effectiveTicketId);
@@ -1301,7 +1364,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       let resumePath: string | undefined;
       if (resumeFile) {
         const uploaded = await uploadResume(resumeFile);
-        resumePath = uploaded.filename;
+        resumePath = uploaded.file_url;
       }
       const reqId = parseReqId(effectiveTicketId);
       if (!reqId) return;
@@ -4114,11 +4177,39 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                                   <span style={{ fontWeight: 600 }}>
                                     {app.candidate.full_name}
                                   </span>
-                                  {app.ranking?.final_score != null ? (
-                                    <span style={{ fontWeight: 700, fontSize: "11px" }}>
-                                      {Math.round(app.ranking.final_score)}
-                                    </span>
-                                  ) : null}
+                                  {(() => {
+                                    const s = atsBoardScoreByCandidateId.get(app.candidate_id);
+                                    const status = s?.ai_status ?? "PENDING";
+                                    const score = s?.final_score ?? null;
+                                    return (
+                                      <span
+                                        style={{
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          gap: "6px",
+                                          fontWeight: 700,
+                                          fontSize: "11px",
+                                        }}
+                                      >
+                                        <span>
+                                          {status === "OK" && score != null
+                                            ? Math.round(score)
+                                            : "—"}
+                                        </span>
+                                        {status !== "OK" ? (
+                                          <span
+                                            style={{
+                                              fontWeight: 600,
+                                              fontSize: "10px",
+                                              color: "var(--text-tertiary)",
+                                            }}
+                                          >
+                                            {status}
+                                          </span>
+                                        ) : null}
+                                      </span>
+                                    );
+                                  })()}
                                 </div>
                                 {snippet ? (
                                   <div
@@ -4758,7 +4849,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                             #{idx + 1} {rc.full_name}
                           </div>
                           <div style={{ fontSize: "13px", fontWeight: 700 }}>
-                            {Math.round(rc.score.final_score)}
+                            {rc.score.final_score == null
+                              ? "—"
+                              : Math.round(rc.score.final_score)}
                           </div>
                         </div>
                         <div
@@ -5355,17 +5448,21 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         )}
 
         {activeTab === "interviews" && (
-          <div style={{ marginTop: "8px" }}>
+          <div style={{ marginTop: "8px", fontFamily: interviewUi.fontSans }}>
             <div
               style={{
                 display: "flex",
                 flexWrap: "wrap",
                 gap: "12px",
                 alignItems: "center",
-                marginBottom: "14px",
+                marginBottom: "16px",
+                padding: "12px 14px",
+                borderRadius: interviewUi.radiusMd,
+                border: `1px solid ${interviewUi.border}`,
+                backgroundColor: interviewUi.surface,
               }}
             >
-              <label style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+              <label style={{ fontSize: "12px", color: interviewUi.textMuted }}>
                 Position:
               </label>
               <select
@@ -5377,10 +5474,11 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 }
                 style={{
                   padding: "6px 12px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--border-subtle)",
+                  borderRadius: interviewUi.radiusSm,
+                  border: `1px solid ${interviewUi.border}`,
                   fontSize: "12px",
-                  backgroundColor: "var(--bg-primary)",
+                  backgroundColor: interviewUi.bg,
+                  color: interviewUi.text,
                 }}
               >
                 <option value="all">All positions</option>
@@ -5395,52 +5493,76 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
             <div
               style={{
                 marginBottom: "24px",
-                padding: "14px",
-                borderRadius: "12px",
-                border: "1px solid var(--border-subtle)",
-                backgroundColor: "var(--bg-secondary)",
+                padding: "16px",
+                borderRadius: interviewUi.radiusLg,
+                border: `1px solid ${interviewUi.border}`,
+                backgroundColor: interviewUi.surface,
+                boxShadow: interviewUi.shadow,
               }}
             >
-              <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "6px" }}>
+              <div
+                style={{
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  marginBottom: "6px",
+                  color: interviewUi.text,
+                }}
+              >
                 Candidates in Interviewing stage
               </div>
               <p
                 style={{
                   fontSize: "11px",
-                  color: "var(--text-tertiary)",
+                  color: interviewUi.textMuted,
                   marginTop: 0,
                   marginBottom: "12px",
                   lineHeight: 1.45,
                 }}
               >
-                Pipeline stage <strong>Interviewing</strong> is separate from calendar rounds.
-                Use <strong>Schedule interview</strong> to add a round (or <strong>
-                Profile</strong> for the full hiring view).
+                Pipeline stage <strong style={{ color: interviewUi.text }}>Interviewing</strong>{" "}
+                is separate from calendar rounds. Use{" "}
+                <strong style={{ color: interviewUi.text }}>Schedule interview</strong> to add a
+                round (or <strong style={{ color: interviewUi.text }}>Profile</strong> for the
+                full hiring view).
               </p>
               {candidatesLoading ? (
-                <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                <div style={{ fontSize: "12px", color: interviewUi.textSubtle }}>
                   Loading…
                 </div>
               ) : interviewingCandidatesForTable.length === 0 ? (
-                <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                  No candidates in Interviewing for this filter. Move someone from
-                  Shortlisted or open a profile to change stage.
+                <div style={{ fontSize: "12px", color: interviewUi.textSubtle }}>
+                  No candidates in Interviewing for this filter. Move someone from Shortlisted or
+                  open a profile to change stage.
                 </div>
               ) : (
-                <div style={{ overflowX: "auto" }}>
+                <div
+                  style={{
+                    overflowX: "auto",
+                    borderRadius: interviewUi.radiusMd,
+                    border: `1px solid ${interviewUi.border}`,
+                    overflow: "hidden",
+                  }}
+                >
                   <table
                     style={{
                       width: "100%",
                       borderCollapse: "collapse",
                       fontSize: "12px",
+                      color: interviewUi.text,
                     }}
                   >
                     <thead>
-                      <tr style={{ textAlign: "left", color: "var(--text-tertiary)" }}>
+                      <tr
+                        style={{
+                          textAlign: "left",
+                          color: interviewUi.textSubtle,
+                          backgroundColor: interviewUi.surfaceElevated,
+                        }}
+                      >
                         <th
                           style={{
                             padding: "8px 10px",
-                            borderBottom: "1px solid var(--border-subtle)",
+                            borderBottom: `1px solid ${interviewUi.border}`,
                           }}
                         >
                           Name
@@ -5448,7 +5570,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                         <th
                           style={{
                             padding: "8px 10px",
-                            borderBottom: "1px solid var(--border-subtle)",
+                            borderBottom: `1px solid ${interviewUi.border}`,
                           }}
                         >
                           Email
@@ -5456,7 +5578,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                         <th
                           style={{
                             padding: "8px 10px",
-                            borderBottom: "1px solid var(--border-subtle)",
+                            borderBottom: `1px solid ${interviewUi.border}`,
                           }}
                         >
                           Position
@@ -5464,7 +5586,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                         <th
                           style={{
                             padding: "8px 10px",
-                            borderBottom: "1px solid var(--border-subtle)",
+                            borderBottom: `1px solid ${interviewUi.border}`,
                           }}
                         >
                           Stage
@@ -5472,7 +5594,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                         <th
                           style={{
                             padding: "8px 10px",
-                            borderBottom: "1px solid var(--border-subtle)",
+                            borderBottom: `1px solid ${interviewUi.border}`,
                           }}
                         >
                           Actions
@@ -5486,19 +5608,22 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                             sensitivity: "base",
                           }),
                         )
-                        .map((c) => {
+                        .map((c, rowIdx) => {
                           const linkedItem = ticket.items.find(
                             (it) => it.numericItemId === c.requisition_item_id,
                           );
                           return (
                             <tr
                               key={`int-pipeline-${c.application_id ?? c.candidate_id}-${c.requisition_item_id}`}
-                              style={{ backgroundColor: "var(--bg-primary)" }}
+                              style={{
+                                backgroundColor:
+                                  rowIdx % 2 === 0 ? interviewUi.surface : interviewUi.bg,
+                              }}
                             >
                               <td
                                 style={{
                                   padding: "10px",
-                                  borderBottom: "1px solid var(--border-subtle)",
+                                  borderBottom: `1px solid ${interviewUi.border}`,
                                   fontWeight: 600,
                                 }}
                               >
@@ -5507,8 +5632,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                               <td
                                 style={{
                                   padding: "10px",
-                                  borderBottom: "1px solid var(--border-subtle)",
-                                  color: "var(--text-secondary)",
+                                  borderBottom: `1px solid ${interviewUi.border}`,
+                                  color: interviewUi.textMuted,
                                 }}
                               >
                                 {c.email}
@@ -5516,7 +5641,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                               <td
                                 style={{
                                   padding: "10px",
-                                  borderBottom: "1px solid var(--border-subtle)",
+                                  borderBottom: `1px solid ${interviewUi.border}`,
                                 }}
                               >
                                 {linkedItem
@@ -5526,7 +5651,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                               <td
                                 style={{
                                   padding: "10px",
-                                  borderBottom: "1px solid var(--border-subtle)",
+                                  borderBottom: `1px solid ${interviewUi.border}`,
                                 }}
                               >
                                 {c.current_stage}
@@ -5534,7 +5659,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                               <td
                                 style={{
                                   padding: "10px",
-                                  borderBottom: "1px solid var(--border-subtle)",
+                                  borderBottom: `1px solid ${interviewUi.border}`,
                                 }}
                               >
                                 <div
@@ -5547,16 +5672,31 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                                 >
                                   <button
                                     type="button"
-                                    className="action-button primary"
-                                    style={{ fontSize: "11px", padding: "4px 10px" }}
+                                    style={{
+                                      fontSize: "11px",
+                                      padding: "6px 12px",
+                                      borderRadius: interviewUi.radiusSm,
+                                      border: "none",
+                                      cursor: "pointer",
+                                      fontWeight: 600,
+                                      backgroundColor: interviewUi.accent,
+                                      color: interviewUi.onAccent,
+                                    }}
                                     onClick={() => openCandidateModal(c, "execute")}
                                   >
                                     Schedule interview
                                   </button>
                                   <button
                                     type="button"
-                                    className="action-button"
-                                    style={{ fontSize: "11px", padding: "4px 10px" }}
+                                    style={{
+                                      fontSize: "11px",
+                                      padding: "6px 12px",
+                                      borderRadius: interviewUi.radiusSm,
+                                      cursor: "pointer",
+                                      backgroundColor: "transparent",
+                                      color: interviewUi.textMuted,
+                                      border: `1px solid ${interviewUi.border}`,
+                                    }}
                                     onClick={() => openCandidateModal(c, "execute")}
                                   >
                                     Profile
@@ -5572,58 +5712,83 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
               )}
             </div>
 
-            <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "8px" }}>
+            <div
+              style={{
+                fontSize: "13px",
+                fontWeight: 600,
+                marginBottom: "10px",
+                color: interviewUi.text,
+              }}
+            >
               Scheduled interview rounds
             </div>
             {reqInterviewsLoading ? (
-              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+              <div style={{ fontSize: "12px", color: interviewUi.textSubtle }}>
                 Loading scheduled rounds…
               </div>
             ) : reqInterviews.length === 0 ? (
               <div
                 style={{
                   padding: "14px 16px",
-                  borderRadius: "10px",
-                  border: "1px solid rgba(59, 130, 246, 0.25)",
-                  backgroundColor: "rgba(59, 130, 246, 0.06)",
+                  borderRadius: interviewUi.radiusMd,
+                  border: `1px solid ${interviewUi.border}`,
+                  borderLeft: `3px solid ${interviewUi.accent}`,
+                  backgroundColor: interviewUi.surfaceElevated,
                   fontSize: "12px",
-                  color: "var(--text-secondary)",
+                  color: interviewUi.textMuted,
                   lineHeight: 1.5,
                 }}
               >
                 {interviewingCandidatesForTable.length > 0 ? (
                   <>
-                    <strong style={{ color: "var(--text-primary)" }}>
+                    <strong style={{ color: interviewUi.text }}>
                       No calendar rounds yet — that’s expected.
                     </strong>{" "}
-                    The table above is the <em>Interviewing</em> pipeline list. This section
-                    only lists <strong>scheduled</strong> rounds (date, interviewer, status).
-                    Click <strong>Schedule interview</strong> on a candidate to create one;
-                    it will show up here automatically.
+                    The table above is the <em>Interviewing</em> pipeline list. This section only
+                    lists <strong style={{ color: interviewUi.text }}>scheduled</strong> rounds
+                    (date, interviewer, status). Click{" "}
+                    <strong style={{ color: interviewUi.text }}>Schedule interview</strong> on a
+                    candidate to create one; it will show up here automatically.
                   </>
                 ) : (
                   <>
                     No scheduled rounds for this requisition. When candidates reach{" "}
-                    <strong>Interviewing</strong> and you add rounds from their profile,
-                    each round appears here as a separate row.
+                    <strong style={{ color: interviewUi.text }}>Interviewing</strong> and you add
+                    rounds from their profile, each round appears here as a separate row.
                   </>
                 )}
               </div>
             ) : (
-              <div style={{ overflowX: "auto" }}>
+              <div
+                style={{
+                  overflowX: "auto",
+                  borderRadius: interviewUi.radiusLg,
+                  border: `1px solid ${interviewUi.border}`,
+                  backgroundColor: interviewUi.surface,
+                  boxShadow: interviewUi.shadow,
+                  overflow: "hidden",
+                }}
+              >
                 <table
                   style={{
                     width: "100%",
                     borderCollapse: "collapse",
                     fontSize: "12px",
+                    color: interviewUi.text,
                   }}
                 >
                   <thead>
-                    <tr style={{ textAlign: "left", color: "var(--text-tertiary)" }}>
+                    <tr
+                      style={{
+                        textAlign: "left",
+                        color: interviewUi.textSubtle,
+                        backgroundColor: interviewUi.surfaceElevated,
+                      }}
+                    >
                       <th
                         style={{
                           padding: "8px 10px",
-                          borderBottom: "1px solid var(--border-subtle)",
+                          borderBottom: `1px solid ${interviewUi.border}`,
                         }}
                       >
                         Candidate
@@ -5631,7 +5796,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                       <th
                         style={{
                           padding: "8px 10px",
-                          borderBottom: "1px solid var(--border-subtle)",
+                          borderBottom: `1px solid ${interviewUi.border}`,
                         }}
                       >
                         Round
@@ -5639,7 +5804,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                       <th
                         style={{
                           padding: "8px 10px",
-                          borderBottom: "1px solid var(--border-subtle)",
+                          borderBottom: `1px solid ${interviewUi.border}`,
                         }}
                       >
                         Interviewer
@@ -5647,7 +5812,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                       <th
                         style={{
                           padding: "8px 10px",
-                          borderBottom: "1px solid var(--border-subtle)",
+                          borderBottom: `1px solid ${interviewUi.border}`,
                         }}
                       >
                         Scheduled
@@ -5655,7 +5820,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                       <th
                         style={{
                           padding: "8px 10px",
-                          borderBottom: "1px solid var(--border-subtle)",
+                          borderBottom: `1px solid ${interviewUi.border}`,
                         }}
                       >
                         Status
@@ -5663,7 +5828,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                       <th
                         style={{
                           padding: "8px 10px",
-                          borderBottom: "1px solid var(--border-subtle)",
+                          borderBottom: `1px solid ${interviewUi.border}`,
                         }}
                       >
                         Result
@@ -5671,7 +5836,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                       <th
                         style={{
                           padding: "8px 10px",
-                          borderBottom: "1px solid var(--border-subtle)",
+                          borderBottom: `1px solid ${interviewUi.border}`,
                         }}
                       >
                         Actions
@@ -5679,19 +5844,22 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                     </tr>
                   </thead>
                   <tbody>
-                    {reqInterviews.map((iv) => {
+                    {reqInterviews.map((iv, rowIdx) => {
                       const cand = candidates.find(
                         (x) => x.candidate_id === iv.candidate_id,
                       );
                       return (
                         <tr
                           key={iv.id}
-                          style={{ backgroundColor: "var(--bg-primary)" }}
+                          style={{
+                            backgroundColor:
+                              rowIdx % 2 === 0 ? interviewUi.surface : interviewUi.bg,
+                          }}
                         >
                           <td
                             style={{
                               padding: "10px",
-                              borderBottom: "1px solid var(--border-subtle)",
+                              borderBottom: `1px solid ${interviewUi.border}`,
                               fontWeight: 600,
                             }}
                           >
@@ -5702,7 +5870,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                               style={{
                                 fontSize: "11px",
                                 fontWeight: 400,
-                                color: "var(--text-tertiary)",
+                                color: interviewUi.textSubtle,
                               }}
                             >
                               {iv.candidate_email ?? cand?.email ?? ""}
@@ -5711,23 +5879,25 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                           <td
                             style={{
                               padding: "10px",
-                              borderBottom: "1px solid var(--border-subtle)",
+                              borderBottom: `1px solid ${interviewUi.border}`,
                             }}
                           >
-                            {iv.round_number}
+                            {iv.round_name?.trim() || iv.round_number}
                           </td>
                           <td
                             style={{
                               padding: "10px",
-                              borderBottom: "1px solid var(--border-subtle)",
+                              borderBottom: `1px solid ${interviewUi.border}`,
                             }}
                           >
-                            {iv.interviewer_name}
+                            {iv.panelists && iv.panelists.length > 0
+                              ? iv.panelists.map((p) => p.display_name).join(", ")
+                              : iv.interviewer_name ?? "—"}
                           </td>
                           <td
                             style={{
                               padding: "10px",
-                              borderBottom: "1px solid var(--border-subtle)",
+                              borderBottom: `1px solid ${interviewUi.border}`,
                             }}
                           >
                             {new Date(iv.scheduled_at).toLocaleString()}
@@ -5735,15 +5905,16 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                           <td
                             style={{
                               padding: "10px",
-                              borderBottom: "1px solid var(--border-subtle)",
+                              borderBottom: `1px solid ${interviewUi.border}`,
                             }}
                           >
-                            {iv.status}
+                            <InterviewStatusBadge status={iv.status} />
                           </td>
                           <td
                             style={{
                               padding: "10px",
-                              borderBottom: "1px solid var(--border-subtle)",
+                              borderBottom: `1px solid ${interviewUi.border}`,
+                              color: interviewUi.textMuted,
                             }}
                           >
                             {iv.result ?? "—"}
@@ -5751,25 +5922,27 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                           <td
                             style={{
                               padding: "10px",
-                              borderBottom: "1px solid var(--border-subtle)",
+                              borderBottom: `1px solid ${interviewUi.border}`,
                             }}
                           >
                             {cand ? (
                               <button
                                 type="button"
-                                className="action-button"
-                                style={{ fontSize: "11px", padding: "4px 10px" }}
+                                style={{
+                                  fontSize: "11px",
+                                  padding: "6px 12px",
+                                  borderRadius: interviewUi.radiusSm,
+                                  cursor: "pointer",
+                                  backgroundColor: "transparent",
+                                  color: interviewUi.textMuted,
+                                  border: `1px solid ${interviewUi.border}`,
+                                }}
                                 onClick={() => openCandidateModal(cand, "execute")}
                               >
                                 Open
                               </button>
                             ) : (
-                              <span
-                                style={{
-                                  fontSize: "11px",
-                                  color: "var(--text-tertiary)",
-                                }}
-                              >
+                              <span style={{ fontSize: "11px", color: interviewUi.textSubtle }}>
                                 —
                               </span>
                             )}
@@ -5785,42 +5958,6 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         )}
 
         </div>
-      )}
-
-      {/* Candidate Detail Modal */}
-      {selectedCandidate && (
-        <CandidateDetailModal
-          candidate={selectedCandidate}
-          onClose={() => setSelectedCandidate(null)}
-          onUpdate={(updated) => {
-            setCandidates((prev) =>
-              prev.map((c) =>
-                c.candidate_id === updated.candidate_id ? updated : c,
-              ),
-            );
-            void loadCandidates();
-            void loadPipelineCompact();
-            void loadRanking(false);
-            setPipelineFull(null);
-            const rid = parseReqId(effectiveTicketId);
-            if (rid != null) {
-              void fetchInterviews({ requisitionId: rid }).then(setReqInterviews);
-            }
-            if (updated.current_stage === "Hired") {
-              refetchRequisition();
-            }
-            setSelectedCandidate(null);
-          }}
-          userRoles={userRoles}
-          evaluationContext={modalEvaluationProps.evaluationContext}
-          evaluationShortlistBlocked={
-            modalEvaluationProps.evaluationShortlistBlocked
-          }
-          evaluationShortlistBlockedReason={
-            modalEvaluationProps.evaluationShortlistBlockedReason
-          }
-          pipelineWorkspace={modalPipelineWorkspace}
-        />
       )}
 
       {activeTab === "timeline" && (

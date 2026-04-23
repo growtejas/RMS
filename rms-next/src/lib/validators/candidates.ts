@@ -82,18 +82,3 @@ export const candidateStageBody = z.object({
 });
 
 export const applicationStageBody = candidateStageBody;
-
-export const interviewCreateBody = z.object({
-  candidate_id: z.number().int(),
-  round_number: z.number().int().min(1),
-  interviewer_name: z.string().min(1).max(150),
-  scheduled_at: z.string(),
-});
-
-export const interviewPatchBody = z.object({
-  interviewer_name: z.string().min(1).max(150).optional(),
-  scheduled_at: z.string().optional(),
-  status: z.enum(["Scheduled", "Completed", "Cancelled"]).optional(),
-  result: z.enum(["Pass", "Fail", "Hold"]).nullable().optional(),
-  feedback: z.string().nullable().optional(),
-});

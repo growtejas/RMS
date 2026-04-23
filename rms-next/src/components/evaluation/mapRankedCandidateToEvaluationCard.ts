@@ -9,7 +9,14 @@ import type {
 export type RankingRowForEvaluationCard = {
   candidate_id: number;
   full_name: string;
-  score: { final_score: number; deterministic_final_score?: number };
+  score: {
+    final_score: number | null;
+    ai_status?: "OK" | "PENDING" | "UNAVAILABLE";
+    ai_confidence?: number;
+    ai_summary?: string;
+    ai_risks?: string[];
+    deterministic_final_score?: number;
+  };
   meta?: { skill_match_ratio?: number };
   explain: {
     matched_skills?: string[];
@@ -54,12 +61,17 @@ function resolveListAlignedAndBlendedRank(
   const det = row.score.deterministic_final_score;
   if (det != null && Number.isFinite(det)) {
     const blendedRounded =
-      Number.isFinite(final) && Math.round(final) !== Math.round(det)
+      final != null &&
+      Number.isFinite(final) &&
+      Math.round(final) !== Math.round(det)
         ? Math.round(final)
         : null;
     return { listAligned: det, aiBlendedRankRounded: blendedRounded };
   }
-  return { listAligned: final, aiBlendedRankRounded: null };
+  if (final != null && Number.isFinite(final)) {
+    return { listAligned: final, aiBlendedRankRounded: null };
+  }
+  return { listAligned: 0, aiBlendedRankRounded: null };
 }
 
 function aiStrengthFromScore(score: number): AiStrengthLabel {
@@ -202,8 +214,16 @@ export function mapRankedCandidateToEvaluationCard(
     highlights.push({ tone, text: expLine });
   }
 
-  if (row.explain.ai_summary?.trim()) {
-    const first = splitSummaryLines(row.explain.ai_summary, 1)[0];
+  const summaryFromRow =
+    (typeof row.score.ai_summary === "string" && row.score.ai_summary.trim()
+      ? row.score.ai_summary.trim()
+      : null) ??
+    (typeof row.explain.ai_summary === "string" && row.explain.ai_summary.trim()
+      ? row.explain.ai_summary.trim()
+      : null);
+
+  if (summaryFromRow) {
+    const first = splitSummaryLines(summaryFromRow, 1)[0];
     if (first && highlights.length < 4) {
       const dup = highlights.some(
         (h) => h.text.toLowerCase() === first.toLowerCase(),
@@ -221,27 +241,39 @@ export function mapRankedCandidateToEvaluationCard(
 
   while (highlights.length > 4) highlights.pop();
 
+  const aiStatus = row.score.ai_status;
+  const aiOk =
+    aiStatus === "OK" &&
+    row.score.final_score != null &&
+    Number.isFinite(row.score.final_score);
+
   const aiScore =
-    row.explain.ai_score != null && Number.isFinite(row.explain.ai_score)
-      ? Number(row.explain.ai_score)
-      : null;
+    aiOk
+      ? Number(row.score.final_score)
+      : row.explain.ai_score != null && Number.isFinite(row.explain.ai_score)
+        ? Number(row.explain.ai_score)
+        : null;
   const hasAi = aiScore != null;
-  const summaryFullRaw =
-    typeof row.explain.ai_summary === "string" && row.explain.ai_summary.trim()
-      ? row.explain.ai_summary.trim()
-      : null;
-  let summaryLines = hasAi ? splitSummaryLines(summaryFullRaw ?? undefined, 3) : [];
+
+  const summaryFullRaw = summaryFromRow;
+  let summaryLines = hasAi
+    ? splitSummaryLines(summaryFullRaw ?? undefined, 3)
+    : [];
   if (hasAi && summaryLines.length === 0) {
     summaryLines = ["No written summary is stored for this evaluation."];
   }
 
-  const risksRaw = [...miss.slice(0, 2), ...(row.explain.ai_risks ?? []).slice(0, 2)];
+  const risksFromRow =
+    row.score.ai_risks && Array.isArray(row.score.ai_risks)
+      ? row.score.ai_risks
+      : row.explain.ai_risks ?? [];
+  const risksRaw = [...miss.slice(0, 2), ...risksFromRow.slice(0, 2)];
   const risks = dedupeStrings(risksRaw, 3);
 
   const rankingWhy = buildRankingWhy(
     skillsFit,
     experienceFit,
-    row.explain.ai_confidence,
+    row.score.ai_confidence ?? row.explain.ai_confidence,
   );
 
   const positiveTexts = highlights

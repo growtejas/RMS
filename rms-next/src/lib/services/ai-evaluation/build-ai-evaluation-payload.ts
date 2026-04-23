@@ -56,7 +56,9 @@ export function buildCandidateEvaluationInputFromSignals(
 ): CandidateEvaluationInput {
   const struct = signals.structured_document?.profile;
   const skills = signals.skills_normalized.slice(0, 80).map((s) => s.slice(0, 120));
-  let experience_years = signals.ats.experience_years;
+  // IMPORTANT: `signals.ats.experience_years` is already normalized with priority:
+  // DB > structured profile > parser. Do not re-merge here.
+  const experience_years = signals.ats.experience_years;
   const projects = (struct?.projects ?? [])
     .filter((p): p is string => typeof p === "string")
     .map((p) => p.slice(0, 600))
@@ -74,9 +76,6 @@ export function buildCandidateEvaluationInputFromSignals(
     .filter((c): c is string => typeof c === "string" && c.trim().length > 0)
     .map((c) => c.trim().slice(0, 200))
     .slice(0, 40);
-  if (experience_years == null && struct?.experience_years != null) {
-    experience_years = struct.experience_years;
-  }
   const expCapped =
     experience_years != null
       ? Math.min(80, Math.max(0, experience_years))

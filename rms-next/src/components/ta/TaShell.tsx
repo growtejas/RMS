@@ -15,6 +15,7 @@ const viewLabels: Record<string, string> = {
   requisitions: "Requisitions",
   "my-requisitions": "My Requisitions",
   "requisition-detail": "Requisition Detail",
+  interviews: "Interviews",
   "resource-pool": "Resource Pool",
   reports: "Reports",
   "audit-logs": "Audit Logs",
@@ -34,6 +35,9 @@ export default function TaShell({ children }: { children: React.ReactNode }) {
   const activeLabel = useMemo(() => {
     if (pathname.startsWith("/ta/requisitions/")) {
       return viewLabels["requisition-detail"]!;
+    }
+    if (pathname.startsWith("/ta/interviews")) {
+      return viewLabels["interviews"]!;
     }
     if (pathname.startsWith("/ta/requisitions")) {
       return viewLabels["requisitions"]!;

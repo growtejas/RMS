@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 
-import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
+import { envelopeCatch, envelopeFail, envelopeOk } from "@/lib/http/api-envelope";
 import { parseFastapiJsonBody } from "@/lib/http/parse-fastapi-body";
+import { interviewPatchBody } from "@/lib/validators/interviews";
 import {
   deleteInterviewJson,
   getInterviewJson,
   patchInterviewJson,
 } from "@/lib/services/interviews-service";
-import { interviewPatchBody } from "@/lib/validators/candidates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,10 +18,7 @@ type Ctx = { params: { interviewId: string } };
 function parseId(s: string): number | NextResponse {
   const id = Number.parseInt(s, 10);
   if (!Number.isFinite(id)) {
-    return NextResponse.json(
-      { detail: "Invalid interview id" },
-      { status: 422 },
-    );
+    return envelopeFail("Invalid interview id", 422);
   }
   return id;
 }
@@ -43,10 +40,10 @@ export async function GET(req: Request, { params }: Ctx) {
       return interviewId;
     }
 
-    const data = await getInterviewJson(interviewId, user.organizationId);
-    return NextResponse.json(data);
+    const interview = await getInterviewJson(interviewId, user.organizationId);
+    return envelopeOk({ interview });
   } catch (e) {
-    return referenceWriteCatch(e, "[GET /api/interviews/[interviewId]]");
+    return envelopeCatch(e, "[GET /api/interviews/[interviewId]]");
   }
 }
 
@@ -69,13 +66,17 @@ export async function PATCH(req: Request, { params }: Ctx) {
 
     const parsed = await parseFastapiJsonBody(req, interviewPatchBody);
     if (!parsed.ok) {
-      return parsed.response;
+      const errBody = await parsed.response.json();
+      return envelopeFail(
+        typeof errBody.detail === "string" ? errBody.detail : "Invalid request body",
+        422,
+      );
     }
 
     const data = await patchInterviewJson(interviewId, parsed.data, user);
-    return NextResponse.json(data);
+    return envelopeOk(data);
   } catch (e) {
-    return referenceWriteCatch(e, "[PATCH /api/interviews/[interviewId]]");
+    return envelopeCatch(e, "[PATCH /api/interviews/[interviewId]]");
   }
 }
 
@@ -97,8 +98,8 @@ export async function DELETE(req: Request, { params }: Ctx) {
     }
 
     await deleteInterviewJson(interviewId, user);
-    return new NextResponse(null, { status: 204 });
+    return envelopeOk({ deleted: true });
   } catch (e) {
-    return referenceWriteCatch(e, "[DELETE /api/interviews/[interviewId]]");
+    return envelopeCatch(e, "[DELETE /api/interviews/[interviewId]]");
   }
 }

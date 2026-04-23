@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, usePathname } from "next/navigation";
 import {
   ArrowLeft,
   Edit,
@@ -23,7 +23,6 @@ import {
 import { apiClient } from "@/lib/api/client";
 import type { Candidate } from "@/lib/api/candidateApi";
 import { fetchCandidatesFromApplications } from "@/lib/api/candidateApi";
-import CandidateDetailModal from "@/components/shared/CandidateDetailModal";
 import { useAuth } from "@/contexts/useAuth";
 import { PlainStatusText } from "@/components/common/PlainStatusText";
 import { normalizeStatus } from "@/types/workflow";
@@ -364,6 +363,7 @@ const MasterTimeline: React.FC<MasterTimelineProps> = ({ events }) => {
 const ManagerRequisitionDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const pathname = usePathname();
   const { user } = useAuth();
 
   // State
@@ -399,9 +399,6 @@ const ManagerRequisitionDetails: React.FC = () => {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
   const [candidateError, setCandidateError] = useState<string | null>(null);
-  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(
-    null,
-  );
   const [candidateStageFilter, setCandidateStageFilter] =
     useState<string>("all");
   const [candidateItemFilter, setCandidateItemFilter] = useState<
@@ -917,6 +914,21 @@ const ManagerRequisitionDetails: React.FC = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when requisition id changes only
   }, [requisition?.req_id]);
+
+  const openManagerCandidateProfile = useCallback(
+    (c: Candidate) => {
+      const q = new URLSearchParams();
+      if (c.application_id != null) {
+        q.set("application_id", String(c.application_id));
+      }
+      q.set("workspace", "execute");
+      if (pathname) {
+        q.set("returnTo", pathname);
+      }
+      router.push(`/manager/candidates/${c.candidate_id}?${q.toString()}`);
+    },
+    [router, pathname],
+  );
 
   // Handle before unload for unsaved changes
   useEffect(() => {
@@ -2838,7 +2850,7 @@ const ManagerRequisitionDetails: React.FC = () => {
                             <button
                               key={c.candidate_id}
                               type="button"
-                              onClick={() => setSelectedCandidate(c)}
+                              onClick={() => openManagerCandidateProfile(c)}
                               className="w-full text-left border border-gray-200 rounded-lg p-3 hover:border-indigo-300 hover:bg-indigo-50/40 transition-colors"
                             >
                               <div className="flex items-start justify-between gap-3">
@@ -2980,23 +2992,6 @@ const ManagerRequisitionDetails: React.FC = () => {
           </div>
         )}
       </div>
-
-      {/* Candidate Detail Modal (read-only actions for Manager) */}
-      {selectedCandidate && (
-        <CandidateDetailModal
-          candidate={selectedCandidate}
-          onClose={() => setSelectedCandidate(null)}
-          onUpdate={(updated) => {
-            setCandidates((prev) =>
-              prev.map((c) =>
-                c.candidate_id === updated.candidate_id ? updated : c,
-              ),
-            );
-            setSelectedCandidate(null);
-          }}
-          userRoles={user?.roles || []}
-        />
-      )}
 
       {/* JD PDF Viewer Modal (view on spot, same pattern as candidate resume) */}
       {showJdViewer && (

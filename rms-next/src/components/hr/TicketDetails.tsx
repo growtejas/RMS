@@ -37,7 +37,7 @@ import {
   RefreshCw,
   Eye,
 } from "lucide-react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { apiClient } from "@/lib/api/client";
 import { getUsersListCached } from "@/lib/api/users-list-cache";
 import HRGatekeeperPanel from "./HRGatekeeperPanel";
@@ -54,8 +54,6 @@ import {
   getCandidateActionErrorMessage,
   type Candidate,
 } from "@/lib/api/candidateApi";
-import CandidateDetailModal from "@/components/shared/CandidateDetailModal";
-import type { EvaluationCardContext } from "@/components/evaluation/mapRankedCandidateToEvaluationCard";
 import { PlainPriorityText } from "@/components/common/PlainPriorityText";
 
 interface TicketDetailsProps {
@@ -208,6 +206,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
   const idParam = params?.id;
   const routeId = Array.isArray(idParam) ? idParam[0] : idParam;
   const router = useRouter();
+  const pathname = usePathname();
   const { user } = useAuth();
   const effectiveTicketId = ticketId ?? routeId;
 
@@ -259,9 +258,6 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
   // ---- Candidate Pipeline state ----
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
-  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(
-    null,
-  );
   const [showAddCandidate, setShowAddCandidate] = useState(false);
   const [addCandidateItemId, setAddCandidateItemId] = useState<number | null>(
     null,
@@ -669,18 +665,20 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
     loadCandidates();
   }, [loadCandidates]);
 
-  const hrModalEvaluationContext = useMemo(():
-    | EvaluationCardContext
-    | undefined => {
-    if (!selectedCandidate || !ticket) return undefined;
-    const item = ticket.items.find(
-      (it) => it.numericItemId === selectedCandidate.requisition_item_id,
-    );
-    return {
-      requiredExperienceYears: item?.experience ?? null,
-      requiredSkillsCount: undefined,
-    };
-  }, [selectedCandidate, ticket]);
+  const openHrCandidateProfile = useCallback(
+    (c: Candidate) => {
+      const q = new URLSearchParams();
+      if (c.application_id != null) {
+        q.set("application_id", String(c.application_id));
+      }
+      q.set("workspace", "execute");
+      if (pathname) {
+        q.set("returnTo", pathname);
+      }
+      router.push(`/hr/candidates/${c.candidate_id}?${q.toString()}`);
+    },
+    [router, pathname],
+  );
 
   // ---- Add candidate handler ----
   const handleAddCandidate = async (e: React.FormEvent) => {
@@ -692,7 +690,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
       let resumePath: string | undefined;
       if (resumeFile) {
         const uploaded = await uploadResume(resumeFile);
-        resumePath = uploaded.filename;
+        resumePath = uploaded.file_url;
       }
       const reqId = parseReqId(effectiveTicketId);
       if (!reqId) return;
@@ -2426,7 +2424,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                                     alignItems: "center",
                                     cursor: "pointer",
                                   }}
-                                  onClick={() => setSelectedCandidate(c)}
+                                  onClick={() => openHrCandidateProfile(c)}
                                 >
                                   <div>
                                     <div
@@ -2973,7 +2971,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                   return (
                     <div
                       key={c.candidate_id}
-                      onClick={() => setSelectedCandidate(c)}
+                      onClick={() => openHrCandidateProfile(c)}
                       style={{
                         padding: "16px 20px",
                         backgroundColor: "var(--bg-primary)",
@@ -3080,27 +3078,6 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
             </div>
           )}
         </div>
-      )}
-
-      {/* Candidate Detail Modal */}
-      {selectedCandidate && (
-        <CandidateDetailModal
-          candidate={selectedCandidate}
-          onClose={() => setSelectedCandidate(null)}
-          onUpdate={(updated) => {
-            setCandidates((prev) =>
-              prev.map((c) =>
-                c.candidate_id === updated.candidate_id ? updated : c,
-              ),
-            );
-            if (updated.current_stage === "Hired") {
-              handleRefreshData();
-            }
-            setSelectedCandidate(null);
-          }}
-          userRoles={user?.roles || []}
-          evaluationContext={hrModalEvaluationContext}
-        />
       )}
 
       {activeTab === "timeline" && (

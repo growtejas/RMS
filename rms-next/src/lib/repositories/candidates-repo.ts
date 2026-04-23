@@ -9,6 +9,7 @@ import {
   requisitionItems,
   requisitions,
 } from "@/lib/db/schema";
+import * as ivRepo from "@/lib/repositories/interviews-repo";
 import type { AppDb } from "@/lib/workflow/workflow-db";
 
 export type CandidateRow = typeof candidates.$inferSelect;
@@ -141,24 +142,14 @@ export async function selectInterviewsList(
     conds.push(eq(interviews.candidateId, filters.candidateId));
   }
   if (filters?.requisitionId != null) {
-    conds.push(eq(applications.requisitionId, filters.requisitionId));
-    conds.push(eq(applications.organizationId, organizationId));
-  }
-  if (filters?.requisitionId != null) {
-    return db
-      .select({
-        interview: interviews,
-        candidateFullName: candidates.fullName,
-        candidateEmail: candidates.email,
-      })
-      .from(interviews)
-      .innerJoin(candidates, eq(interviews.candidateId, candidates.candidateId))
-      .innerJoin(
-        applications,
-        eq(applications.candidateId, candidates.candidateId),
-      )
-      .where(and(...conds))
-      .orderBy(desc(interviews.scheduledAt));
+    let rows = await ivRepo.listInterviewsForRequisition({
+      reqId: filters.requisitionId,
+      organizationId,
+    });
+    if (filters.candidateId != null) {
+      rows = rows.filter((r) => r.interview.candidateId === filters.candidateId);
+    }
+    return rows;
   }
   return db
     .select({
@@ -497,6 +488,7 @@ export async function insertInterviewRow(values: {
   conductedBy: number;
 }): Promise<InterviewRow> {
   const db = getDb();
+  const endTime = new Date(values.scheduledAt.getTime() + 60 * 60 * 1000);
   const [row] = await db
     .insert(interviews)
     .values({
@@ -504,7 +496,9 @@ export async function insertInterviewRow(values: {
       roundNumber: values.roundNumber,
       interviewerName: values.interviewerName,
       scheduledAt: values.scheduledAt,
-      status: "Scheduled",
+      endTime,
+      timezone: "UTC",
+      status: "SCHEDULED",
       conductedBy: values.conductedBy,
     })
     .returning();

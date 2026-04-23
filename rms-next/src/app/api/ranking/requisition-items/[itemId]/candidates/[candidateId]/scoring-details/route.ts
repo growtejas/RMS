@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
 import { enrichRankingWithCachedAiEvaluations } from "@/lib/services/ai-evaluation/ai-evaluation-service";
+import { resolveRankingEngine } from "@/lib/services/scoring/ranking-engine";
 import {
   getRankingJobRequirementsForItem,
   pickCandidateScoringDetailsFromRanking,
@@ -57,8 +58,17 @@ export async function GET(req: Request, { params }: Ctx) {
     await assertRequisitionItemInOrganization(itemId, user.organizationId);
     await assertCandidateInOrganization(candidateId, user.organizationId);
 
+    const engine = resolveRankingEngine();
+    if (engine.engine !== "ai_only") {
+      return NextResponse.json(
+        {
+          detail: `Ranking engine misconfigured: expected ai_only, got ${engine.engine} (env RANKING_ENGINE=${process.env.RANKING_ENGINE ?? ""})`,
+        },
+        { status: 500 },
+      );
+    }
+
     const url = new URL(req.url);
-    const aiEval = url.searchParams.get("ai_eval") === "1";
     const strictSnapshot =
       url.searchParams.get("strict_snapshot") === "1" ||
       url.searchParams.get("strict_snapshot") === "true";
@@ -66,13 +76,11 @@ export async function GET(req: Request, { params }: Ctx) {
     const jobReq = await getRankingJobRequirementsForItem(itemId);
 
     let ranking = await rankCandidatesForRequisitionItem(itemId, { strictSnapshot });
-    if (aiEval) {
-      ranking = await enrichRankingWithCachedAiEvaluations({
-        organizationId: user.organizationId,
-        itemId,
-        ranking,
-      });
-    }
+    ranking = await enrichRankingWithCachedAiEvaluations({
+      organizationId: user.organizationId,
+      itemId,
+      ranking,
+    });
 
     const data = pickCandidateScoringDetailsFromRanking(ranking, candidateId, jobReq);
     if (!data) {
@@ -85,7 +93,40 @@ export async function GET(req: Request, { params }: Ctx) {
       );
     }
 
-    return NextResponse.json(data);
+    // Strict ai_only: return only AI-facing explain + minimal ranking metadata.
+    return NextResponse.json({
+      ranking_engine: "ai_only",
+      requisition_item_id: data.requisition_item_id,
+      req_id: data.req_id,
+      candidate_id: data.candidate_id,
+      full_name: data.full_name,
+      email: data.email,
+      current_stage: data.current_stage,
+      generated_at: data.generated_at,
+      ranking_version: data.ranking_version,
+      total_candidates: data.total_candidates,
+      score: data.score,
+      ...(data.flags ? { flags: data.flags } : {}),
+      explain: {
+        ai_breakdown: data.explain.ai_breakdown,
+        ai_summary: data.explain.ai_summary,
+        ai_risks: data.explain.ai_risks,
+        ai_confidence: data.explain.ai_confidence,
+      },
+      job_requirements: {
+        ranking_engine: "ai_only",
+        requisition_item_id: data.job_requirements.requisition_item_id,
+        req_id: data.job_requirements.req_id,
+        jd_narrative: data.job_requirements.jd_narrative,
+        composite_scoring_text: data.job_requirements.composite_scoring_text,
+        required_skills: data.job_requirements.required_skills,
+        ats_job_profile: data.job_requirements.ats_job_profile,
+        scoring_config: { ranking_engine: "ai_only" },
+        item_snapshot: data.job_requirements.item_snapshot,
+        control: data.job_requirements.control,
+      },
+      meta: { ranking_engine: "ai_only", ai_eval_enriched: true },
+    });
   } catch (e) {
     return referenceWriteCatch(
       e,

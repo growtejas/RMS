@@ -406,9 +406,11 @@ export function computeAtsV1ScoreFromSignals(
 export type AtsRankingEngineMode = "hybrid" | "ats_v1" | "phase5_only";
 
 export function resolveAtsRankingEngineMode(): AtsRankingEngineMode {
-  const raw = (process.env.RANKING_ENGINE ?? "hybrid").trim().toLowerCase();
+  // Deterministic submode resolver only. Overall ranking engine is resolved elsewhere.
+  const raw = (process.env.RANKING_ENGINE ?? "ai_only").trim().toLowerCase();
   if (raw === "ats_v1" || raw === "v1") return "ats_v1";
   if (raw === "phase5_only" || raw === "phase5") return "phase5_only";
+  // For ai_only / hybrid / deterministic (and any unknowns), deterministic fallback uses hybrid.
   return "hybrid";
 }
 
