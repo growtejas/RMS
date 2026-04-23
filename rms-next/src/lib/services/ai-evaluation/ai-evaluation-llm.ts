@@ -463,6 +463,7 @@ Avoid clustering.
 
 - Required skills = PRIMARY signal
 - Missing core skills → strong penalty (<50)
+- 
 
 -------------------------------------
 
@@ -757,7 +758,7 @@ No explanation outside JSON.`;
         return { ok: false, reason: "llm_schema_rejected" };
       }
       const output = validated.data;
-      const aiScore = computeAiCompositeScore(output);
+      const aiScore = computeAiCompositeScore(output, input.job.required_experience);
       return { ok: true, output, aiScore };
     } catch (e) {
       clearTimeout(timer);

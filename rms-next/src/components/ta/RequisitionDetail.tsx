@@ -407,6 +407,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     null,
   );
   const pipelineJdFileInputRef = useRef<HTMLInputElement>(null);
+  const lastAtsFocusRefreshAtRef = useRef<number>(0);
   const [rankingRequiredSkillsDraft, setRankingRequiredSkillsDraft] =
     useState("");
   /** Phase 2: hide pipeline board, ranking, buckets, and Kanban unless expanded. */
@@ -1120,7 +1121,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     let cancelled = false;
     setAtsBoardLoading(true);
     void Promise.all([
-      fetchRequisitionItemRanking(atsBoardItemId),
+      fetchRequisitionItemRanking(atsBoardItemId, { aiEval: true }),
       fetchApplicationsAtsBuckets(atsBoardItemId),
     ])
       .then(([ranking, ab]) => {
@@ -1175,7 +1176,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       if (cancelled) return;
       attempts += 1;
       try {
-        const ranking = await fetchRequisitionItemRanking(itemId);
+        const ranking = await fetchRequisitionItemRanking(itemId, { aiEval: true });
         if (!cancelled) {
           setAtsBoardRanking(ranking);
         }
@@ -1203,6 +1204,30 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     atsBucketsData,
     atsBoardScoreByCandidateId,
   ]);
+
+  useEffect(() => {
+    const maybeRefresh = () => {
+      if (activeTab !== "ats" || !rankingItemId) return;
+      const now = Date.now();
+      if (now - lastAtsFocusRefreshAtRef.current < 1500) return;
+      lastAtsFocusRefreshAtRef.current = now;
+      void loadRanking(false);
+    };
+
+    const onFocus = () => maybeRefresh();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        maybeRefresh();
+      }
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [activeTab, rankingItemId, loadRanking]);
 
   useEffect(() => {
     const reqId = parseReqId(effectiveTicketId);
@@ -1259,13 +1284,13 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     setPipelineFull(null);
   }, [candidateItemFilter]);
 
-  // Ranking GET reuses DB snapshots when version/weights match, so scores/stages can
-  // lag behind real candidate changes. POST recompute keeps the panel aligned with data.
+  // Auto-open / item-switch should not force recompute; that can reset buckets while
+  // AI evaluations are still pending. Use explicit Recompute button for hard refresh.
   useEffect(() => {
     if (activeTab !== "ats" || !pipelineAdvancedOpen) {
       return;
     }
-    void loadRanking(true);
+    void loadRanking(false);
   }, [activeTab, pipelineAdvancedOpen, loadRanking]);
 
   // Load JD PDF for viewer when modal opens (item-level endpoint)
@@ -4816,7 +4841,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                     >
                       Open a candidate to see role fit, AI insight, and actions.
                     </div>
-                    {rankingData.ranked_candidates.slice(0, 8).map((rc, idx) => (
+                    {rankingData.ranked_candidates.slice(0, 10).map((rc, idx) => (
                       <div
                         key={rc.candidate_id}
                         role="button"

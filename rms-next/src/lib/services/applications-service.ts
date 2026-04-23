@@ -5,7 +5,12 @@ import * as applicationsRepo from "@/lib/repositories/applications-repo";
 import * as candidatesRepo from "@/lib/repositories/candidates-repo";
 import * as rankingMetadataRepo from "@/lib/repositories/ranking-metadata-repo";
 import { ensureApplicationForCandidateTx } from "@/lib/services/application-sync-service";
-import { ATS_BUCKET_KEYS } from "@/lib/services/ats-buckets";
+import {
+  ATS_BUCKET_KEYS,
+  getAtsBucketFromFinalScore,
+  getAtsBucketFromRelativeScore,
+  resolveAtsBucketMode,
+} from "@/lib/services/ats-buckets";
 import { patchCandidateStageJson } from "@/lib/services/candidates-service";
 
 const APPLICATION_STAGE_ORDER = [
@@ -90,12 +95,25 @@ function enrichApplicationWithStoredRanking(
   if (!s) {
     return { ...base, ranking: null };
   }
-  const final = Number.parseFloat(s.score);
+  const breakdownObj = (s.breakdown as Record<string, unknown> | null | undefined) ?? undefined;
+  const hasBreakdownFinal =
+    breakdownObj != null && Object.prototype.hasOwnProperty.call(breakdownObj, "final");
+  const breakdownFinal = hasBreakdownFinal ? breakdownObj.final : undefined;
+  let final: number | null = null;
+  if (typeof breakdownFinal === "number" && Number.isFinite(breakdownFinal)) {
+    final = breakdownFinal;
+  } else if (hasBreakdownFinal && breakdownFinal == null) {
+    // Explicitly null final means pending/unknown; keep candidate unranked.
+    final = null;
+  } else {
+    const parsed = Number.parseFloat(s.score);
+    final = Number.isFinite(parsed) ? parsed : null;
+  }
   return {
     ...base,
     ranking: {
       ranking_version_id: rankingVersionId,
-      final_score: Number.isFinite(final) ? final : null,
+      final_score: final,
       breakdown: s.breakdown,
     },
   };
@@ -132,6 +150,16 @@ export async function listApplicationsGroupedByAtsBucketJson(params: {
       { score: r.score, breakdown: r.breakdown },
     ]),
   );
+  const scoredFinals = Array.from(scoreByCandidate.values())
+    .map((s) => {
+      const b = (s.breakdown as { final?: unknown } | null | undefined)?.final;
+      if (typeof b === "number" && Number.isFinite(b)) return b;
+      const parsed = Number.parseFloat(s.score);
+      return Number.isFinite(parsed) ? parsed : Number.NaN;
+    })
+    .filter((n) => Number.isFinite(n));
+  const topFinalScore = scoredFinals.length > 0 ? Math.max(...scoredFinals) : Number.NaN;
+  const bucketMode = resolveAtsBucketMode();
 
   const bucketOrder = [...ATS_BUCKET_KEYS];
   const buckets: Record<
@@ -153,20 +181,35 @@ export async function listApplicationsGroupedByAtsBucketJson(params: {
   const truncated: Record<string, boolean> = {};
 
   for (const row of rows) {
-    const raw = row.application.atsBucket;
+    const base = applicationToJson(row);
+    const enriched = enrichApplicationWithStoredRanking(
+      base,
+      rankingVersionId,
+      scoreByCandidate,
+    );
+
+    const persisted = row.application.atsBucket;
+    const scoreBucket =
+      enriched.ranking?.final_score != null &&
+      Number.isFinite(enriched.ranking.final_score)
+        ? bucketMode === "dynamic_relative" && Number.isFinite(topFinalScore) && topFinalScore > 0
+          ? getAtsBucketFromRelativeScore(enriched.ranking.final_score / topFinalScore)
+          : getAtsBucketFromFinalScore(enriched.ranking.final_score)
+        : null;
+    // Prefer live score bucket so Kanban reflects latest ranking immediately.
+    // Fall back to persisted ats_bucket, then UNRANKED when no score exists.
     const key =
-      raw != null && (bucketOrder as readonly string[]).includes(raw)
-        ? raw
-        : "UNRANKED";
+      scoreBucket ??
+      (persisted != null && (bucketOrder as readonly string[]).includes(persisted)
+        ? persisted
+        : "UNRANKED");
+
     const target = buckets[key]!;
     if (target.length >= limit) {
       truncated[key] = true;
       continue;
     }
-    const base = applicationToJson(row);
-    target.push(
-      enrichApplicationWithStoredRanking(base, rankingVersionId, scoreByCandidate),
-    );
+    target.push(enriched);
   }
 
   return {

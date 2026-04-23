@@ -336,7 +336,21 @@ export async function executeAiEvaluationsForItem(input: {
 
   const preparedById = new Map(prepared.map((p) => [p.candidateId, p]));
 
-  const cacheScoreByKey = new Map<string, string>();
+  const cacheEvalByKey = new Map<
+    string,
+    {
+      aiScore: number;
+      confidence: number;
+      summary: string;
+      risks: string[];
+      breakdown: {
+        project_complexity: number;
+        growth_trajectory: number;
+        company_reputation: number;
+        jd_alignment: number;
+      };
+    }
+  >();
   if (!input.force && prepared.length > 0) {
     const hits = await selectCandidateAiEvaluationsForPairs({
       organizationId: input.organizationId,
@@ -344,7 +358,18 @@ export async function executeAiEvaluationsForItem(input: {
       pairs: prepared.map((p) => ({ candidateId: p.candidateId, inputHash: p.inputHash })),
     });
     for (const h of hits) {
-      cacheScoreByKey.set(`${h.candidateId}\0${h.inputHash}`, h.aiScore);
+      cacheEvalByKey.set(`${h.candidateId}\0${h.inputHash}`, {
+        aiScore: Number(h.aiScore),
+        confidence: Number(h.confidence),
+        summary: h.summary,
+        risks: h.risks,
+        breakdown: h.breakdown as {
+          project_complexity: number;
+          growth_trajectory: number;
+          company_reputation: number;
+          jd_alignment: number;
+        },
+      });
     }
   }
 
@@ -356,7 +381,7 @@ export async function executeAiEvaluationsForItem(input: {
       const cj = input.candidateIds[j];
       const pj = preparedById.get(cj);
       if (!pj) continue;
-      if (!input.force && cacheScoreByKey.has(`${cj}\0${pj.inputHash}`)) continue;
+      if (!input.force && cacheEvalByKey.has(`${cj}\0${pj.inputHash}`)) continue;
       return true;
     }
     return false;
@@ -371,15 +396,59 @@ export async function executeAiEvaluationsForItem(input: {
     }
 
     const cacheKey = `${cid}\0${p.inputHash}`;
-    if (!input.force && cacheScoreByKey.has(cacheKey)) {
+    if (!input.force && cacheEvalByKey.has(cacheKey)) {
       const row = byId.get(cid)!;
       const signalsSkip = buildSignalsForAiRow({ candidateRow: row, rankedRow: p.rankedRow });
       const candidateInputSkip = buildCandidateEvaluationInputFromSignals(signalsSkip);
+      const cached = cacheEvalByKey.get(cacheKey)!;
+      if (rankingVersionId != null) {
+        const reqSkills = requiredSkillsList
+          .map((s) => normalizeSkill(String(s)))
+          .filter(Boolean);
+        const reqSet = new Set(reqSkills);
+        const matchedRequiredSkillsCount = candidateInputSkip.skills.filter((s) =>
+          reqSet.has(s),
+        ).length;
+        const finalDecision = computeFinalScore({
+          engine: "ai_only",
+          deterministicSubmode: "hybrid",
+          deterministicFinalScore: 0,
+          aiScore: cached.aiScore,
+          aiConfidence: cached.confidence,
+          aiCacheHit: true,
+          requiredSkillsCount: reqSkills.length,
+          matchedRequiredSkillsCount,
+          requiredExperienceYears: item.experienceYears ?? null,
+          candidateExperienceYears: candidateInputSkip.experience_years,
+        });
+        const finalScore = finalDecision.finalScore;
+        await upsertCandidateJobScore({
+          candidateId: cid,
+          requisitionItemId: input.itemId,
+          rankingVersionId,
+          score: finalScore == null ? "0.00" : finalScore.toFixed(2),
+          breakdown: {
+            engine: { ranking_engine: "ai_only" },
+            final: finalScore,
+            ai: {
+              ai_score: cached.aiScore,
+              ai_confidence: cached.confidence,
+              flags: finalDecision.explainFlags,
+            },
+          },
+        });
+        await updateApplicationAtsBucketForCandidate({
+          organizationId: input.organizationId,
+          requisitionItemId: input.itemId,
+          candidateId: cid,
+          atsBucket: finalScore == null ? null : getAtsBucketFromFinalScore(finalScore),
+        });
+      }
       results.push({
         candidate_id: cid,
         status: "skipped_cache",
         input_hash: p.inputHash,
-        ai_score: Number(cacheScoreByKey.get(cacheKey)),
+        ai_score: cached.aiScore,
         ...(input.includeEvalInput
           ? { eval_input: { job, candidate: candidateInputSkip } }
           : {}),

@@ -40,18 +40,57 @@ const W_GROWTH = 0.25;
 const W_COMPANY = 0.15;
 const W_JD = 0.3;
 
+function clamp01(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(1, n));
+}
+
+/**
+ * Softness factor used to reduce JD strictness as required experience grows.
+ * 0 => default weighting, 1 => maximum softening.
+ */
+export function resolveExperienceSoftness(requiredExperienceYears: number | null | undefined): number {
+  const req = Number(requiredExperienceYears);
+  if (!Number.isFinite(req) || req <= 0) return 0.2;
+  return clamp01(0.2 + 0.6 * Math.min(req, 10) / 10);
+}
+
+function resolveAiDimensionWeights(requiredExperienceYears: number | null | undefined): {
+  project: number;
+  growth: number;
+  company: number;
+  jd: number;
+} {
+  const softness = resolveExperienceSoftness(requiredExperienceYears);
+  // Keep all dimensions active, but progressively soften strict JD alignment
+  // and reward potential signals (projects + growth) more.
+  const project = W_PROJECT + 0.08 * softness;
+  const growth = W_GROWTH + 0.06 * softness;
+  const jd = Math.max(0.15, W_JD - 0.12 * softness);
+  const company = Math.max(0.1, 1 - project - growth - jd);
+  // Normalize to avoid rounding drift.
+  const sum = project + growth + jd + company;
+  return {
+    project: project / sum,
+    growth: growth / sum,
+    company: company / sum,
+    jd: jd / sum,
+  };
+}
+
 /** Spec §7 — composite 0–100 from validated dimensions. */
 export function computeAiCompositeScore(b: {
   project_complexity: number;
   growth_trajectory: number;
   company_reputation: number;
   jd_alignment: number;
-}): number {
+}, requiredExperienceYears?: number | null): number {
+  const w = resolveAiDimensionWeights(requiredExperienceYears);
   const raw =
-    W_PROJECT * b.project_complexity +
-    W_GROWTH * b.growth_trajectory +
-    W_COMPANY * b.company_reputation +
-    W_JD * b.jd_alignment;
+    w.project * b.project_complexity +
+    w.growth * b.growth_trajectory +
+    w.company * b.company_reputation +
+    w.jd * b.jd_alignment;
   return Math.max(0, Math.min(100, Number(raw.toFixed(2))));
 }
 

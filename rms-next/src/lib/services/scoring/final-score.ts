@@ -66,6 +66,24 @@ function clampScore(n: number): number {
   return Math.max(0, Math.min(100, n));
 }
 
+function clamp01(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(1, n));
+}
+
+/**
+ * JD strictness softening factor (0..1) derived from required experience years.
+ *
+ * Product intent:
+ * - Fresher roles should be reasonably soft.
+ * - Softness should increase as JD required experience increases.
+ */
+function resolveExperienceSoftness(requiredExperienceYears: number | null): number {
+  const req = Number(requiredExperienceYears);
+  if (!Number.isFinite(req) || req <= 0) return 0.2;
+  return clamp01(0.2 + 0.6 * Math.min(req, 10) / 10);
+}
+
 function mergeGuardrails(
   overrides?: Partial<FinalScoreGuardrailsConfig>,
 ): FinalScoreGuardrailsConfig {
@@ -83,12 +101,14 @@ function applyCaps(params: {
   let out = params.score;
   const capsApplied: Array<{ reason: string; cap: number }> = [];
   const flags: string[] = [];
+  const softness = resolveExperienceSoftness(params.requiredExperienceYears);
 
   if (params.guardrails.capWhenNoRequiredSkillsMatch) {
     const hasReq = params.requiredSkillsCount > 0;
     const matched = params.matchedRequiredSkillsCount;
     if (hasReq && matched <= 0) {
-      const cap = clampScore(params.guardrails.noRequiredSkillsMatchCap);
+      // Higher JD experience => more tolerant cap for missing structured skill match.
+      const cap = clampScore(params.guardrails.noRequiredSkillsMatchCap + 25 * softness);
       if (out > cap) {
         out = cap;
         capsApplied.push({ reason: "no_required_skill_match", cap });
@@ -108,8 +128,10 @@ function applyCaps(params: {
       Number.isFinite(cand)
     ) {
       const gap = req - cand;
-      if (gap >= params.guardrails.experienceFarBelowGapYears) {
-        const cap = clampScore(params.guardrails.experienceFarBelowCap);
+      const dynamicGapThreshold = params.guardrails.experienceFarBelowGapYears + Math.round(2 * softness);
+      if (gap >= dynamicGapThreshold) {
+        // Higher JD experience => less harsh cap (still bounded by guardrails).
+        const cap = clampScore(params.guardrails.experienceFarBelowCap + 18 * softness);
         if (out > cap) {
           out = cap;
           capsApplied.push({ reason: "experience_far_below", cap });
@@ -119,6 +141,7 @@ function applyCaps(params: {
     }
   }
 
+  flags.push(`softness:${softness.toFixed(2)}`);
   return { score: out, capsApplied, flags };
 }
 
@@ -163,8 +186,13 @@ export function computeFinalScore(input: ComputeFinalScoreInput): ComputeFinalSc
         guardrails.flagLowAiConfidence &&
         aiConfOk &&
         Number(input.aiConfidence) < guardrails.lowAiConfidenceThreshold;
+      const softness = resolveExperienceSoftness(input.requiredExperienceYears);
+      const lowConfidencePenaltyFactor = Math.min(
+        1,
+        guardrails.lowAiConfidencePenaltyFactor + 0.08 * softness,
+      );
       final = lowConf
-        ? clampScore(base * guardrails.lowAiConfidencePenaltyFactor)
+        ? clampScore(base * lowConfidencePenaltyFactor)
         : base;
     } else {
       final = null;

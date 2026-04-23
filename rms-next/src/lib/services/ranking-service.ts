@@ -1458,10 +1458,12 @@ export async function recomputeRankingForRequisitionItem(
   const organizationId = await resolveOrganizationIdForRequisitionItem(itemId);
   const candidateBuckets = new Map<number, AtsBucket>();
   for (const r of ranking.ranked_candidates) {
-    candidateBuckets.set(
-      r.candidate_id,
-      getAtsBucketFromFinalScore(r.score.final_score ?? Number.NaN),
-    );
+    const finalScore = r.score.final_score;
+    // Keep candidates with no finalized score in UNRANKED (null bucket), not NOT_SUITABLE.
+    if (finalScore == null || !Number.isFinite(finalScore)) {
+      continue;
+    }
+    candidateBuckets.set(r.candidate_id, getAtsBucketFromFinalScore(finalScore));
   }
   await replaceApplicationAtsBucketsForRequisitionItem({
     requisitionItemId: itemId,
