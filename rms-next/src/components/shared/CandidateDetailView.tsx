@@ -157,7 +157,7 @@ export default function CandidateDetailView({
         // Keep initialCandidate (already set); list payloads often omit interviews[]
       }
     })();
-  }, [initialCandidate.candidate_id, initialCandidate.application_id]);
+  }, [initialCandidate]);
 
   useEffect(() => {
     if (isEvaluateWorkspace) {
@@ -274,6 +274,7 @@ export default function CandidateDetailView({
     evaluationContext?.requiredExperienceYears,
     evaluationContext?.requiredSkillsCount,
     isEvaluateWorkspace,
+    aiEvalWorking,
     evaluationRefreshKey,
   ]);
 
@@ -298,12 +299,13 @@ export default function CandidateDetailView({
     }
   };
 
-  const handleEvaluationReject = async () => {
+  const handleEvaluationReject = async (reason: string) => {
     setError(null);
     try {
       candidateHydrateGenRef.current += 1;
       const updated = await updateCandidateStageCompatible(candidate, {
         new_stage: "Rejected",
+        reason,
       });
       setCandidate(updated);
       onUpdate(updated);
@@ -344,14 +346,6 @@ export default function CandidateDetailView({
       setError(getCandidateActionErrorMessage(err, "AI evaluation failed"));
     } finally {
       setAiEvalWorking(false);
-    }
-  };
-
-  const scrollBodyToTop = () => {
-    if (variant === "page") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    } else {
-      modalBodyRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
 
@@ -683,11 +677,23 @@ export default function CandidateDetailView({
                 <CandidateEvaluationCard
                   model={evaluationModel}
                   readOnly={!canEdit}
-                  disabled={evaluationShortlistBlocked === true}
-                  shortlistDisabledReason={evaluationShortlistBlockedReason}
+                  shortlistDone={
+                    ["Shortlisted", "Interviewing", "Offered", "Hired"].includes(
+                      candidate.current_stage,
+                    )
+                  }
+                  rejectDone={candidate.current_stage === "Rejected"}
+                  disabled={
+                    evaluationShortlistBlocked === true ||
+                    candidate.current_stage === "Rejected"
+                  }
+                  shortlistDisabledReason={
+                    candidate.current_stage === "Rejected"
+                      ? "This candidate is rejected and cannot be shortlisted."
+                      : evaluationShortlistBlockedReason
+                  }
                   onShortlist={() => void handleEvaluationShortlist()}
-                  onReject={() => void handleEvaluationReject()}
-                  onViewDetails={scrollBodyToTop}
+                  onReject={(reason) => void handleEvaluationReject(reason)}
                 />
               </>
             ) : null}

@@ -1,5 +1,16 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  /**
+   * Permanent fix for intermittent dev 500s like:
+   * - GET /_next/static/* 500
+   * - Cannot find module './NNNN.js' from .next/server/webpack-runtime.js
+   *
+   * Root cause: switching between `next build` and `next dev` can leave `.next`
+   * in an inconsistent/corrupted state (especially with filesystem caching).
+   *
+   * Solution: keep dev output isolated from prod build output.
+   */
+  distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
   // Native/CommonJS parsers must not be bundled for API routes / server actions.
   serverExternalPackages: ["pdf-parse", "word-extractor"],
   // Reduces duplicate network calls in development caused by React 18 StrictMode

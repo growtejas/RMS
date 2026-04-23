@@ -626,8 +626,9 @@ export async function uploadItemCv(
   itemId: number,
   organizationId: string,
   file: UploadBody,
-  userId: number,
+  _userId: number,
 ) {
+  void _userId;
   const size = "buffer" in file ? file.buffer.length : file.size;
   // CV is treated as a PDF for now (matches the Shortlist gate + preview logic).
   assertPdf(file.filename, file.mime, size);
@@ -664,8 +665,9 @@ export async function uploadItemCv(
 export async function deleteItemCv(
   itemId: number,
   organizationId: string,
-  userId: number,
+  _userId: number,
 ) {
+  void _userId;
   const item = await findItemById(itemId, organizationId);
   if (!item) {
     throw new HttpError(404, "Requisition item not found");

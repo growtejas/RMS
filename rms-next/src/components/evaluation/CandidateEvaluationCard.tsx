@@ -5,17 +5,20 @@ import { Check, AlertTriangle } from "lucide-react";
 import type { CandidateEvaluationCardProps } from "@/components/evaluation/candidate-evaluation-card.types";
 import { bandToUserLabel } from "@/components/evaluation/mapRankedCandidateToEvaluationCard";
 import ShortlistConfirmModal from "@/components/evaluation/ShortlistConfirmModal";
+import RejectConfirmModal from "@/components/evaluation/RejectConfirmModal";
 
 export default function CandidateEvaluationCard({
   model,
   onShortlist,
   onReject,
-  onViewDetails,
   disabled,
   shortlistDisabledReason,
+  shortlistDone,
+  rejectDone,
   readOnly,
 }: CandidateEvaluationCardProps) {
   const [shortlistOpen, setShortlistOpen] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
   const [aiExpanded, setAiExpanded] = useState(false);
   const [shortlistBlockedNudge, setShortlistBlockedNudge] = useState(false);
 
@@ -274,16 +277,19 @@ export default function CandidateEvaluationCard({
               <button
                 type="button"
                 className="action-button primary"
-                aria-disabled={disabled ? true : undefined}
+                aria-disabled={disabled || shortlistDone ? true : undefined}
                 title={shortlistDisabledReason}
                 style={{
                   fontSize: 11,
                   padding: "6px 12px",
-                  opacity: disabled ? 0.6 : 1,
-                  cursor: disabled ? "not-allowed" : "pointer",
+                  opacity: disabled || shortlistDone ? 0.6 : 1,
+                  cursor: disabled || shortlistDone ? "not-allowed" : "pointer",
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (shortlistDone) {
+                    return;
+                  }
                   if (disabled) {
                     setShortlistBlockedNudge(true);
                     window.setTimeout(() => setShortlistBlockedNudge(false), 2000);
@@ -292,29 +298,28 @@ export default function CandidateEvaluationCard({
                   setShortlistOpen(true);
                 }}
               >
-                Shortlist
+                {shortlistDone ? "Shortlisted" : "Shortlist"}
               </button>
               <button
                 type="button"
                 className="action-button"
-                style={{ fontSize: 11, padding: "6px 12px" }}
+                style={{
+                  fontSize: 11,
+                  padding: "6px 12px",
+                  borderColor: "rgba(239, 68, 68, 0.35)",
+                  backgroundColor: "rgba(239, 68, 68, 0.06)",
+                  color: "#b91c1c",
+                  fontWeight: 800,
+                  opacity: rejectDone ? 0.6 : 1,
+                  cursor: rejectDone ? "not-allowed" : "pointer",
+                }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onReject();
+                  if (rejectDone) return;
+                  setRejectOpen(true);
                 }}
               >
-                Reject
-              </button>
-              <button
-                type="button"
-                className="action-button"
-                style={{ fontSize: 11, padding: "6px 12px" }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onViewDetails();
-                }}
-              >
-                View details
+                {rejectDone ? "Rejected" : "Reject"}
               </button>
             </div>
 
@@ -349,6 +354,18 @@ export default function CandidateEvaluationCard({
           onConfirm={() => {
             setShortlistOpen(false);
             onShortlist();
+          }}
+        />
+      ) : null}
+
+      {!readOnly ? (
+        <RejectConfirmModal
+          open={rejectOpen}
+          candidateName={model.fullName}
+          onCancel={() => setRejectOpen(false)}
+          onConfirm={(reason) => {
+            setRejectOpen(false);
+            onReject(reason);
           }}
         />
       ) : null}

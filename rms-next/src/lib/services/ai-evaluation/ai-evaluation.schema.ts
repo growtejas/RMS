@@ -37,7 +37,6 @@ export type CandidateEvaluationInput = z.infer<typeof candidateEvaluationInputSc
 
 const W_PROJECT = 0.3;
 const W_GROWTH = 0.25;
-const W_COMPANY = 0.15;
 const W_JD = 0.3;
 
 function clamp01(n: number): number {

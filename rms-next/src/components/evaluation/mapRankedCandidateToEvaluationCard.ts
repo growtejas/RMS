@@ -140,7 +140,7 @@ function splitSummaryLines(raw: string | undefined, maxLines: number): string[] 
   const parts = cleaned.split(/(?<=[.!?])\s+/).filter(Boolean);
   const out: string[] = [];
   for (const p of parts) {
-    let line = p.trim();
+    const line = p.trim();
     if (/^(may|could potentially|might)\s/i.test(line)) continue;
     out.push(line);
     if (out.length >= maxLines) break;

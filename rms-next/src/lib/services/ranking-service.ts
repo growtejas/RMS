@@ -40,7 +40,6 @@ import {
 import {
   cosineSimilarity,
   ensureCandidateEmbedding,
-  ensureRequisitionItemEmbedding,
 } from "@/lib/services/embeddings-service";
 import {
   contentHashFromArtifact,
@@ -74,6 +73,11 @@ type RankedCandidateScore = {
   ai_confidence?: number;
   ai_summary?: string;
   ai_risks?: string[];
+};
+
+type ExplainReasonList = string[] & {
+  _matchedTerms?: string[];
+  _missingTerms?: string[];
 };
 
 export type RankedCandidateExplain = {
@@ -800,23 +804,6 @@ function mergeResumeDerivedBatches(
   return Array.from(map.values());
 }
 
-function atsBreakdownToExplain(b: AtsV1Breakdown) {
-  const req = b.required_skills_count ?? 0;
-  const mat = b.matched_skills_count ?? 0;
-  return {
-    skills: req > 0 ? (b.skills_alignment ?? Math.min(1, Math.max(0, mat / req))) : 0,
-    experience: b.experience,
-    notice: b.notice,
-    education: b.education,
-    seniority: b.seniority,
-    bonus: 0,
-    matched_skills: mat,
-    required_skills: req,
-    partial_data: b.partial_data,
-    flags: b.flags,
-  };
-}
-
 async function buildRankingForRequisitionItem(
   itemId: number,
   weights: RankingWeights,
@@ -997,7 +984,6 @@ async function buildRankingForRequisitionItem(
     const reqSkillsNorm = requiredSkillsList.map((s) => normalizeSkill(s));
     const candSkillsNorm = new Set(signals.skills_normalized);
     const matchedSkills = Array.from(new Set(reqSkillsNorm.filter((s) => candSkillsNorm.has(s))));
-    const missingSkills = Array.from(new Set(reqSkillsNorm.filter((s) => !candSkillsNorm.has(s))));
     const skillMatchRatio =
       reqSkillsNorm.length > 0 ? matchedSkills.length / reqSkillsNorm.length : 1;
 
@@ -1011,7 +997,7 @@ async function buildRankingForRequisitionItem(
     let skillGateMultiplier = 1;
     let deterministicFinalScore: number | undefined = undefined;
 
-    const reasons: string[] = [];
+    const reasons: ExplainReasonList = [];
 
     if (isAiOnly) {
       // Strict ai_only: do not compute deterministic scoring layers. Keep deprecated fields stable (zeros).
@@ -1188,8 +1174,8 @@ async function buildRankingForRequisitionItem(
 
       // Keep term arrays for deterministic modes.
       // (Set later in explain block)
-      (reasons as any)._matchedTerms = matchedTerms.slice(0, 15);
-      (reasons as any)._missingTerms = missingTerms.slice(0, 15);
+      reasons._matchedTerms = matchedTerms.slice(0, 15);
+      reasons._missingTerms = missingTerms.slice(0, 15);
     }
 
     const finalDecision = computeFinalScore({
@@ -1212,7 +1198,6 @@ async function buildRankingForRequisitionItem(
       reasons.push(`Resume duplicate flag: same content as candidate_id ${candidate.duplicateResumeOfCandidateId}`);
     }
 
-    const explainAts = atsBreakdown ? atsBreakdownToExplain(atsBreakdown) : undefined;
     const resumeParserExplain = resumeParserForRankingResponse(
       parsedArtifact,
       "no_resume_reference",

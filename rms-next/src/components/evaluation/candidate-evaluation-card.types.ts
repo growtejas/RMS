@@ -36,10 +36,13 @@ export type CandidateEvaluationCardModel = {
 export type CandidateEvaluationCardProps = {
   model: CandidateEvaluationCardModel;
   onShortlist: () => void;
-  onReject: () => void;
-  onViewDetails: () => void;
+  onReject: (reason: string) => void;
   disabled?: boolean;
   shortlistDisabledReason?: string;
+  /** When true, the candidate is already shortlisted and the button should reflect that. */
+  shortlistDone?: boolean;
+  /** When true, the candidate is already rejected and the button should reflect that. */
+  rejectDone?: boolean;
   /** Hide Shortlist / Reject / View details (e.g. Manager read-only). */
   readOnly?: boolean;
 };

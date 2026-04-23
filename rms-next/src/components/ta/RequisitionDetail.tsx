@@ -953,27 +953,31 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     [rankingItemId],
   );
 
-  const runAiEvalTopN = useCallback(
-    async (topN = 10) => {
-      if (!rankingItemId) return;
-      setAiEvalWorking(true);
-      setTransitionError(null);
-      try {
-        await runAiEvaluationForRequisitionItem(rankingItemId, {
-          top_n: topN,
-          force: false,
-        });
-        await loadRanking(false);
-      } catch (err: unknown) {
-        setTransitionError(
-          getCandidateActionErrorMessage(err, "AI evaluation failed"),
-        );
-      } finally {
-        setAiEvalWorking(false);
-      }
-    },
-    [loadRanking, rankingItemId],
-  );
+  const runAiEvalAllPresent = useCallback(async () => {
+    if (!rankingItemId) return;
+    const ids = Array.from(
+      new Set((rankingData?.ranked_candidates ?? []).map((rc) => rc.candidate_id)),
+    );
+    if (ids.length === 0) {
+      setTransitionError("No ranked candidates found to evaluate.");
+      return;
+    }
+    setAiEvalWorking(true);
+    setTransitionError(null);
+    try {
+      await runAiEvaluationForRequisitionItem(rankingItemId, {
+        candidate_ids: ids,
+        force: false,
+      });
+      await loadRanking(false);
+    } catch (err: unknown) {
+      setTransitionError(
+        getCandidateActionErrorMessage(err, "AI evaluation failed"),
+      );
+    } finally {
+      setAiEvalWorking(false);
+    }
+  }, [loadRanking, rankingItemId, rankingData?.ranked_candidates]);
 
   const refetchRequisition = useCallback(async () => {
     const reqId = parseReqId(effectiveTicketId);
@@ -1404,7 +1408,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       const noticeRaw = newCandidateNotice.trim();
       const noticeNum =
         noticeRaw === "" ? undefined : Number.parseInt(noticeRaw, 10);
-      await createCandidate({
+      const created = await createCandidate({
         requisition_item_id: addCandidateItemId,
         requisition_id: reqId,
         full_name: newCandidateName.trim(),
@@ -1427,12 +1431,44 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       setNewCandidateReferral(false);
       setNewCandidateSkills("");
       setResumeFile(null);
+      // Keep the form mounted while we refresh data to avoid UI “glitches” from collapsing/expanding.
+      // Refreshes can be slow (uploads + ranking), so we do them together, then close the form.
+      await Promise.allSettled([loadCandidates(), loadPipelineCompact()]);
+
+      /**
+       * Root cause of "everyone becomes UNRANKED after adding a candidate":
+       * - `recomputeRequisitionItemRanking()` creates a NEW `ranking_version_id`.
+       * - ATS buckets read scores from `candidate_job_scores` for the LATEST ranking version.
+       * - Until AI eval runs for that new version, all candidates appear UNRANKED.
+       *
+       * Fix: recompute first (so the new candidate is included), then run AI eval for ALL present
+       * candidates to populate scores for the new ranking version (mostly cache hits), then refresh.
+       */
+      await recomputeRequisitionItemRanking(addCandidateItemId);
+      try {
+        const nextRanking = await fetchRequisitionItemRanking(addCandidateItemId, {
+          aiEval: false,
+        });
+        const ids = Array.from(
+          new Set((nextRanking?.ranked_candidates ?? []).map((rc) => rc.candidate_id)),
+        );
+        if (ids.length > 0) {
+          await runAiEvaluationForRequisitionItem(addCandidateItemId, {
+            candidate_ids: ids,
+            force: false,
+          });
+        }
+      } catch {
+        // Best-effort: if AI eval fails here, the board may show UNRANKED until user triggers AI eval manually.
+      }
+
+      // Refresh the currently-selected ranking/buckets UI (without switching the user's context).
+      if (rankingItemId === addCandidateItemId) {
+        await loadRanking(false);
+      }
+      setPipelineFull(null);
       setShowAddCandidate(false);
       setAddCandidateItemId(null);
-      await loadCandidates();
-      await loadPipelineCompact();
-      await loadRanking(true);
-      setPipelineFull(null);
     } catch (err: any) {
       setTransitionError(
         getCandidateActionErrorMessage(err, "Failed to add candidate"),
@@ -4577,11 +4613,11 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 <button
                   className="action-button"
                   disabled={aiEvalWorking || !rankingItemId}
-                  onClick={() => void runAiEvalTopN(10)}
+                  onClick={() => void runAiEvalAllPresent()}
                   style={{ fontSize: "11px", padding: "4px 10px" }}
-                  title="Runs AI evaluation for top 10 ranked candidates and stores results."
+                  title="Runs AI evaluation for all currently ranked candidates and stores results."
                 >
-                  {aiEvalWorking ? "AI evaluating..." : "AI Eval (Top 10)"}
+                  {aiEvalWorking ? "AI evaluating..." : "AI Eval (All)"}
                 </button>
               </div>
             </div>
@@ -4827,71 +4863,10 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   </span>
                 </div>
 
-                {rankingData.ranked_candidates.length === 0 ? (
-                  <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                    No ranked candidates available.
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    <div
-                      style={{
-                        fontSize: "11px",
-                        color: "var(--text-tertiary)",
-                        marginBottom: 2,
-                      }}
-                    >
-                      Open a candidate to see role fit, AI insight, and actions.
-                    </div>
-                    {rankingData.ranked_candidates.slice(0, 10).map((rc, idx) => (
-                      <div
-                        key={rc.candidate_id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => openEvaluateFromRankedRow(rc)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            openEvaluateFromRankedRow(rc);
-                          }
-                        }}
-                        style={{
-                          border: "1px solid var(--border-subtle)",
-                          borderRadius: "8px",
-                          padding: "10px 12px",
-                          backgroundColor: "var(--bg-primary)",
-                          cursor: "pointer",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: "8px",
-                            marginBottom: "4px",
-                          }}
-                        >
-                          <div style={{ fontSize: "13px", fontWeight: 600 }}>
-                            #{idx + 1} {rc.full_name}
-                          </div>
-                          <div style={{ fontSize: "13px", fontWeight: 700 }}>
-                            {rc.score.final_score == null
-                              ? "—"
-                              : Math.round(rc.score.final_score)}
-                          </div>
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "11px",
-                            color: "var(--text-secondary)",
-                          }}
-                        >
-                          {rc.email} • {rc.current_stage}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
+                  Candidate ranking preview is hidden on this page. Use the ATS evaluation board,
+                  pipeline board, and filters above to manage candidates.
+                </div>
               </div>
             )}
           </div>

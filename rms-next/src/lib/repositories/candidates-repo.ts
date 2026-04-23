@@ -2,7 +2,6 @@ import { and, asc, count, desc, eq, inArray, ne, notInArray, sql } from "drizzle
 
 import { getDb } from "@/lib/db";
 import {
-  applications,
   auditLog,
   candidates,
   interviews,

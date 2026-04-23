@@ -21,7 +21,6 @@ import {
 } from "@/lib/services/ai-evaluation/build-ai-evaluation-payload";
 import {
   resolveAiEvalEnabled,
-  resolveAiEvalConfigured,
   resolveAiEvalMinIntervalMs,
   resolveAiEvalActiveModel,
   resolveAiEvalPromptVersion,

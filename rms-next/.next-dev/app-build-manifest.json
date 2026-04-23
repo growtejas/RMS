@@ -1,0 +1,41 @@
+{
+  "pages": {
+    "/layout": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/css/app/layout.css",
+      "static/chunks/app/layout.js"
+    ],
+    "/ta/requisitions/[id]/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/ta/requisitions/[id]/page.js"
+    ],
+    "/ta/layout": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/css/app/ta/layout.css",
+      "static/chunks/app/ta/layout.js"
+    ],
+    "/ta/candidates/[candidateId]/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/ta/candidates/[candidateId]/page.js"
+    ],
+    "/ta/interviews/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/ta/interviews/page.js"
+    ],
+    "/ta/candidates/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/ta/candidates/page.js"
+    ],
+    "/ta/my-requisitions/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/ta/my-requisitions/page.js"
+    ]
+  }
+}
