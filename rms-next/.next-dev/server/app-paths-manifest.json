@@ -1,12 +1,9 @@
 {
-  "/api/requisitions/[reqId]/route": "app/api/requisitions/[reqId]/route.js",
-  "/api/audit-logs/route": "app/api/audit-logs/route.js",
-  "/api/requisitions/[reqId]/status-history/route": "app/api/requisitions/[reqId]/status-history/route.js",
   "/api/users/route": "app/api/users/route.js",
-  "/api/applications/route": "app/api/applications/route.js",
-  "/api/ranking/requisition-items/[itemId]/route": "app/api/ranking/requisition-items/[itemId]/route.js",
   "/api/requisitions/route": "app/api/requisitions/route.js",
-  "/ta/requisitions/[id]/page": "app/ta/requisitions/[id]/page.js",
+  "/ta/interviews/page": "app/ta/interviews/page.js",
   "/ta/requisitions/page": "app/ta/requisitions/page.js",
-  "/ta/candidates/[candidateId]/page": "app/ta/candidates/[candidateId]/page.js"
+  "/ta/requisitions/[id]/page": "app/ta/requisitions/[id]/page.js",
+  "/ta/candidates/[candidateId]/page": "app/ta/candidates/[candidateId]/page.js",
+  "/ta/candidates/page": "app/ta/candidates/page.js"
 }

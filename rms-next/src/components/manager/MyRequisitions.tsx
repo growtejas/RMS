@@ -1,61 +1,148 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Eye } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { AlertTriangle, Eye, RefreshCw, Search } from "lucide-react";
 
-import { apiClient } from "@/lib/api/client";
+import {
+  useManagerRequisitionList,
+} from "@/hooks/manager/useManagerRequisitionList";
 
-interface Requisition {
-  req_id: number;
-  project_name: string;
-  client_name: string | null;
-  overall_status: string;
-  required_by_date: string;
-  priority: string;
-  budget_amount: number;
-  created_at: string;
-}
+const PAGE_SIZE = 12;
+type SortValue =
+  | "created_desc"
+  | "created_asc"
+  | "required_desc"
+  | "required_asc"
+  | "budget_desc"
+  | "budget_asc";
+type StatusValue = "all" | "pending" | "in_progress" | "closed" | "draft";
+type PriorityValue = "all" | "high" | "medium" | "low";
 
-const INITIAL_VISIBLE = 20;
+const SORT_OPTIONS: Array<{ label: string; value: SortValue }> = [
+  { label: "Newest created", value: "created_desc" },
+  { label: "Oldest created", value: "created_asc" },
+  { label: "Required date (soonest)", value: "required_asc" },
+  { label: "Required date (latest)", value: "required_desc" },
+  { label: "Budget (high to low)", value: "budget_desc" },
+  { label: "Budget (low to high)", value: "budget_asc" },
+];
+
+const statusLabels: Record<StatusValue, string> = {
+  all: "All statuses",
+  pending: "Pending",
+  in_progress: "In Progress",
+  closed: "Closed",
+  draft: "Draft",
+};
+
+const priorityLabels: Record<PriorityValue, string> = {
+  all: "All priorities",
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
+
+const getStatusBucket = (status: string): Exclude<StatusValue, "all"> => {
+  const normalized = status.toLowerCase();
+  if (normalized.includes("draft")) return "draft";
+  if (
+    normalized.includes("fulfilled") ||
+    normalized.includes("closed") ||
+    normalized.includes("cancel") ||
+    normalized.includes("reject")
+  ) {
+    return "closed";
+  }
+  if (
+    normalized.includes("pending") ||
+    normalized.includes("approval") ||
+    normalized.includes("awaiting")
+  ) {
+    return "pending";
+  }
+  return "in_progress";
+};
+
+const parsePriority = (priority: string): Exclude<PriorityValue, "all"> => {
+  const normalized = priority.toLowerCase();
+  if (normalized.includes("high") || normalized.includes("critical")) {
+    return "high";
+  }
+  if (normalized.includes("low")) {
+    return "low";
+  }
+  return "medium";
+};
 
 const MyRequisitions: React.FC = () => {
   const router = useRouter();
-  const [requisitions, setRequisitions] = useState<Requisition[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const { requisitions, isLoading, error, reload } = useManagerRequisitionList();
 
-  useEffect(() => {
-    let isMounted = true;
+  const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
+  const [statusFilter, setStatusFilter] = useState<StatusValue>(() => {
+    const value = searchParams.get("status");
+    if (value === "pending" || value === "in_progress" || value === "closed" || value === "draft") {
+      return value;
+    }
+    return "all";
+  });
+  const [priorityFilter, setPriorityFilter] = useState<PriorityValue>(() => {
+    const value = searchParams.get("priority");
+    if (value === "high" || value === "medium" || value === "low") {
+      return value;
+    }
+    return "all";
+  });
+  const [sortBy, setSortBy] = useState<SortValue>(() => {
+    const value = searchParams.get("sort");
+    if (
+      value === "created_desc" ||
+      value === "created_asc" ||
+      value === "required_desc" ||
+      value === "required_asc" ||
+      value === "budget_desc" ||
+      value === "budget_asc"
+    ) {
+      return value;
+    }
+    return "created_desc";
+  });
+  const [page, setPage] = useState(() => {
+    const value = Number.parseInt(searchParams.get("page") ?? "1", 10);
+    return Number.isFinite(value) && value > 0 ? value : 1;
+  });
 
-    const fetchRequisitions = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        const response = await apiClient.get<Requisition[]>("/requisitions/my");
-        if (isMounted) {
-          setRequisitions(response.data ?? []);
-          setVisibleCount(INITIAL_VISIBLE);
-        }
-      } catch (err) {
-        if (!isMounted) return;
-        const message =
-          err instanceof Error ? err.message : "Failed to load requisitions";
-        setError(message);
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    fetchRequisitions();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  const setQueryParams = (next: {
+    q?: string;
+    status?: StatusValue;
+    priority?: PriorityValue;
+    sort?: SortValue;
+    page?: number;
+  }) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next.q !== undefined) {
+      next.q ? params.set("q", next.q) : params.delete("q");
+    }
+    if (next.status !== undefined) {
+      next.status === "all" ? params.delete("status") : params.set("status", next.status);
+    }
+    if (next.priority !== undefined) {
+      next.priority === "all" ? params.delete("priority") : params.set("priority", next.priority);
+    }
+    if (next.sort !== undefined) {
+      next.sort === "created_desc" ? params.delete("sort") : params.set("sort", next.sort);
+    }
+    if (next.page !== undefined) {
+      next.page <= 1 ? params.delete("page") : params.set("page", String(next.page));
+    }
+    const queryString = params.toString();
+    router.replace(queryString ? `${pathname}?${queryString}` : pathname, {
+      scroll: false,
+    });
+  };
 
   const formatDate = (value: string) => {
     if (!value) return "—";
@@ -89,19 +176,230 @@ const MyRequisitions: React.FC = () => {
     }
     return `status-badge ${status.toLowerCase().replace(/\s+/g, "-")}`;
   };
+  const kpis = useMemo(() => {
+    const totalBudget = requisitions.reduce(
+      (sum, req) => sum + (req.effective_budget ?? 0),
+      0,
+    );
+    const pending = requisitions.filter(
+      (req) => getStatusBucket(req.overall_status) === "pending",
+    ).length;
+    const inProgress = requisitions.filter(
+      (req) => getStatusBucket(req.overall_status) === "in_progress",
+    ).length;
+    const atRisk = requisitions.filter((req) => {
+      if (!req.required_by_date) return false;
+      const days =
+        (new Date(req.required_by_date).getTime() - Date.now()) /
+        (1000 * 60 * 60 * 24);
+      return days <= 7 && days >= 0 && getStatusBucket(req.overall_status) !== "closed";
+    }).length;
+    return { totalBudget, pending, inProgress, atRisk };
+  }, [requisitions]);
+
+  const filteredAndSorted = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const filtered = requisitions.filter((req) => {
+      const status = getStatusBucket(req.overall_status);
+      const priority = parsePriority(req.priority || "");
+
+      const matchesStatus = statusFilter === "all" || statusFilter === status;
+      const matchesPriority =
+        priorityFilter === "all" || priorityFilter === priority;
+      const haystack = [
+        `REQ-${req.req_id}`,
+        req.project_name,
+        req.client_name ?? "",
+        req.overall_status,
+      ]
+        .join(" ")
+        .toLowerCase();
+      const matchesQuery = !normalizedQuery || haystack.includes(normalizedQuery);
+
+      return matchesStatus && matchesPriority && matchesQuery;
+    });
+
+    const sorted = [...filtered];
+    sorted.sort((a, b) => {
+      switch (sortBy) {
+        case "created_asc":
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        case "created_desc":
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        case "required_asc":
+          return (
+            new Date(a.required_by_date).getTime() -
+            new Date(b.required_by_date).getTime()
+          );
+        case "required_desc":
+          return (
+            new Date(b.required_by_date).getTime() -
+            new Date(a.required_by_date).getTime()
+          );
+        case "budget_asc":
+          return (a.effective_budget ?? 0) - (b.effective_budget ?? 0);
+        case "budget_desc":
+          return (b.effective_budget ?? 0) - (a.effective_budget ?? 0);
+        default:
+          return 0;
+      }
+    });
+
+    return sorted;
+  }, [priorityFilter, query, requisitions, sortBy, statusFilter]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredAndSorted.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const pageRows = filteredAndSorted.slice(pageStart, pageStart + PAGE_SIZE);
+
+  useEffect(() => {
+    if (page > pageCount) {
+      setPage(pageCount);
+      setQueryParams({ page: pageCount });
+    }
+  }, [page, pageCount]);
+
   return (
-    <div className="bg-white rounded-xl shadow-sm p-6">
-      {/* Page Header */}
-      <div className="manager-header">
-        <h2>My Requisitions</h2>
-        <p className="subtitle">
-          Track progress of the demands you have raised.
-        </p>
+    <div className="space-y-4">
+      <div className="bg-white rounded-xl shadow-sm p-6">
+        <div className="manager-header">
+          <h2>My Requisitions</h2>
+          <p className="subtitle">
+            Track progress, identify bottlenecks, and drill into requisition details.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-4 gap-3 mt-4">
+          <div className="rounded-lg border border-slate-200 p-4 bg-slate-50">
+            <div className="text-xs text-slate-500">Total Requisitions</div>
+            <div className="text-2xl font-semibold text-slate-900">
+              {requisitions.length}
+            </div>
+          </div>
+          <div className="rounded-lg border border-amber-200 p-4 bg-amber-50">
+            <div className="text-xs text-amber-700">Pending Approvals</div>
+            <div className="text-2xl font-semibold text-amber-900">{kpis.pending}</div>
+          </div>
+          <div className="rounded-lg border border-blue-200 p-4 bg-blue-50">
+            <div className="text-xs text-blue-700">In Progress</div>
+            <div className="text-2xl font-semibold text-blue-900">{kpis.inProgress}</div>
+          </div>
+          <div className="rounded-lg border border-rose-200 p-4 bg-rose-50">
+            <div className="text-xs text-rose-700">At Risk (next 7 days)</div>
+            <div className="text-2xl font-semibold text-rose-900">{kpis.atRisk}</div>
+          </div>
+        </div>
+
+        <div className="mt-3 text-xs text-slate-500">
+          Total requested budget:{" "}
+          <span className="font-medium text-slate-700">{formatCurrency(kpis.totalBudget)}</span>
+        </div>
       </div>
 
-      {/* Requisitions Table */}
-      <div className="data-table-container">
-        <table className="data-table">
+      <div className="bg-white rounded-xl shadow-sm p-6">
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-medium text-slate-600">Search</label>
+            <div className="mt-1 flex items-center rounded-lg border border-slate-200 px-3">
+              <Search size={16} className="text-slate-400" />
+              <input
+                value={query}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setQuery(next);
+                  setPage(1);
+                  setQueryParams({ q: next, page: 1 });
+                }}
+                placeholder="REQ ID, project, client, status"
+                className="w-full border-0 outline-none bg-transparent px-2 py-2 text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs font-medium text-slate-600">Status</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => {
+                  const next = e.target.value as StatusValue;
+                  setStatusFilter(next);
+                  setPage(1);
+                  setQueryParams({ status: next, page: 1 });
+                }}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              >
+                {Object.entries(statusLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-slate-600">Priority</label>
+              <select
+                value={priorityFilter}
+                onChange={(e) => {
+                  const next = e.target.value as PriorityValue;
+                  setPriorityFilter(next);
+                  setPage(1);
+                  setQueryParams({ priority: next, page: 1 });
+                }}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              >
+                {Object.entries(priorityLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-slate-600">Sort</label>
+              <div className="mt-1 flex items-center gap-2">
+                <select
+                  value={sortBy}
+                  onChange={(e) => {
+                    const next = e.target.value as SortValue;
+                    setSortBy(next);
+                    setPage(1);
+                    setQueryParams({ sort: next, page: 1 });
+                  }}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                >
+                  {SORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="action-button text-sm"
+                  onClick={() => {
+                    void reload();
+                  }}
+                  title="Refresh"
+                >
+                  <RefreshCw size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 text-xs text-slate-500">
+          Showing {filteredAndSorted.length} of {requisitions.length} requisitions
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm p-6">
+        <div className="data-table-container">
+          <table className="data-table">
           <thead>
             <tr>
               <th>Req ID</th>
@@ -148,7 +446,20 @@ const MyRequisitions: React.FC = () => {
 
             {!isLoading &&
               !error &&
-              requisitions.slice(0, visibleCount).map((req) => (
+              filteredAndSorted.length === 0 &&
+              requisitions.length > 0 && (
+                <tr>
+                  <td colSpan={9}>
+                    <div className="empty-state">
+                      No requisitions match the selected filters.
+                    </div>
+                  </td>
+                </tr>
+              )}
+
+            {!isLoading &&
+              !error &&
+              pageRows.map((req) => (
                 <tr key={req.req_id}>
                   <td>
                     <strong>REQ-{req.req_id}</strong>
@@ -162,7 +473,7 @@ const MyRequisitions: React.FC = () => {
                   </td>
                   <td>{req.priority || "—"}</td>
                   <td>{formatDate(req.required_by_date)}</td>
-                  <td>{formatCurrency(req.budget_amount)}</td>
+                  <td>{formatCurrency(req.effective_budget ?? null)}</td>
                   <td>{formatDate(req.created_at)}</td>
                   <td>
                     <button
@@ -181,52 +492,51 @@ const MyRequisitions: React.FC = () => {
         </table>
       </div>
 
-      {!isLoading && !error && requisitions.length > visibleCount && (
-        <div
-          style={{
-            marginTop: "16px",
-            display: "flex",
-            justifyContent: "center",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "8px",
-          }}
-        >
-          <button
-            type="button"
-            className="action-button"
-            onClick={() => setVisibleCount((prev) => prev + 20)}
-          >
-            Load more requisitions
-          </button>
-          <span
-            style={{ fontSize: "12px", color: "var(--text-tertiary)" }}
-          >
-            Showing {visibleCount} of {requisitions.length} requisitions
-          </span>
-        </div>
-      )}
-
-      {!isLoading &&
-        !error &&
-        requisitions.length > 0 &&
-        requisitions.length <= visibleCount && (
-          <div
-            style={{
-              marginTop: "12px",
-              fontSize: "12px",
-              color: "var(--text-tertiary)",
-              textAlign: "center",
-            }}
-          >
-            Showing all {requisitions.length} requisitions
+        {!isLoading && !error && filteredAndSorted.length > 0 && (
+          <div className="mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <div className="text-xs text-slate-500">
+              Page {currentPage} of {pageCount}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="action-button text-sm"
+                disabled={currentPage <= 1}
+                onClick={() => {
+                  const next = currentPage - 1;
+                  setPage(next);
+                  setQueryParams({ page: next });
+                }}
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                className="action-button text-sm"
+                disabled={currentPage >= pageCount}
+                onClick={() => {
+                  const next = currentPage + 1;
+                  setPage(next);
+                  setQueryParams({ page: next });
+                }}
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
 
-      {/* Authority Notice */}
-      <div className="mt-4 text-xs text-slate-500">
-        • This view is read-only. • Item status, assignments, and closure are
-        handled by HR / TA.
+        {kpis.atRisk > 0 && !isLoading && (
+          <div className="mt-4 text-xs text-rose-700 flex items-center gap-1">
+            <AlertTriangle size={14} />
+            {kpis.atRisk} requisition{kpis.atRisk > 1 ? "s are" : " is"} due
+            within 7 days. Review required-by dates and bottlenecks.
+          </div>
+        )}
+
+        <div className="mt-4 text-xs text-slate-500">
+          This view is read-only. Item status, assignments, and closure are handled by HR/TA workflows.
+        </div>
       </div>
     </div>
   );

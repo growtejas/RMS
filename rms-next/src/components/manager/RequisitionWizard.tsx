@@ -27,6 +27,7 @@ import React, {
 } from "react";
 import {
   Check,
+  AlertCircle,
   Plus,
   X,
   Upload,
@@ -111,6 +112,10 @@ interface StepIndicatorProps {
 interface SkillResponse {
   skill_id: number;
   skill_name: string;
+}
+
+interface JDSkillExtractionResponse {
+  extractedSkills: string[];
 }
 
 interface LocationResponse {
@@ -463,6 +468,9 @@ const App: React.FC = () => {
   const [newSkillInputs, setNewSkillInputs] = useState<Record<string, string>>(
     {},
   );
+  const [jdExtractionStatus, setJdExtractionStatus] = useState<
+    Record<string, { loading: boolean; message: string; error: boolean }>
+  >({});
 
   // File input refs
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -968,7 +976,7 @@ const App: React.FC = () => {
   };
 
   // File upload handling
-  const handleFileUpload = (
+  const handleFileUpload = async (
     positionId: string,
     event: ChangeEvent<HTMLInputElement>,
   ) => {
@@ -977,9 +985,80 @@ const App: React.FC = () => {
 
     // Update position with file
     updatePosition(positionId, "jobDescriptionFile", file);
+    setJdExtractionStatus((prev) => ({
+      ...prev,
+      [positionId]: {
+        loading: true,
+        error: false,
+        message: "Parsing JD and extracting primary skills...",
+      },
+    }));
 
     // Simulate async upload - in real app, this would upload to storage
     console.log(`Uploading file: ${file.name} for position ${positionId}`);
+
+    try {
+      const formData = new FormData();
+      formData.append("jd_file", file);
+      const response = await apiClient.post<JDSkillExtractionResponse>(
+        "/skills/extract-from-jd",
+        formData,
+      );
+      const extractedSkills = Array.isArray(response.data?.extractedSkills)
+        ? response.data.extractedSkills
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0)
+        : [];
+
+      setRequisitionData((prev) => ({
+        ...prev,
+        positions: prev.positions.map((p) => {
+          if (p.id !== positionId) return p;
+          const secondarySet = new Set(
+            p.secondarySkills.map((s) => s.toLowerCase()),
+          );
+          const existingPrimarySet = new Set(
+            p.primarySkills.map((s) => s.toLowerCase()),
+          );
+          const jdPrimary = extractedSkills.filter(
+            (s) =>
+              !secondarySet.has(s.toLowerCase()) &&
+              !existingPrimarySet.has(s.toLowerCase()),
+          );
+          return {
+            ...p,
+            primarySkills: [...p.primarySkills, ...jdPrimary],
+          };
+        }),
+      }));
+      setAvailableSkills((prev) => {
+        const merged = new Set(prev);
+        extractedSkills.forEach((skill) => merged.add(skill));
+        return Array.from(merged);
+      });
+
+      setJdExtractionStatus((prev) => ({
+        ...prev,
+        [positionId]: {
+          loading: false,
+          error: false,
+          message:
+            extractedSkills.length > 0
+              ? `Added ${extractedSkills.length} skill(s) to Primary Skills from JD.`
+              : "No matching primary skills were found in this JD.",
+        },
+      }));
+    } catch {
+      setJdExtractionStatus((prev) => ({
+        ...prev,
+        [positionId]: {
+          loading: false,
+          error: true,
+          message:
+            "Unable to auto-extract skills from this JD. You can still add skills manually.",
+        },
+      }));
+    }
 
     // Simulate file URL after upload
     setTimeout(() => {
@@ -1018,24 +1097,46 @@ const App: React.FC = () => {
   return (
     <PageShell maxWidth="7xl">
       {submitNotice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-4">
           <div
-            className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-gray-200 p-6"
+            className="w-full max-w-lg rounded-2xl sm:rounded-3xl bg-white shadow-2xl border border-gray-100 p-5 sm:p-7"
             role="dialog"
             aria-modal="true"
             aria-labelledby="submit-notice-title"
           >
-            <h3
-              id="submit-notice-title"
-              className={`text-lg font-semibold mb-3 ${
-                submitNotice.type === "success"
-                  ? "text-gray-900"
-                  : "text-red-700"
-              }`}
-            >
-              {submitNotice.title}
-            </h3>
-            <div className="space-y-1 text-sm text-gray-700 mb-6">
+            <div className="flex items-start gap-3 sm:gap-4 mb-4">
+              <div
+                className={`shrink-0 mt-0.5 flex h-10 w-10 items-center justify-center rounded-full ${
+                  submitNotice.type === "success"
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-red-100 text-red-700"
+                }`}
+              >
+                {submitNotice.type === "success" ? (
+                  <Check className="h-5 w-5" />
+                ) : (
+                  <AlertCircle className="h-5 w-5" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <h3
+                  id="submit-notice-title"
+                  className={`text-lg sm:text-xl font-semibold ${
+                    submitNotice.type === "success"
+                      ? "text-gray-900"
+                      : "text-red-700"
+                  }`}
+                >
+                  {submitNotice.title}
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  {submitNotice.type === "success"
+                    ? "Your requisition has been processed successfully."
+                    : "Please review the details below and try again."}
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2 text-sm text-gray-700 mb-6 bg-gray-50 rounded-xl border border-gray-100 p-3 sm:p-4 max-h-[40vh] overflow-y-auto">
               {submitNotice.lines.map((line, idx) => (
                 <p key={`${line}-${idx}`}>{line}</p>
               ))}
@@ -1044,13 +1145,13 @@ const App: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setSubmitNotice(null)}
-                className={`px-5 py-2 rounded-lg text-sm font-semibold text-white transition-colors ${
+                className={`w-full sm:w-auto px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-colors ${
                   submitNotice.type === "success"
                     ? "bg-indigo-600 hover:bg-indigo-700"
                     : "bg-red-600 hover:bg-red-700"
                 }`}
               >
-                OK
+                Close
               </button>
             </div>
           </div>
@@ -1086,117 +1187,111 @@ const App: React.FC = () => {
               title="Project Foundation"
               subtitle="Set the context and basic information for your requisition"
             >
-              <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Project Name <span className="text-red-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <Briefcase className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                      <input
-                        type="text"
-                        value={requisitionData.projectName}
-                        onChange={(e) =>
-                          handleInputChange("projectName", e.target.value)
-                        }
-                        className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        placeholder="Enter project name"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Required By Date <span className="text-red-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <Calendar className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                      <input
-                        type="date"
-                        value={requisitionData.requiredByDate}
-                        onChange={(e) =>
-                          handleInputChange("requiredByDate", e.target.value)
-                        }
-                        className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      />
-                    </div>
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Project Name <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Briefcase className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                    <input
+                      type="text"
+                      value={requisitionData.projectName}
+                      onChange={(e) =>
+                        handleInputChange("projectName", e.target.value)
+                      }
+                      className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Enter project name"
+                    />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Client Name (Optional)
-                    </label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                      <input
-                        type="text"
-                        value={requisitionData.clientName}
-                        onChange={(e) =>
-                          handleInputChange("clientName", e.target.value)
-                        }
-                        className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        placeholder="Enter client name"
-                      />
-                    </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Required By Date <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                    <input
+                      type="date"
+                      value={requisitionData.requiredByDate}
+                      onChange={(e) =>
+                        handleInputChange("requiredByDate", e.target.value)
+                      }
+                      className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
                   </div>
+                </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Office Location
-                    </label>
-                    <div className="relative">
-                      <Building className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                      <select
-                        value={requisitionData.officeLocation}
-                        onChange={(e) =>
-                          handleInputChange("officeLocation", e.target.value)
-                        }
-                        className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none"
-                      >
-                        <option value="">Select location</option>
-                        {officeLocations.map((location) => {
-                          const label = [location.city, location.country]
-                            .filter(Boolean)
-                            .join(", ");
-                          return (
-                            <option
-                              key={location.location_id}
-                              value={
-                                label || `Location ${location.location_id}`
-                              }
-                            >
-                              {label || `Location ${location.location_id}`}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Client Name (Optional)
+                  </label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                    <input
+                      type="text"
+                      value={requisitionData.clientName}
+                      onChange={(e) =>
+                        handleInputChange("clientName", e.target.value)
+                      }
+                      className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Enter client name"
+                    />
                   </div>
+                </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Work Mode
-                    </label>
-                    <div className="relative">
-                      <MapPin className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                      <select
-                        value={requisitionData.workMode}
-                        onChange={(e) =>
-                          handleInputChange("workMode", e.target.value)
-                        }
-                        className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none"
-                      >
-                        <option value="">Select work mode</option>
-                        {WORK_MODES.map((mode) => (
-                          <option key={mode} value={mode}>
-                            {mode}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Office Location
+                  </label>
+                  <div className="relative">
+                    <Building className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                    <select
+                      value={requisitionData.officeLocation}
+                      onChange={(e) =>
+                        handleInputChange("officeLocation", e.target.value)
+                      }
+                      className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none"
+                    >
+                      <option value="">Select location</option>
+                      {officeLocations.map((location) => {
+                        const label = [location.city, location.country]
+                          .filter(Boolean)
+                          .join(", ");
+                        return (
+                          <option
+                            key={location.location_id}
+                            value={label || `Location ${location.location_id}`}
+                          >
+                            {label || `Location ${location.location_id}`}
                           </option>
-                        ))}
-                      </select>
-                    </div>
+                        );
+                      })}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Work Mode
+                  </label>
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                    <select
+                      value={requisitionData.workMode}
+                      onChange={(e) =>
+                        handleInputChange("workMode", e.target.value)
+                      }
+                      className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 appearance-none"
+                    >
+                      <option value="">Select work mode</option>
+                      {WORK_MODES.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {mode}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
@@ -1204,7 +1299,7 @@ const App: React.FC = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Priority Level
                   </label>
-                  <div className="flex gap-4">
+                  <div className="flex gap-4 flex-wrap">
                     {PRIORITIES.map((priority) => (
                       <label
                         key={priority}
@@ -1260,7 +1355,7 @@ const App: React.FC = () => {
                     onChange={(e) =>
                       handleInputChange("managerNotes", e.target.value)
                     }
-                    rows={3}
+                    rows={4}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     placeholder="Internal notes for HR/TA (not visible to candidates)..."
                   />
@@ -1294,7 +1389,7 @@ const App: React.FC = () => {
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                           Role Title <span className="text-red-500">*</span>
@@ -1314,7 +1409,57 @@ const App: React.FC = () => {
                         />
                       </div>
 
-                      <div className="md:col-span-2">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Job Description Document
+                        </label>
+                        <div className="flex items-center gap-4">
+                          <input
+                            ref={(el) => {
+                              fileInputRefs.current[position.id] = el;
+                            }}
+                            type="file"
+                            accept="application/pdf,.pdf"
+                            onChange={(e) => handleFileUpload(position.id, e)}
+                            className="hidden"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => triggerFileInput(position.id)}
+                            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                          >
+                            <Upload size={16} />
+                            Upload JD & Auto-Fill Skills
+                          </button>
+                          {position.jobDescriptionFile && (
+                            <span className="text-sm text-gray-600 flex items-center gap-2">
+                              <FileText size={16} className="text-green-500" />
+                              {position.jobDescriptionFile.name}
+                            </span>
+                          )}
+                          {position.jobDescriptionUrl &&
+                            !position.jobDescriptionFile && (
+                              <span className="text-sm text-green-600">
+                                ✓ File uploaded successfully
+                              </span>
+                            )}
+                        </div>
+                        {jdExtractionStatus[position.id]?.message && (
+                          <p
+                            className={`mt-2 text-sm ${
+                              jdExtractionStatus[position.id]?.error
+                                ? "text-red-600"
+                                : "text-indigo-600"
+                            }`}
+                          >
+                            {jdExtractionStatus[position.id]?.loading
+                              ? "Processing..."
+                              : jdExtractionStatus[position.id]?.message}
+                          </p>
+                        )}
+                      </div>
+
+                      <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                           Primary Skills <span className="text-red-500">*</span>
                         </label>
@@ -1330,7 +1475,7 @@ const App: React.FC = () => {
                                 e.target.value = "";
                               }
                             }}
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            className="flex-[2] min-w-0 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           >
                             <option value="">Select primary skill</option>
                             {availableSkills.map((skill) => (
@@ -1351,7 +1496,7 @@ const App: React.FC = () => {
                               }))
                             }
                             placeholder="Add new skill"
-                            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                             onKeyPress={(e) => {
                               if (e.key === "Enter") {
                                 e.preventDefault();
@@ -1364,7 +1509,7 @@ const App: React.FC = () => {
                             onClick={() =>
                               handleInstantSkillAdd(position.id, "primary")
                             }
-                            className="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                            className="shrink-0 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
                           >
                             <Plus size={16} />
                           </button>
@@ -1390,7 +1535,7 @@ const App: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="md:col-span-2">
+                      <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                           Secondary Skills
                         </label>
@@ -1406,7 +1551,7 @@ const App: React.FC = () => {
                                 e.target.value = "";
                               }
                             }}
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            className="flex-[2] min-w-0 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           >
                             <option value="">Select secondary skill</option>
                             {availableSkills.map((skill) => (
@@ -1427,7 +1572,7 @@ const App: React.FC = () => {
                               }))
                             }
                             placeholder="Add new skill"
-                            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                             onKeyPress={(e) => {
                               if (e.key === "Enter") {
                                 e.preventDefault();
@@ -1440,7 +1585,7 @@ const App: React.FC = () => {
                             onClick={() =>
                               handleInstantSkillAdd(position.id, "secondary")
                             }
-                            className="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                            className="shrink-0 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
                           >
                             <Plus size={16} />
                           </button>
@@ -1534,7 +1679,7 @@ const App: React.FC = () => {
                         <DollarSign className="w-4 h-4 text-green-600" />
                         Budget for this Position
                       </h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
                             Estimated Budget (per resource){" "}
@@ -1665,42 +1810,6 @@ const App: React.FC = () => {
                       </div>
                     )}
 
-                    <div className="mt-4">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Job Description Document
-                      </label>
-                      <div className="flex items-center gap-4">
-                        <input
-                          ref={(el) => {
-                            fileInputRefs.current[position.id] = el;
-                          }}
-                          type="file"
-                          accept="application/pdf,.pdf"
-                          onChange={(e) => handleFileUpload(position.id, e)}
-                          className="hidden"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => triggerFileInput(position.id)}
-                          className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-                        >
-                          <Upload size={16} />
-                          Upload JD
-                        </button>
-                        {position.jobDescriptionFile && (
-                          <span className="text-sm text-gray-600 flex items-center gap-2">
-                            <FileText size={16} className="text-green-500" />
-                            {position.jobDescriptionFile.name}
-                          </span>
-                        )}
-                        {position.jobDescriptionUrl &&
-                          !position.jobDescriptionFile && (
-                            <span className="text-sm text-green-600">
-                              ✓ File uploaded successfully
-                            </span>
-                          )}
-                      </div>
-                    </div>
                   </div>
                 ))}
 
@@ -1728,7 +1837,7 @@ const App: React.FC = () => {
                     <DollarSign className="w-5 h-5" />
                     Budget Summary (Computed from Items)
                   </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-2 gap-6">
                     <div className="bg-white rounded-lg p-4 border border-green-100">
                       <div className="text-sm text-gray-600 mb-1">
                         Total Estimated Budget
@@ -1842,7 +1951,7 @@ const App: React.FC = () => {
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">
                     Requisition Summary
                   </h3>
-                  <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
                     <div className="flex justify-between py-2 border-b border-gray-200">
                       <span className="text-gray-600">Project Name:</span>
                       <span className="font-medium text-gray-900">
@@ -1880,7 +1989,7 @@ const App: React.FC = () => {
                         )}
                       </span>
                     </div>
-                    <div className="flex justify-between py-2">
+                    <div className="flex justify-between py-2 col-span-2">
                       <span className="text-gray-600">
                         Total Estimated Budget:
                       </span>

@@ -1,15 +1,15 @@
 {
   "pages": {
-    "/ta/requisitions/[id]/page": [
+    "/manager/raise-requisition/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/ta/requisitions/[id]/page.js"
+      "static/chunks/app/manager/raise-requisition/page.js"
     ],
-    "/ta/layout": [
+    "/manager/layout": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/css/app/ta/layout.css",
-      "static/chunks/app/ta/layout.js"
+      "static/css/app/manager/layout.css",
+      "static/chunks/app/manager/layout.js"
     ],
     "/layout": [
       "static/chunks/webpack.js",
@@ -17,15 +17,72 @@
       "static/css/app/layout.css",
       "static/chunks/app/layout.js"
     ],
-    "/ta/candidates/[candidateId]/page": [
+    "/manager/my-requisitions/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/ta/candidates/[candidateId]/page.js"
+      "static/chunks/app/manager/my-requisitions/page.js"
+    ],
+    "/manager/requisitions/[id]/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/manager/requisitions/[id]/page.js"
+    ],
+    "/manager/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/manager/page.js"
+    ],
+    "/manager/candidates/[candidateId]/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/manager/candidates/[candidateId]/page.js"
+    ],
+    "/login/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/css/app/login/page.css",
+      "static/chunks/app/login/page.js"
+    ],
+    "/ta/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/ta/page.js"
+    ],
+    "/ta/layout": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/css/app/ta/layout.css",
+      "static/chunks/app/ta/layout.js"
+    ],
+    "/ta/resource-pool/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/ta/resource-pool/page.js"
+    ],
+    "/ta/interviews/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/ta/interviews/page.js"
     ],
     "/ta/requisitions/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/ta/requisitions/page.js"
+    ],
+    "/ta/requisitions/[id]/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/ta/requisitions/[id]/page.js"
+    ],
+    "/ta/candidates/[candidateId]/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/ta/candidates/[candidateId]/page.js"
+    ],
+    "/ta/candidates/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/ta/candidates/page.js"
     ]
   }
 }
