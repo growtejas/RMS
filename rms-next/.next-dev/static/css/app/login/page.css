@@ -1,0 +1,352 @@
+/*!*****************************************************************************************************************************************************************************************************************************************************************************!*\
+  !*** css ./node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[14].oneOf[12].use[2]!./node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[14].oneOf[12].use[3]!./src/styles/legacy/variables.css ***!
+  \*****************************************************************************************************************************************************************************************************************************************************************************/
+/* RBM Color Scheme & Design Tokens
+   Monochrome / Neutral Admin Theme */
+
+:root {
+  /* =========================
+     Primary / Accent Colors
+     ========================= */
+
+  /* Used sparingly for focus, active, highlights */
+  --primary-gradient-start: #111111;
+  --primary-gradient-end: #2a2a2a;
+
+  --primary-color: #111111;
+  --primary-hover: #1f1f1f;
+  --primary-active: #000000;
+
+  /* Secondary (muted emphasis) */
+  --secondary-color: #4b4b4b;
+  --secondary-hover: #3f3f3f;
+  --secondary-active: #2f2f2f;
+
+  /* =========================
+     Text Colors
+     ========================= */
+
+  --text-primary: #111111;
+  --text-secondary: #4b4b4b;
+  --text-tertiary: #7a7a7a;
+  --text-light: #ffffff;
+  --text-inverse: #f5f5f5;
+
+  /* =========================
+     Background Colors
+     ========================= */
+
+  --bg-primary: #ffffff;
+  --bg-secondary: #f7f7f7;
+  --bg-tertiary: #eeeeee;
+  --bg-muted: #fafafa;
+  --bg-dark: #111111;
+
+  /* =========================
+     Border Colors
+     ========================= */
+
+  --border-color: #e0e0e0;
+  --border-light: #eeeeee;
+  --border-strong: #cfcfcf;
+
+  /* =========================
+     Status Colors (Muted)
+     ========================= */
+
+  --success-color: #1f7a4d;
+  --warning-color: #a16207;
+  --error-color: #991b1b;
+  --info-color: #374151;
+
+  /* Semantic backgrounds */
+  --error-bg: #fdf2f2;
+  --error-text: #7f1d1d;
+  --error-border: #f3caca;
+
+  /* =========================
+     Shadows (Soft & Clean)
+     ========================= */
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.18);
+
+  /* =========================
+     Spacing
+     ========================= */
+
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 20px;
+  --spacing-2xl: 24px;
+  --spacing-3xl: 32px;
+
+  /* =========================
+     Border Radius
+     ========================= */
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* =========================
+     Font Sizes
+     ========================= */
+
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-base: 14px;
+  --font-lg: 16px;
+  --font-xl: 18px;
+  --font-2xl: 22px;
+  --font-3xl: 28px;
+
+  /* =========================
+     Font Weights
+     ========================= */
+
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+
+  /* =========================
+     Transitions
+     ========================= */
+
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+  --transition-slow: 0.4s ease;
+
+  /* =========================
+     Z-Index
+     ========================= */
+
+  --z-dropdown: 10;
+  --z-header: 100;
+  --z-modal: 1000;
+  --z-debug: 9999;
+}
+
+/*!*************************************************************************************************************************************************************************************************************************************************************************!*\
+  !*** css ./node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[14].oneOf[12].use[2]!./node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[14].oneOf[12].use[3]!./src/styles/legacy/Login.css ***!
+  \*************************************************************************************************************************************************************************************************************************************************************************/
+/*
+   1. GLOBAL RESET (MANDATORY)
+   */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+}
+
+/*
+   2. FULL SCREEN PAGE (FIXED)
+   */
+.login-page {
+  position: fixed;
+  inset: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 24px;
+
+  background: linear-gradient(180deg, #fafafa 0%, #f2f2f2 50%, #ededed 100%);
+}
+
+/*
+   3. LOGIN CARD
+   */
+.login-card.single {
+  width: 100%;
+  max-width: 420px;
+
+  background: var(--bg-primary);
+  border-radius: 16px;
+  padding: 48px 42px;
+
+  display: flex;
+  flex-direction: column;
+
+  box-shadow:
+    0 24px 48px rgba(0, 0, 0, 0.08),
+    0 8px 16px rgba(0, 0, 0, 0.06);
+}
+
+/*
+   4. LOGO / HEADER
+   */
+.login-logo {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 28px;
+}
+
+.login-logo img {
+  display: block;
+}
+
+.form-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.form-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 28px;
+}
+
+/*
+   5. ERROR MESSAGE
+   */
+.form-error {
+  background: var(--error-bg);
+  color: var(--error-text);
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--error-border);
+  margin-bottom: 20px;
+  font-size: 13px;
+}
+
+/*
+   6. FORM LAYOUT
+   */
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-field label {
+  align-self: flex-start;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/*
+   7. INPUT STYLING
+   */
+.form-field input {
+  height: 44px;
+  padding: 0 14px;
+
+  font-size: 14px;
+  color: var(--text-primary);
+
+  background: #fafafa;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+
+  transition: all 0.15s ease;
+}
+
+.form-field input::placeholder {
+  color: #9ca3af;
+}
+
+.form-field input:focus {
+  outline: none;
+  background: #ffffff;
+  border-color: #111111;
+  box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.08);
+}
+
+.form-field input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/*
+   8. BUTTON 
+   */
+.login-submit {
+  margin-top: 8px;
+  height: 46px;
+
+  border-radius: 12px;
+  border: none;
+
+  background: linear-gradient(180deg, #1a1a1a, #000000);
+  color: #ffffff;
+
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.login-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.18);
+}
+
+.login-submit:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.15);
+}
+
+.login-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/*
+   9. FOOTER
+   */
+.login-footer {
+  margin-top: 26px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.login-footer a {
+  color: var(--text-primary);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.login-footer a:hover {
+  text-decoration: underline;
+}
+
+/* 10. MOBILE REFINEMENT */
+@media (max-width: 480px) {
+  .login-card.single {
+    padding: 36px 24px;
+    border-radius: 14px;
+  }
+}
+
