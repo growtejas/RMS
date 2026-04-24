@@ -38,6 +38,12 @@ function toStrictAiOnlyRankingResponse(r: RequisitionItemRankingJson) {
         ai_summary: c.explain.ai_summary,
         ai_risks: c.explain.ai_risks,
         ai_confidence: c.explain.ai_confidence,
+        ranking_signals: {
+          ats: {
+            experience_years:
+              c.explain.ranking_signals?.ats?.experience_years ?? null,
+          },
+        },
       },
     })),
     meta: {

@@ -148,6 +148,61 @@ const ITEM_STATUS_ICONS: Record<string, React.ReactNode> = {
   Cancelled: <Ban size={14} />,
 };
 
+type ExperienceFitTone = "green" | "blue" | "red";
+
+type ExperienceFitFlag = {
+  tone: ExperienceFitTone;
+  label: string;
+  candidateYears: number;
+  requiredYears: number;
+};
+
+function resolveExperienceFitFlag(
+  requiredYears: number | null,
+  candidateYears: number | null | undefined,
+): ExperienceFitFlag | null {
+  if (
+    requiredYears == null ||
+    !Number.isFinite(requiredYears) ||
+    requiredYears < 0 ||
+    candidateYears == null ||
+    !Number.isFinite(candidateYears)
+  ) {
+    return null;
+  }
+  const req = Number(requiredYears);
+  const cand = Number(candidateYears);
+  const diff = cand - req;
+  const abs = Math.abs(diff);
+  const tone: ExperienceFitTone = abs <= 1 ? "green" : abs <= 3 ? "blue" : "red";
+  const reqLabel = req === 0 ? "Fresher" : `${req}y`;
+  const label =
+    abs <= 1
+      ? `Fits qualification • ${cand.toFixed(1)}y (JD: ${reqLabel})`
+      : diff > 0
+        ? `${abs <= 3 ? "Moderately" : "Too"} overqualified • ${cand.toFixed(1)}y (JD: ${reqLabel})`
+        : `${abs <= 3 ? "Moderately" : "Too"} underqualified • ${cand.toFixed(1)}y (JD: ${reqLabel})`;
+  return { tone, label, candidateYears: cand, requiredYears: req };
+}
+
+function extractRequiredYearsFromText(text: string | null | undefined): number | null {
+  if (!text) return null;
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  // Matches common patterns like "3 years", "3+ years", "3-5 years", "3 to 5 years".
+  const m = normalized.match(
+    /(\d{1,2})(?:\s*(?:\+|to|-)\s*(\d{1,2}))?\s*(?:years?|yrs?)/i,
+  );
+  if (!m) return null;
+  const a = Number(m[1]);
+  const b = m[2] != null ? Number(m[2]) : null;
+  if (!Number.isFinite(a)) return null;
+  if (b != null && Number.isFinite(b)) {
+    return Math.round((a + b) / 2);
+  }
+  return a;
+}
+
 interface TimelineEvent {
   date: string;
   event: string;
@@ -484,6 +539,29 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     return atsBoardItemId ?? ticket?.items?.[0]?.numericItemId ?? null;
   }, [atsBoardItemId, ticket?.items]);
 
+  const atsBoardRequiredExperienceYears = useMemo(() => {
+    if (!ticket?.items?.length) return null;
+    const itemId = atsBoardItemId ?? ticket.items[0]?.numericItemId ?? null;
+    if (itemId == null) return null;
+    const item = ticket.items.find((i) => i.numericItemId === itemId);
+    const explicit = item?.experience ?? null;
+    if (explicit != null && Number.isFinite(explicit) && explicit >= 0) {
+      return explicit;
+    }
+    if ((item?.level ?? "").trim().toLowerCase() === "fresher") {
+      return 0;
+    }
+    const fromReq = extractRequiredYearsFromText(item?.requirements);
+    if (fromReq != null && Number.isFinite(fromReq) && fromReq > 0) {
+      return fromReq;
+    }
+    const fromDesc = extractRequiredYearsFromText(item?.description);
+    if (fromDesc != null && Number.isFinite(fromDesc) && fromDesc > 0) {
+      return fromDesc;
+    }
+    return null;
+  }, [atsBoardItemId, ticket?.items]);
+
   const atsBoardScoreByCandidateId = useMemo(() => {
     const m = new Map<
       number,
@@ -502,6 +580,28 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     }
     return m;
   }, [atsBoardRanking]);
+
+  const atsBoardExperienceFlagByCandidateId = useMemo(() => {
+    const m = new Map<number, ExperienceFitFlag>();
+    const requiredYears = atsBoardRequiredExperienceYears;
+    const profileYearsByCandidateId = new Map<number, number | null>();
+    for (const c of candidates) {
+      profileYearsByCandidateId.set(c.candidate_id, c.total_experience_years ?? null);
+    }
+    for (const rc of atsBoardRanking?.ranked_candidates ?? []) {
+      const candidateYearsFromRanking =
+        rc.explain.ranking_signals?.ats?.experience_years ?? null;
+      const candidateYears =
+        candidateYearsFromRanking ??
+        profileYearsByCandidateId.get(rc.candidate_id) ??
+        null;
+      const fit = resolveExperienceFitFlag(requiredYears, candidateYears);
+      if (fit) {
+        m.set(rc.candidate_id, fit);
+      }
+    }
+    return m;
+  }, [atsBoardRanking, atsBoardRequiredExperienceYears, candidates]);
 
   const candidateFromApplicationRecord = useCallback(
     (app: ApplicationRecord): Candidate => ({
@@ -4206,6 +4306,23 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                           {apps.map((app) => {
                             const bd = app.ranking?.breakdown;
                             const snippet = bd ? rankingBreakdownSnippet(bd) : "";
+                            const fallbackYears =
+                              bd && typeof bd === "object"
+                                ? (() => {
+                                    const exp = (
+                                      bd as {
+                                        ranking_signals?: { ats?: { experience_years?: number | null } };
+                                      }
+                                    ).ranking_signals?.ats?.experience_years;
+                                    return exp ?? null;
+                                  })()
+                                : null;
+                            const expFlag =
+                              atsBoardExperienceFlagByCandidateId.get(app.candidate_id) ??
+                              resolveExperienceFitFlag(
+                                atsBoardRequiredExperienceYears,
+                                fallbackYears,
+                              );
                             return (
                               <div
                                 key={app.application_id}
@@ -4284,6 +4401,38 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                                     {snippet}
                                   </div>
                                 ) : null}
+                                {expFlag ? (
+                                  <div
+                                    style={{
+                                      marginTop: "5px",
+                                    }}
+                                  >
+                                    <span
+                                      style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        fontSize: "10px",
+                                        fontWeight: 700,
+                                        padding: "2px 6px",
+                                        borderRadius: "999px",
+                                        backgroundColor:
+                                          expFlag.tone === "red"
+                                            ? "#FEE2E2"
+                                            : expFlag.tone === "blue"
+                                              ? "#DBEAFE"
+                                              : "#DCFCE7",
+                                        color:
+                                          expFlag.tone === "red"
+                                            ? "#991B1B"
+                                            : expFlag.tone === "blue"
+                                              ? "#1E3A8A"
+                                              : "#166534",
+                                      }}
+                                    >
+                                      {expFlag.label}
+                                    </span>
+                                  </div>
+                                ) : null}
                                 <div
                                   style={{
                                     color: "var(--text-tertiary)",
@@ -4311,34 +4460,82 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                         None
                       </span>
                     ) : (
-                      (atsBucketsData.UNRANKED ?? []).map((app) => (
-                        <div
-                          key={app.application_id}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => openEvaluateFromAtsApp(app)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              openEvaluateFromAtsApp(app);
-                            }
-                          }}
-                          style={{
-                            fontSize: "11px",
-                            padding: "8px 10px",
-                            borderRadius: "8px",
-                            border: "1px solid var(--border-subtle)",
-                            cursor: "pointer",
-                            minWidth: "120px",
-                            backgroundColor: "var(--bg-primary)",
-                          }}
-                        >
-                          <div style={{ fontWeight: 600 }}>{app.candidate.full_name}</div>
-                          <div style={{ fontSize: "10px", color: "var(--text-tertiary)" }}>
-                            {app.current_stage}
+                      (atsBucketsData.UNRANKED ?? []).map((app) => {
+                        const bd = app.ranking?.breakdown;
+                        const fallbackYears =
+                          bd && typeof bd === "object"
+                            ? (() => {
+                                const exp = (
+                                  bd as {
+                                    ranking_signals?: { ats?: { experience_years?: number | null } };
+                                  }
+                                ).ranking_signals?.ats?.experience_years;
+                                return exp ?? null;
+                              })()
+                            : null;
+                        const expFlag =
+                          atsBoardExperienceFlagByCandidateId.get(app.candidate_id) ??
+                          resolveExperienceFitFlag(
+                            atsBoardRequiredExperienceYears,
+                            fallbackYears,
+                          );
+                        return (
+                          <div
+                            key={app.application_id}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => openEvaluateFromAtsApp(app)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                openEvaluateFromAtsApp(app);
+                              }
+                            }}
+                            style={{
+                              fontSize: "11px",
+                              padding: "8px 10px",
+                              borderRadius: "8px",
+                              border: "1px solid var(--border-subtle)",
+                              cursor: "pointer",
+                              minWidth: "120px",
+                              backgroundColor: "var(--bg-primary)",
+                            }}
+                          >
+                            <div style={{ fontWeight: 600 }}>{app.candidate.full_name}</div>
+                            {expFlag ? (
+                              <div style={{ marginTop: "4px" }}>
+                                <span
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    fontSize: "10px",
+                                    fontWeight: 700,
+                                    padding: "2px 6px",
+                                    borderRadius: "999px",
+                                    backgroundColor:
+                                      expFlag.tone === "red"
+                                        ? "#FEE2E2"
+                                        : expFlag.tone === "blue"
+                                          ? "#DBEAFE"
+                                          : "#DCFCE7",
+                                    color:
+                                      expFlag.tone === "red"
+                                        ? "#991B1B"
+                                        : expFlag.tone === "blue"
+                                          ? "#1E3A8A"
+                                          : "#166534",
+                                  }}
+                                >
+                                  {expFlag.label}
+                                </span>
+                              </div>
+                            ) : null}
+                            <div style={{ fontSize: "10px", color: "var(--text-tertiary)" }}>
+                              {app.current_stage}
+                            </div>
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>

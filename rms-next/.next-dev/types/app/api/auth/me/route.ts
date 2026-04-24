@@ -1,4 +1,4 @@
-// File: /home/rbm-admin/Documents/RBM-Project/RMS/rms-next/src/app/api/auth/me/route.ts
+// File: C:\Imp\RMS_v2\RMS\rms-next\src\app\api\auth\me\route.ts
 import * as entry from '../../../../../../src/app/api/auth/me/route.js'
 import type { NextRequest } from 'next/server.js'
 

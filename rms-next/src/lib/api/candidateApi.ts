@@ -233,6 +233,11 @@ export interface RequisitionItemRankingCandidate {
     ai_summary?: string;
     ai_risks?: string[];
     ai_confidence?: number;
+    ranking_signals?: {
+      ats?: {
+        experience_years?: number | null;
+      };
+    };
   };
 }
 

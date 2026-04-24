@@ -5,6 +5,9 @@ dist/
 dist-ssr/
 build/
 *.tsbuildinfo
+rms-next/.next/
+rms-next/.next-dev/
+rms-next/out/
 
 # --- Environment & secrets (never commit) ---
 .env

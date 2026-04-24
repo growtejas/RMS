@@ -1,6 +1,6 @@
 {
-  "app/ta/requisitions/[id]/page.tsx -> @/components/ta/RequisitionDetail": {
-    "id": "app/ta/requisitions/[id]/page.tsx -> @/components/ta/RequisitionDetail",
+  "app\\ta\\requisitions\\[id]\\page.tsx -> @/components/ta/RequisitionDetail": {
+    "id": "app\\ta\\requisitions\\[id]\\page.tsx -> @/components/ta/RequisitionDetail",
     "files": [
       "static/css/_app-pages-browser_src_components_ta_RequisitionDetail_tsx.css",
       "static/chunks/_app-pages-browser_src_components_ta_RequisitionDetail_tsx.js"
