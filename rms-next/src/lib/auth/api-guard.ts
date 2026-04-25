@@ -20,45 +20,57 @@ export type ApiUser = {
   organizationId: string;
 };
 
-export async function requireBearerUser(
+export type ApiUserWithActive = ApiUser & { isActive: boolean };
+
+async function resolveUserFromRequest(
   req: Request,
-): Promise<ApiUser | NextResponse> {
+): Promise<
+  | { ok: true; user: ApiUserWithActive }
+  | { ok: false; response: NextResponse }
+> {
   const auth = req.headers.get("authorization") ?? "";
   const token =
     getCookie(req, ACCESS_COOKIE) ?? tryParseAuthorizationAccessToken(auth) ?? null;
   if (!token) {
-    return NextResponse.json({ detail: "Could not validate credentials" }, { status: 401 });
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { detail: "Could not validate credentials" },
+        { status: 401 },
+      ),
+    };
   }
 
   let payload: Awaited<ReturnType<typeof verifyAccessToken>>;
   try {
     payload = await verifyAccessToken(token);
   } catch {
-    return NextResponse.json(
-      { detail: "Could not validate credentials" },
-      {
-        status: 401,
-      },
-    );
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { detail: "Could not validate credentials" },
+        { status: 401 },
+      ),
+    };
   }
 
   const userId = payload.sub != null ? Number.parseInt(String(payload.sub), 10) : NaN;
   if (!Number.isFinite(userId)) {
-    return NextResponse.json(
-      { detail: "Could not validate credentials" },
-      { status: 401 },
-    );
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { detail: "Could not validate credentials" },
+        { status: 401 },
+      ),
+    };
   }
 
   const userWithRoles = await findUserWithRolesById(userId);
   if (!userWithRoles) {
-    return NextResponse.json({ detail: "User not found" }, { status: 401 });
-  }
-  if (userWithRoles.user.isActive === false) {
-    return NextResponse.json(
-      { detail: "User account is inactive" },
-      { status: 403 },
-    );
+    return {
+      ok: false,
+      response: NextResponse.json({ detail: "User not found" }, { status: 401 }),
+    };
   }
 
   const roles = normalizeRoleList(userWithRoles.roles);
@@ -74,11 +86,55 @@ export async function requireBearerUser(
   }
 
   return {
-    userId,
-    username: userWithRoles.user.username,
-    roles,
-    organizationId,
+    ok: true,
+    user: {
+      userId,
+      username: userWithRoles.user.username,
+      roles,
+      organizationId,
+      isActive: userWithRoles.user.isActive !== false,
+    },
   };
+}
+
+export async function requireBearerUser(
+  req: Request,
+): Promise<ApiUser | NextResponse> {
+  const resolved = await resolveUserFromRequest(req);
+  if (!resolved.ok) {
+    return resolved.response;
+  }
+  if (!resolved.user.isActive) {
+    return NextResponse.json(
+      { detail: "User account is inactive" },
+      { status: 403 },
+    );
+  }
+  const { isActive: _isActive, ...user } = resolved.user;
+  void _isActive;
+  return user;
+}
+
+/** Like {@link requireBearerUser} but does not block inactive accounts (used for access-request onboarding). */
+export async function requireBearerUserAllowInactive(
+  req: Request,
+): Promise<ApiUserWithActive | NextResponse> {
+  const resolved = await resolveUserFromRequest(req);
+  if (!resolved.ok) {
+    return resolved.response;
+  }
+  return resolved.user;
+}
+
+/** Resolves a bearer session or returns `null` (no 401 — for `/api/auth/session` bootstrap). */
+export async function tryResolveBearerUserAllowInactive(
+  req: Request,
+): Promise<ApiUserWithActive | null> {
+  const resolved = await resolveUserFromRequest(req);
+  if (!resolved.ok) {
+    return null;
+  }
+  return resolved.user;
 }
 
 export function requireAnyRole(

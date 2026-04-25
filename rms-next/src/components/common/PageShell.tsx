@@ -28,8 +28,10 @@ export const PageShell: React.FC<PageShellProps> = ({
         ? "max-w-7xl"
         : "max-w-6xl";
 
+  const outerPaddingClass = maxWidth === "none" ? "" : "py-8 px-4";
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
+    <div className={`min-h-screen bg-bg ${outerPaddingClass}`}>
       <div className={`${maxWidthClass} mx-auto`}>{children}</div>
     </div>
   );

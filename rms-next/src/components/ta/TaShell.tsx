@@ -9,6 +9,7 @@ import TAHeader from "@/components/ta/TAHeader";
 import TASidebar from "@/components/ta/TASidebar";
 import TADashboardHome from "@/components/ta/TADashboardHome";
 import "@/styles/hr/hr-dashboard.css";
+import PageShell from "@/components/common/PageShell";
 
 const viewLabels: Record<string, string> = {
   dashboard: "Dashboard",
@@ -100,30 +101,32 @@ export default function TaShell({ children }: { children: React.ReactNode }) {
   const isHome = pathname === "/ta" || pathname === "/ta/";
 
   return (
-    <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
-      <TASidebar
-        collapsed={collapsed}
-        onToggleCollapse={() => setCollapsed((prev) => !prev)}
-      />
-
-      <div
-        className={`admin-main-content ${collapsed ? "sidebar-collapsed" : ""}`}
-      >
-        <Header />
-
-        <TAHeader
-          title={activeLabel}
-          user={user}
-          onLogout={() => {
-            logout();
-            router.replace("/login");
-          }}
+    <PageShell maxWidth="none">
+      <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
+        <TASidebar
+          collapsed={collapsed}
+          onToggleCollapse={() => setCollapsed((prev) => !prev)}
         />
 
-        <section className="admin-content-area">
-          {isHome ? <TADashboardHome /> : children}
-        </section>
+        <div
+          className={`admin-main-content ${collapsed ? "sidebar-collapsed" : ""}`}
+        >
+          <Header />
+
+          <TAHeader
+            title={activeLabel}
+            user={user}
+            onLogout={() => {
+              logout();
+              router.replace("/login");
+            }}
+          />
+
+          <section className="admin-content-area">
+            {isHome ? <TADashboardHome /> : children}
+          </section>
+        </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

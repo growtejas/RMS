@@ -1,9 +1,11 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { Search, X } from "lucide-react";
 
 import {
   createInterview,
+  createManagerInterview,
   type InterviewCreateV2,
 } from "@/lib/api/candidateApi";
 import { getUsersListCached } from "@/lib/api/users-list-cache";
@@ -17,13 +19,14 @@ export interface InterviewScheduleFormProps {
   onScheduled: (warnings: string[]) => void;
   onCancel: () => void;
   disabled?: boolean;
+  submitMode?: "default" | "manager";
 }
 
 const labelCls =
-  "mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-500";
+  "mb-1.5 block text-[11px] font-bold uppercase tracking-[0.14em] text-text-muted";
 
 const fieldCls =
-  "w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition-shadow placeholder:text-slate-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/20";
+  "w-full rounded-xl border border-border bg-bg px-3 py-2.5 text-sm text-text outline-none transition focus:ring-2 focus:ring-accent/25";
 
 export function InterviewScheduleForm({
   candidateId,
@@ -32,8 +35,10 @@ export function InterviewScheduleForm({
   onScheduled,
   onCancel,
   disabled,
+  submitMode = "default",
 }: InterviewScheduleFormProps) {
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [userQuery, setUserQuery] = useState("");
   const [roundName, setRoundName] = useState(`Round ${nextRoundNumber}`);
   const [roundType, setRoundType] =
     useState<InterviewCreateV2["round_type"]>("TECHNICAL");
@@ -75,6 +80,21 @@ export function InterviewScheduleForm({
       return next;
     });
   };
+
+  const filteredUsers = useMemo(() => {
+    const q = userQuery.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter((u) => u.username.toLowerCase().includes(q));
+  }, [users, userQuery]);
+
+  const selectedList = useMemo(() => {
+    const selected = Array.from(selectedInterviewers);
+    if (selected.length === 0) return [];
+    const byId = new Map(users.map((u) => [u.user_id, u.username]));
+    return selected
+      .map((id) => ({ id, username: byId.get(id) ?? `User #${id}` }))
+      .sort((a, b) => a.username.localeCompare(b.username));
+  }, [selectedInterviewers, users]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -124,7 +144,10 @@ export function InterviewScheduleForm({
 
     setSubmitting(true);
     try {
-      const { warnings } = await createInterview(payload);
+      const { warnings } =
+        submitMode === "manager"
+          ? await createManagerInterview(payload)
+          : await createInterview(payload);
       onScheduled(warnings);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to schedule";
@@ -137,26 +160,36 @@ export function InterviewScheduleForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="mb-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+      className="overflow-hidden rounded-2xl border border-border bg-surface shadow-lg"
     >
-      <div className="mb-4 flex items-baseline justify-between gap-3 border-b border-slate-200 pb-3.5">
-        <div>
-          <div className="mb-1 text-[10px] font-bold uppercase tracking-widest text-red-600">
-            New interview
+      <div className="border-b border-border bg-bg px-5 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-bold text-text">Schedule next round</div>
+            <div className="mt-1 text-xs text-text-muted">
+              Round {nextRoundNumber} · Choose time and panel
+            </div>
           </div>
-          <div className="text-base font-bold tracking-tight text-slate-900">
-            Schedule round {nextRoundNumber}
-          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-surface text-text-muted shadow-sm transition hover:bg-bg hover:text-text"
+            title="Close"
+          >
+            <X size={18} />
+          </button>
         </div>
       </div>
 
       {localError ? (
-        <div className="mb-3.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-xs text-red-800">
-          {localError}
+        <div className="px-5 pt-4">
+          <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-xs text-red-800">
+            {localError}
+          </div>
         </div>
       ) : null}
 
-      <div className="mb-3.5 grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3.5 px-5 py-4 sm:grid-cols-2">
         <div>
           <label className={labelCls}>Round name *</label>
           <input
@@ -238,31 +271,77 @@ export function InterviewScheduleForm({
         </div>
       </div>
 
-      <div className="mb-3.5">
-        <label className={labelCls}>Interviewers *</label>
-        <div className="max-h-40 overflow-auto rounded-lg border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm">
-          {users.length === 0 ? (
-            <span className="text-slate-500">Loading users…</span>
-          ) : (
-            users.map((u) => (
-              <label
-                key={u.user_id}
-                className="flex cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-2 text-slate-800 hover:bg-white"
+      <div className="px-5 pb-4">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <label className={labelCls}>Interviewers *</label>
+          <div className="text-xs text-text-muted">
+            {selectedInterviewers.size} selected
+          </div>
+        </div>
+
+        {selectedList.length > 0 ? (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {selectedList.map((u) => (
+              <button
+                key={u.id}
+                type="button"
+                onClick={() => toggleInterviewer(u.id)}
+                className="inline-flex items-center gap-2 rounded-full border border-border bg-bg px-3 py-1.5 text-xs font-semibold text-text shadow-sm transition hover:bg-surface"
+                title="Remove"
               >
-                <input
-                  type="checkbox"
-                  checked={selectedInterviewers.has(u.user_id)}
-                  onChange={() => toggleInterviewer(u.user_id)}
-                  className="h-4 w-4 rounded border-slate-300 text-red-600 focus:ring-red-500"
-                />
-                <span>{u.username}</span>
-              </label>
-            ))
+                <span className="max-w-[220px] truncate">{u.username}</span>
+                <span className="text-text-muted">×</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="mb-2 flex items-center gap-2 rounded-xl border border-border bg-bg px-3 py-2 text-sm text-text shadow-sm">
+          <Search size={16} className="text-text-muted" aria-hidden />
+          <input
+            value={userQuery}
+            onChange={(e) => setUserQuery(e.target.value)}
+            placeholder="Search interviewers…"
+            className="w-full bg-transparent text-sm text-text outline-none placeholder:text-text-muted"
+          />
+        </div>
+
+        <div className="max-h-56 overflow-auto rounded-xl border border-border bg-bg p-2 text-sm">
+          {users.length === 0 ? (
+            <span className="text-text-muted">Loading users…</span>
+          ) : (
+            filteredUsers.map((u) => {
+              const checked = selectedInterviewers.has(u.user_id);
+              return (
+                <button
+                  key={u.user_id}
+                  type="button"
+                  onClick={() => toggleInterviewer(u.user_id)}
+                  className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left transition ${
+                    checked ? "bg-surface" : "hover:bg-surface"
+                  }`}
+                >
+                  <span className="truncate text-sm font-semibold text-text">
+                    {u.username}
+                  </span>
+                  <span
+                    className={`inline-flex h-5 w-5 items-center justify-center rounded-md border ${
+                      checked
+                        ? "border-accent bg-accent text-white"
+                        : "border-border bg-bg text-transparent"
+                    }`}
+                    aria-hidden
+                  >
+                    ✓
+                  </span>
+                </button>
+              );
+            })
           )}
         </div>
       </div>
 
-      <div className="mb-3.5 grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3.5 px-5 pb-4 sm:grid-cols-2">
         <div>
           <label className={labelCls}>Meeting link</label>
           <input
@@ -281,7 +360,7 @@ export function InterviewScheduleForm({
         </div>
       </div>
 
-      <div className="mb-4">
+      <div className="px-5 pb-4">
         <label className={labelCls}>Notes</label>
         <textarea
           value={notes}
@@ -291,18 +370,18 @@ export function InterviewScheduleForm({
         />
       </div>
 
-      <div className="flex flex-wrap justify-end gap-2.5">
+      <div className="flex flex-wrap justify-end gap-2.5 border-t border-border bg-bg px-5 py-4">
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          className="rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-text shadow-sm transition hover:bg-bg"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={disabled || submitting}
-          className="rounded-lg bg-red-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-xl bg-black px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {submitting ? "Scheduling…" : "Schedule"}
         </button>

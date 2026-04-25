@@ -124,19 +124,39 @@ const MyRequisitions: React.FC = () => {
   }) => {
     const params = new URLSearchParams(searchParams.toString());
     if (next.q !== undefined) {
-      next.q ? params.set("q", next.q) : params.delete("q");
+      if (next.q) {
+        params.set("q", next.q);
+      } else {
+        params.delete("q");
+      }
     }
     if (next.status !== undefined) {
-      next.status === "all" ? params.delete("status") : params.set("status", next.status);
+      if (next.status === "all") {
+        params.delete("status");
+      } else {
+        params.set("status", next.status);
+      }
     }
     if (next.priority !== undefined) {
-      next.priority === "all" ? params.delete("priority") : params.set("priority", next.priority);
+      if (next.priority === "all") {
+        params.delete("priority");
+      } else {
+        params.set("priority", next.priority);
+      }
     }
     if (next.sort !== undefined) {
-      next.sort === "created_desc" ? params.delete("sort") : params.set("sort", next.sort);
+      if (next.sort === "created_desc") {
+        params.delete("sort");
+      } else {
+        params.set("sort", next.sort);
+      }
     }
     if (next.page !== undefined) {
-      next.page <= 1 ? params.delete("page") : params.set("page", String(next.page));
+      if (next.page <= 1) {
+        params.delete("page");
+      } else {
+        params.set("page", String(next.page));
+      }
     }
     const queryString = params.toString();
     router.replace(queryString ? `${pathname}?${queryString}` : pathname, {
@@ -144,7 +164,7 @@ const MyRequisitions: React.FC = () => {
     });
   };
 
-  const formatDate = (value: string) => {
+  const formatDate = (value: string | null | undefined) => {
     if (!value) return "—";
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
@@ -155,8 +175,8 @@ const MyRequisitions: React.FC = () => {
     });
   };
 
-  const formatCurrency = (value: number) => {
-    if (Number.isNaN(value)) return "—";
+  const formatCurrency = (value: number | null | undefined) => {
+    if (value == null || Number.isNaN(value)) return "—";
     return new Intl.NumberFormat("en-IN", {
       style: "currency",
       currency: "INR",
@@ -221,20 +241,25 @@ const MyRequisitions: React.FC = () => {
 
     const sorted = [...filtered];
     sorted.sort((a, b) => {
+      const time = (v: string | null | undefined) => {
+        if (!v) return 0;
+        const t = new Date(v).getTime();
+        return Number.isFinite(t) ? t : 0;
+      };
       switch (sortBy) {
         case "created_asc":
-          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+          return time(a.created_at) - time(b.created_at);
         case "created_desc":
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+          return time(b.created_at) - time(a.created_at);
         case "required_asc":
           return (
-            new Date(a.required_by_date).getTime() -
-            new Date(b.required_by_date).getTime()
+            time(a.required_by_date) -
+            time(b.required_by_date)
           );
         case "required_desc":
           return (
-            new Date(b.required_by_date).getTime() -
-            new Date(a.required_by_date).getTime()
+            time(b.required_by_date) -
+            time(a.required_by_date)
           );
         case "budget_asc":
           return (a.effective_budget ?? 0) - (b.effective_budget ?? 0);

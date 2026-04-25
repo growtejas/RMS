@@ -69,6 +69,57 @@ export const userRoles = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.roleId] })],
 );
 
+// ============================================================================
+// OAuth + Access Requests (internal onboarding)
+// ============================================================================
+
+export const accessRequestStatusEnum = pgEnum("access_request_status", [
+  "pending",
+  "approved",
+  "rejected",
+]);
+
+/** OAuth identity mapping (e.g. Google `sub`) to an existing `users` row. */
+export const userOauthIdentities = pgTable(
+  "user_oauth_identities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.userId, { onDelete: "cascade" }),
+    provider: varchar("provider", { length: 40 }).notNull(),
+    providerSub: varchar("provider_sub", { length: 255 }).notNull(),
+    email: varchar("email", { length: 255 }).notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ux_user_oauth_provider_sub").on(t.provider, t.providerSub),
+    uniqueIndex("ux_user_oauth_provider_email").on(t.provider, t.email),
+    index("idx_user_oauth_user_id").on(t.userId),
+  ],
+);
+
+export const accessRequests = pgTable(
+  "access_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.userId, { onDelete: "cascade" }),
+    message: text("message"),
+    status: accessRequestStatusEnum("status").notNull().default("pending"),
+    reviewedBy: integer("reviewed_by").references(() => users.userId, {
+      onDelete: "set null",
+    }),
+    reviewedAt: timestamp("reviewed_at", { mode: "date" }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_access_requests_user_id_created_at").on(t.userId, t.createdAt),
+    index("idx_access_requests_status_created_at").on(t.status, t.createdAt),
+  ],
+);
+
 /** User ↔ organization membership; primary org drives JWT `org_id` unless overridden. */
 export const organizationMembers = pgTable(
   "organization_members",

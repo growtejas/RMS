@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   ClipboardList,
   FilePlus,
+  CalendarClock,
   Menu,
   X,
 } from "lucide-react";
@@ -33,6 +34,11 @@ const ManagerSidebar: React.FC<ManagerSidebarProps> = ({
       label: "Dashboard",
       icon: <LayoutDashboard size={20} />,
       end: true,
+    },
+    {
+      href: "/manager/interviews",
+      label: "Interviews",
+      icon: <CalendarClock size={20} />,
     },
     {
       href: "/manager/raise-requisition",

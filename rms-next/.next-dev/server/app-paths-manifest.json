@@ -1,9 +1,8 @@
 {
-  "/api/users/route": "app/api/users/route.js",
-  "/api/requisitions/route": "app/api/requisitions/route.js",
-  "/ta/interviews/page": "app/ta/interviews/page.js",
-  "/ta/requisitions/page": "app/ta/requisitions/page.js",
-  "/ta/requisitions/[id]/page": "app/ta/requisitions/[id]/page.js",
-  "/ta/candidates/[candidateId]/page": "app/ta/candidates/[candidateId]/page.js",
-  "/ta/candidates/page": "app/ta/candidates/page.js"
+  "/api/manager/interviews/route": "app/api/manager/interviews/route.js",
+  "/api/dashboard/manager-metrics/route": "app/api/dashboard/manager-metrics/route.js",
+  "/manager/raise-requisition/page": "app/manager/raise-requisition/page.js",
+  "/manager/interviews/page": "app/manager/interviews/page.js",
+  "/manager/interviews/schedule/page": "app/manager/interviews/schedule/page.js",
+  "/manager/page": "app/manager/page.js"
 }

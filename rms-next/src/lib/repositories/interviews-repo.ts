@@ -20,6 +20,7 @@ import {
   interviews,
   organizationMembers,
   requisitionItems,
+  requisitions,
   users,
 } from "@/lib/db/schema";
 
@@ -235,6 +236,162 @@ export async function listPanelistsForInterviews(
     .from(interviewPanelists)
     .where(inArray(interviewPanelists.interviewId, interviewIds))
     .orderBy(asc(interviewPanelists.id));
+}
+
+export type InterviewWithCandidateAndRoleRow = {
+  interview: InterviewRow;
+  candidateFullName: string;
+  candidateEmail: string | null;
+  requisitionId: number | null;
+  rolePosition: string | null;
+};
+
+/**
+ * Manager-visible interviews:
+ * - Interviews for requisitions raised by this manager (owner scope)
+ * - OR interviews where this manager is a panelist (panelist scope)
+ *
+ * Returns a de-duped list by interview id.
+ */
+export async function listManagerInterviews(params: {
+  organizationId: string;
+  managerUserId: number;
+}): Promise<InterviewWithCandidateAndRoleRow[]> {
+  const db = getDb();
+
+  const ownedRows = await db
+    .select({
+      interview: interviews,
+      candidateFullName: candidates.fullName,
+      candidateEmail: candidates.email,
+      requisitionId: candidates.requisitionId,
+      rolePosition: requisitionItems.rolePosition,
+    })
+    .from(interviews)
+    .innerJoin(candidates, eq(interviews.candidateId, candidates.candidateId))
+    .innerJoin(
+      requisitionItems,
+      eq(candidates.requisitionItemId, requisitionItems.itemId),
+    )
+    .innerJoin(requisitions, eq(candidates.requisitionId, requisitions.reqId))
+    .where(
+      and(
+        eq(candidates.organizationId, params.organizationId),
+        eq(requisitions.raisedBy, params.managerUserId),
+      ),
+    );
+
+  const panelistRows = await db
+    .select({
+      interview: interviews,
+      candidateFullName: candidates.fullName,
+      candidateEmail: candidates.email,
+      requisitionId: candidates.requisitionId,
+      rolePosition: requisitionItems.rolePosition,
+    })
+    .from(interviews)
+    .innerJoin(candidates, eq(interviews.candidateId, candidates.candidateId))
+    .innerJoin(
+      requisitionItems,
+      eq(candidates.requisitionItemId, requisitionItems.itemId),
+    )
+    .innerJoin(
+      interviewPanelists,
+      eq(interviewPanelists.interviewId, interviews.id),
+    )
+    .where(
+      and(
+        eq(candidates.organizationId, params.organizationId),
+        eq(interviewPanelists.userId, params.managerUserId),
+        isNotNull(interviewPanelists.userId),
+      ),
+    );
+
+  const byId = new Map<number, InterviewWithCandidateAndRoleRow>();
+  for (const r of ownedRows) {
+    byId.set(r.interview.id, r);
+  }
+  for (const r of panelistRows) {
+    if (!byId.has(r.interview.id)) {
+      byId.set(r.interview.id, r);
+    }
+  }
+
+  return Array.from(byId.values()).sort(
+    (a, b) => b.interview.scheduledAt.getTime() - a.interview.scheduledAt.getTime(),
+  );
+}
+
+export async function managerHasAccessToInterview(params: {
+  organizationId: string;
+  managerUserId: number;
+  interviewId: number;
+}): Promise<boolean> {
+  const db = getDb();
+
+  const owned = await db
+    .select({ id: interviews.id })
+    .from(interviews)
+    .innerJoin(candidates, eq(interviews.candidateId, candidates.candidateId))
+    .innerJoin(requisitions, eq(candidates.requisitionId, requisitions.reqId))
+    .where(
+      and(
+        eq(candidates.organizationId, params.organizationId),
+        eq(interviews.id, params.interviewId),
+        eq(requisitions.raisedBy, params.managerUserId),
+      ),
+    )
+    .limit(1);
+  if (owned.length > 0) {
+    return true;
+  }
+
+  const panelist = await db
+    .select({ id: interviews.id })
+    .from(interviews)
+    .innerJoin(candidates, eq(interviews.candidateId, candidates.candidateId))
+    .innerJoin(
+      interviewPanelists,
+      eq(interviewPanelists.interviewId, interviews.id),
+    )
+    .where(
+      and(
+        eq(candidates.organizationId, params.organizationId),
+        eq(interviews.id, params.interviewId),
+        eq(interviewPanelists.userId, params.managerUserId),
+        isNotNull(interviewPanelists.userId),
+      ),
+    )
+    .limit(1);
+  return panelist.length > 0;
+}
+
+export async function managerIsPanelistForCandidateItem(params: {
+  organizationId: string;
+  managerUserId: number;
+  candidateId: number;
+  requisitionItemId: number;
+}): Promise<boolean> {
+  const db = getDb();
+  const rows = await db
+    .select({ id: interviews.id })
+    .from(interviews)
+    .innerJoin(candidates, eq(interviews.candidateId, candidates.candidateId))
+    .innerJoin(
+      interviewPanelists,
+      eq(interviewPanelists.interviewId, interviews.id),
+    )
+    .where(
+      and(
+        eq(candidates.organizationId, params.organizationId),
+        eq(interviews.candidateId, params.candidateId),
+        eq(interviews.requisitionItemId, params.requisitionItemId),
+        eq(interviewPanelists.userId, params.managerUserId),
+        isNotNull(interviewPanelists.userId),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
 }
 
 export async function deletePanelistsForInterview(

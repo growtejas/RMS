@@ -53,7 +53,12 @@ function interviewToJson(
   row: repo.InterviewRow,
   options?: {
     panelists?: InterviewPanelistJson[];
-    extras?: { candidate_name?: string; candidate_email?: string | null };
+    extras?: {
+      candidate_name?: string;
+      candidate_email?: string | null;
+      requisition_id?: number | null;
+      role_position?: string | null;
+    };
   },
 ) {
   return {
@@ -84,6 +89,8 @@ function interviewToJson(
       ? {
           candidate_name: options.extras.candidate_name,
           candidate_email: options.extras.candidate_email ?? null,
+          requisition_id: options.extras.requisition_id ?? null,
+          role_position: options.extras.role_position ?? null,
         }
       : {}),
   };
@@ -137,6 +144,26 @@ export async function listInterviewsJson(
   );
 }
 
+export async function listManagerInterviewsJson(user: ApiUser) {
+  const rows = await ivRepo.listManagerInterviews({
+    organizationId: user.organizationId,
+    managerUserId: user.userId,
+  });
+  const ids = rows.map((r) => r.interview.id);
+  const panelMap = await attachPanelistsMap(ids);
+  return rows.map((r) =>
+    interviewToJson(r.interview, {
+      panelists: panelMap.get(r.interview.id) ?? [],
+      extras: {
+        candidate_name: r.candidateFullName,
+        candidate_email: r.candidateEmail,
+        requisition_id: r.requisitionId,
+        role_position: r.rolePosition,
+      },
+    }),
+  );
+}
+
 export async function getInterviewJson(interviewId: number, organizationId: string) {
   const row = await repo.selectInterviewById(interviewId, organizationId);
   if (!row) {
@@ -153,6 +180,31 @@ export async function createInterviewJson(payload: InterviewCreateInput, user: A
     return createInterviewV2(payload, user);
   }
   return createInterviewLegacy(payload as InterviewCreateLegacy, user);
+}
+
+export async function createInterviewAsManagerJson(
+  payload: InterviewCreateV2,
+  user: ApiUser,
+) {
+  const meta = await repo.selectRequisitionItemMetaByItemId(payload.requisition_item_id);
+  if (!meta || meta.organizationId !== user.organizationId) {
+    throw new HttpError(404, "Requisition item not found");
+  }
+
+  const owned = meta.raisedBy === user.userId;
+  const panelist = await ivRepo.managerIsPanelistForCandidateItem({
+    organizationId: user.organizationId,
+    managerUserId: user.userId,
+    candidateId: payload.candidate_id,
+    requisitionItemId: payload.requisition_item_id,
+  });
+
+  if (!owned && !panelist) {
+    throw new HttpError(403, "Not authorized to schedule interviews for this role");
+  }
+
+  // Reuse the same core validations and conflict checks as TA/HR/Admin scheduling.
+  return createInterviewV2(payload, user, { skipOwnership: true });
 }
 
 async function createInterviewLegacy(
@@ -225,7 +277,11 @@ async function createInterviewLegacy(
   }
 }
 
-async function createInterviewV2(payload: InterviewCreateV2, user: ApiUser) {
+async function createInterviewV2(
+  payload: InterviewCreateV2,
+  user: ApiUser,
+  options?: { skipOwnership?: boolean },
+) {
   const cand = await repo.selectCandidateById(
     payload.candidate_id,
     user.organizationId,
@@ -233,7 +289,9 @@ async function createInterviewV2(payload: InterviewCreateV2, user: ApiUser) {
   if (!cand) {
     throw new HttpError(404, "Candidate not found");
   }
-  await assertTaOwnershipForCandidate(payload.candidate_id, user);
+  if (!options?.skipOwnership) {
+    await assertTaOwnershipForCandidate(payload.candidate_id, user);
+  }
 
   const app = await ivRepo.findApplicationForSchedule({
     candidateId: payload.candidate_id,
@@ -614,6 +672,79 @@ export async function patchInterviewJson(
     }
     throw e;
   }
+}
+
+export async function patchInterviewAsManagerJson(
+  interviewId: number,
+  patch: InterviewPatchInput,
+  user: ApiUser,
+) {
+  const existing = await repo.selectInterviewById(interviewId, user.organizationId);
+  if (!existing) {
+    throw new HttpError(404, "Interview not found");
+  }
+
+  const allowed = await ivRepo.managerHasAccessToInterview({
+    organizationId: user.organizationId,
+    managerUserId: user.userId,
+    interviewId,
+  });
+  if (!allowed) {
+    throw new HttpError(403, "Not authorized to update this interview");
+  }
+
+  const triesDisallowed =
+    patch.status !== undefined ||
+    patch.scheduled_at !== undefined ||
+    patch.end_time !== undefined ||
+    patch.timezone !== undefined ||
+    patch.meeting_link !== undefined ||
+    patch.location !== undefined ||
+    patch.round_name !== undefined ||
+    patch.round_type !== undefined ||
+    patch.interview_mode !== undefined ||
+    patch.interviewer_name !== undefined ||
+    patch.interviewer_ids !== undefined ||
+    patch.reschedule_reason !== undefined;
+  if (triesDisallowed) {
+    throw new HttpError(403, "Managers can only update result, feedback, and notes");
+  }
+
+  const db = getDb();
+  const updated = await db.transaction(async (tx) => {
+    const row = await ivRepo.updateInterviewFull(tx, interviewId, {
+      notes: patch.notes === undefined ? undefined : patch.notes,
+      result: patch.result === undefined ? undefined : patch.result,
+      feedback: patch.feedback === undefined ? undefined : patch.feedback,
+      updatedBy: user.userId,
+    });
+    if (!row) {
+      throw new HttpError(404, "Interview not found");
+    }
+
+    await repo.insertInterviewAuditUpdate({
+      interviewId,
+      performedBy: user.userId,
+      oldValue: `status=${existing.status}, result=${existing.result ?? ""}`,
+      newValue: [
+        patch.result !== undefined ? `result → ${patch.result}` : null,
+        patch.feedback !== undefined ? "feedback updated" : null,
+        patch.notes !== undefined ? "notes updated" : null,
+      ]
+        .filter(Boolean)
+        .join("; "),
+    });
+
+    return row;
+  });
+
+  const panelMap = await attachPanelistsMap([interviewId]);
+  return {
+    interview: interviewToJson(updated, {
+      panelists: panelMap.get(interviewId) ?? [],
+    }),
+    warnings: [] as string[],
+  };
 }
 
 export async function deleteInterviewJson(

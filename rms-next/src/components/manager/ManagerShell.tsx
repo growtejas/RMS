@@ -9,9 +9,11 @@ import ManagerHeader from "@/components/manager/ManagerHeader";
 import ManagerSidebar from "@/components/manager/ManagerSidebar";
 import "@/styles/hr/hr-dashboard.css";
 import "@/styles/manager/manager-dashboard.css";
+import PageShell from "@/components/common/PageShell";
 
 const viewLabels: Record<string, string> = {
   "manager-dashboard": "Dashboard",
+  interviews: "Interviews",
   "raise-requisition": "Raise Requisition",
   "my-requisitions": "My Requisitions",
   "requisition-audit": "Requisition Audit",
@@ -42,6 +44,9 @@ export default function ManagerShell({
     }
     if (path.startsWith("/manager/requisition-audit")) {
       return viewLabels["requisition-audit"]!;
+    }
+    if (path.startsWith("/manager/interviews")) {
+      return viewLabels.interviews;
     }
     return viewLabels["manager-dashboard"]!;
   }, [pathname]);
@@ -87,27 +92,29 @@ export default function ManagerShell({
   }
 
   return (
-    <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
-      <ManagerSidebar
-        collapsed={collapsed}
-        onToggleCollapse={() => setCollapsed((prev) => !prev)}
-      />
-
-      <div
-        className={`admin-main-content ${collapsed ? "sidebar-collapsed" : ""}`}
-      >
-        <Header />
-        <ManagerHeader
-          title={activeLabel}
-          user={user}
-          onLogout={() => {
-            logout();
-            router.replace("/login");
-          }}
+    <PageShell maxWidth="none">
+      <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
+        <ManagerSidebar
+          collapsed={collapsed}
+          onToggleCollapse={() => setCollapsed((prev) => !prev)}
         />
 
-        <section className="admin-content-area">{children}</section>
+        <div
+          className={`admin-main-content ${collapsed ? "sidebar-collapsed" : ""}`}
+        >
+          <Header />
+          <ManagerHeader
+            title={activeLabel}
+            user={user}
+            onLogout={() => {
+              logout();
+              router.replace("/login");
+            }}
+          />
+
+          <section className="admin-content-area">{children}</section>
+        </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

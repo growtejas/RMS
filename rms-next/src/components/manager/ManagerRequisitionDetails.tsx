@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { useRouter, useParams, usePathname } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 import {
   ArrowLeft,
   Edit,
@@ -784,7 +784,6 @@ const TimelineTab: React.FC<TimelineTabProps> = ({
 const ManagerRequisitionDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const pathname = usePathname();
   const { user } = useAuth();
 
   // State
@@ -1335,21 +1334,6 @@ const ManagerRequisitionDetails: React.FC = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when requisition id changes only
   }, [requisition?.req_id]);
-
-  const openManagerCandidateProfile = useCallback(
-    (c: Candidate) => {
-      const q = new URLSearchParams();
-      if (c.application_id != null) {
-        q.set("application_id", String(c.application_id));
-      }
-      q.set("workspace", "execute");
-      if (pathname) {
-        q.set("returnTo", pathname);
-      }
-      router.push(`/manager/candidates/${c.candidate_id}?${q.toString()}`);
-    },
-    [router, pathname],
-  );
 
   // Handle before unload for unsaved changes
   useEffect(() => {

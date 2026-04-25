@@ -7,6 +7,7 @@ import { interviewPatchBody } from "@/lib/validators/interviews";
 import {
   deleteInterviewJson,
   getInterviewJson,
+  patchInterviewAsManagerJson,
   patchInterviewJson,
 } from "@/lib/services/interviews-service";
 
@@ -54,7 +55,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
     if (user instanceof NextResponse) {
       return user;
     }
-    const denied = requireAnyRole(user, "TA", "HR", "Admin");
+    const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager");
     if (denied) {
       return denied;
     }
@@ -73,7 +74,12 @@ export async function PATCH(req: Request, { params }: Ctx) {
       );
     }
 
-    const data = await patchInterviewJson(interviewId, parsed.data, user);
+    const isManagerOnly =
+      user.roles.includes("Manager") &&
+      !user.roles.some((r) => r === "TA" || r === "HR" || r === "Admin" || r === "Owner");
+    const data = isManagerOnly
+      ? await patchInterviewAsManagerJson(interviewId, parsed.data, user)
+      : await patchInterviewJson(interviewId, parsed.data, user);
     return envelopeOk(data);
   } catch (e) {
     return envelopeCatch(e, "[PATCH /api/interviews/[interviewId]]");

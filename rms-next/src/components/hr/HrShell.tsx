@@ -9,6 +9,7 @@ import HrHeader from "@/components/hr/HRHeader";
 import HrSidebar from "@/components/hr/HRSidebar";
 import "@/styles/hr/hr-dashboard.css";
 import HRDashboardView from "@/components/hr/HRDashboardView";
+import PageShell from "@/components/common/PageShell";
 
 export default function HrShell({ children }: { children: React.ReactNode }) {
   const { user, logout, isHydrating, isAuthenticated } = useAuth();
@@ -86,38 +87,40 @@ export default function HrShell({ children }: { children: React.ReactNode }) {
   const isHome = pathname === "/hr" || pathname === "/hr/";
 
   return (
-    <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
-      <HrSidebar
-        collapsed={collapsed}
-        onToggleCollapse={() => setCollapsed((prev) => !prev)}
-      />
-
-      <div
-        className={`admin-main-content ${collapsed ? "sidebar-collapsed" : ""}`}
-      >
-        <Header />
-
-        <HrHeader
-          title={activeLabel}
-          user={user}
-          onLogout={() => {
-            logout();
-            router.replace("/login");
-          }}
+    <PageShell maxWidth="none">
+      <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
+        <HrSidebar
+          collapsed={collapsed}
+          onToggleCollapse={() => setCollapsed((prev) => !prev)}
         />
 
-        <section className="admin-content-area">
-          {isHome ? (
-            <HRDashboardView
-              onViewRequisition={(reqId: number) => {
-                router.push(`/hr/requisitions/${reqId}`);
-              }}
-            />
-          ) : (
-            children
-          )}
-        </section>
+        <div
+          className={`admin-main-content ${collapsed ? "sidebar-collapsed" : ""}`}
+        >
+          <Header />
+
+          <HrHeader
+            title={activeLabel}
+            user={user}
+            onLogout={() => {
+              logout();
+              router.replace("/login");
+            }}
+          />
+
+          <section className="admin-content-area">
+            {isHome ? (
+              <HRDashboardView
+                onViewRequisition={(reqId: number) => {
+                  router.push(`/hr/requisitions/${reqId}`);
+                }}
+              />
+            ) : (
+              children
+            )}
+          </section>
+        </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

@@ -1,4 +1,4 @@
-// File: C:\Imp\RMS_v2\RMS\rms-next\src\app\layout.tsx
+// File: /home/rbm-admin/Documents/RBM-Project/RMS/rms-next/src/app/layout.tsx
 import * as entry from '../../../src/app/layout.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Shield, Database, Users, FileText, Menu, X } from "lucide-react";
+import { Shield, Database, Users, FileText, UserCheck, Menu, X } from "lucide-react";
 
 interface AdminSidebarProps {
   collapsed: boolean;
@@ -26,6 +26,11 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
     end?: boolean;
   }[] = [
     { href: "/admin", label: "Overview", icon: <Shield size={20} />, end: true },
+    {
+      href: "/admin/access-requests",
+      label: "Access requests",
+      icon: <UserCheck size={20} />,
+    },
     {
       href: "/admin/master-data",
       label: "Master Data",
@@ -55,31 +60,44 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
   };
 
   return (
-    <aside className={`admin-sidebar ${collapsed ? "collapsed" : ""}`}>
+    <aside
+      className={`admin-sidebar ${collapsed ? "collapsed" : ""}`}
+      aria-label="Admin dashboard navigation"
+    >
       <div className="sidebar-header">
         {!collapsed && (
           <div className="sidebar-brand">
             <Shield size={24} className="brand-icon" />
-            <span className="brand-text">Admin Dashboard</span>
+            <span className="brand-text">Admin</span>
           </div>
         )}
-        <button type="button" className="sidebar-toggle" onClick={onToggleCollapse}>
+        <button
+          type="button"
+          className="sidebar-toggle"
+          onClick={onToggleCollapse}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
+        >
           {collapsed ? <Menu size={20} /> : <X size={20} color="white" />}
         </button>
       </div>
 
-      <nav className="sidebar-nav">
-        <ul>
+      <nav className="sidebar-nav" aria-label="Main menu">
+        <ul role="list">
           {menuItems.map((item) => (
             <li key={item.href}>
               <Link
                 href={item.href}
                 className={`nav-item ${isActive(item.href, item.end) ? "active" : ""}`}
-                title={collapsed ? item.label : ""}
+                title={collapsed ? item.label : undefined}
               >
-                <span className="nav-icon">{item.icon}</span>
-                {!collapsed && <span className="nav-label">{item.label}</span>}
-                {!collapsed && <span className="active-indicator"></span>}
+                <span className="nav-icon" aria-hidden>
+                  {item.icon}
+                </span>
+                {!collapsed && (
+                  <span className="nav-label">{item.label}</span>
+                )}
+                {!collapsed && <span className="active-indicator" aria-hidden />}
               </Link>
             </li>
           ))}

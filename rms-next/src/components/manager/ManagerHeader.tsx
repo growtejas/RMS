@@ -31,17 +31,7 @@ const ManagerHeader: React.FC<ManagerHeaderProps> = ({
 
       {showUser && (
         <div className="header-actions">
-          {/* <div className="search-bar">
-          <Search size={16} />
-          <input type="text" placeholder="Search" />
-        </div> */}
-
           <div className="header-user">
-            {/* <button className="notification-btn" title="Notifications">
-            <Bell size={18} />
-            <span className="notification-badge">3</span>
-          </button> */}
-
             <div className="user-info">
               <div className="user-name">{displayName}</div>
               <div className="user-role">{displayRole}</div>
@@ -53,11 +43,7 @@ const ManagerHeader: React.FC<ManagerHeaderProps> = ({
               title="Logout"
               type="button"
             >
-              {displayName ? (
-                displayName.charAt(0).toUpperCase()
-              ) : (
-                <User size={18} />
-              )}
+              {displayName ? displayName.charAt(0).toUpperCase() : <User size={18} />}
             </button>
           </div>
         </div>

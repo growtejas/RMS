@@ -23,6 +23,21 @@ export interface MeResponse {
   roles: string[];
 }
 
+export type SessionResponse =
+  | { authenticated: false }
+  | (MeResponse & {
+      authenticated: true;
+      organization_id: string;
+      is_active: boolean;
+    });
+
+export async function fetchSession(): Promise<SessionResponse> {
+  const { data } = await apiClient.get<SessionResponse>("/auth/session", {
+    timeout: 15_000,
+  });
+  return data;
+}
+
 export async function fetchMe(): Promise<MeResponse> {
   const { data } = await apiClient.get<MeResponse>("/auth/me", { timeout: 15_000 });
   return data;

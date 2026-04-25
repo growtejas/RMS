@@ -11,7 +11,22 @@ import React, {
 import axios from "axios";
 
 import type { User, AuthContextType } from "@/types/auth";
-import { fetchMe, logout as apiLogout, refreshAccessToken } from "@/lib/api/auth";
+import { fetchSession, logout as apiLogout, refreshAccessToken } from "@/lib/api/auth";
+
+function readBrowserCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const parts = document.cookie.split(";").map((p) => p.trim());
+  for (const p of parts) {
+    if (!p) continue;
+    const eq = p.indexOf("=");
+    if (eq <= 0) continue;
+    const k = p.slice(0, eq);
+    if (k === name) {
+      return decodeURIComponent(p.slice(eq + 1));
+    }
+  }
+  return null;
+}
 
 export const AuthContext = createContext<AuthContextType | undefined>(
   undefined,
@@ -96,6 +111,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
         user_id: data.user_id,
         username: data.username,
         roles: normalizedRoles,
+        is_active: true,
       };
 
       setUser(userObj);
@@ -133,6 +149,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
         user_id: data.user_id,
         username: data.username,
         roles: normalizedRoles,
+        is_active: true,
       };
       setUser(userObj);
       return userObj;
@@ -155,6 +172,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
       return;
     }
 
+    const path = window.location.pathname || "/";
+    const first = path.split("/").filter(Boolean)[0] ?? "";
+    // Public routes: skip session bootstrap (other pages use `/api/auth/session`, which avoids 401 noise).
+    const skipSessionBootstrap =
+      first === "unauthorized" ||
+      first === "public" ||
+      first === "api";
+
+    if (skipSessionBootstrap) {
+      setUser(null);
+      setIsHydrating(false);
+      return;
+    }
+
     const myGen = ++bootstrapGeneration.current;
     const finishBootstrap = () => {
       if (bootstrapGeneration.current === myGen) {
@@ -168,20 +199,28 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
 
     (async () => {
       try {
-        // Attempt to load an existing cookie session.
-        const me = await fetchMe();
-        setUser({
-          user_id: me.user_id,
-          username: me.username,
-          roles: Array.isArray(me.roles) ? me.roles.map((r) => r.toLowerCase()) : [],
-        });
-      } catch (e) {
-        // If access cookie expired, attempt refresh once.
-        if (axios.isAxiosError(e) && e.response?.status === 401) {
-          await refreshSession();
+        const session = await fetchSession();
+        if (session.authenticated) {
+          setUser({
+            user_id: session.user_id,
+            username: session.username,
+            roles: Array.isArray(session.roles)
+              ? session.roles.map((r) => r.toLowerCase())
+              : [],
+            is_active: session.is_active,
+          });
         } else {
-          setUser(null);
+          // Access missing/expired: try refresh if we likely have a refresh cookie (httpOnly);
+          // `rfm_csrf` is set with login/refresh and is a cheap signal.
+          const likelyHasRefreshSession = Boolean(readBrowserCookie("rfm_csrf"));
+          if (likelyHasRefreshSession) {
+            await refreshSession();
+          } else {
+            setUser(null);
+          }
         }
+      } catch {
+        setUser(null);
       } finally {
         window.clearTimeout(maxTimer);
         finishBootstrap();

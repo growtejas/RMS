@@ -53,6 +53,10 @@ export interface Interview {
   id: number;
   candidate_id: number;
   requisition_item_id?: number | null;
+  /** Present on manager-scoped list responses. */
+  requisition_id?: number | null;
+  /** Present on manager-scoped list responses. */
+  role_position?: string | null;
   round_number: number;
   round_name?: string | null;
   round_type?: string | null;
@@ -757,6 +761,16 @@ export async function fetchInterviews(filters: {
   return data.data.interviews;
 }
 
+export async function fetchManagerInterviews(): Promise<Interview[]> {
+  const { data } = await apiClient.get<
+    InterviewApiEnvelope<{ interviews: Interview[] }>
+  >("/manager/interviews");
+  if (!data.success || !data.data) {
+    throw new Error(data.error ?? "Failed to load interviews");
+  }
+  return data.data.interviews;
+}
+
 export async function createInterview(
   payload: InterviewCreatePayload,
 ): Promise<InterviewMutationResult> {
@@ -765,6 +779,18 @@ export async function createInterview(
   >("/interviews/", payload);
   if (!data.success || !data.data) {
     throw new Error(data.error ?? "Failed to create interview");
+  }
+  return data.data;
+}
+
+export async function createManagerInterview(
+  payload: InterviewCreateV2,
+): Promise<InterviewMutationResult> {
+  const { data } = await apiClient.post<
+    InterviewApiEnvelope<InterviewMutationResult>
+  >("/manager/interviews/schedule", payload);
+  if (!data.success || !data.data) {
+    throw new Error(data.error ?? "Failed to schedule interview");
   }
   return data.data;
 }

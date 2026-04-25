@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     if (user instanceof NextResponse) {
       return user;
     }
-    const denied = requireAnyRole(user, "Admin", "HR", "TA");
+    const denied = requireAnyRole(user, "Admin", "HR", "TA", "Manager");
     if (denied) {
       return denied;
     }

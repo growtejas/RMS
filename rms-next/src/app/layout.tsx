@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
-import { DM_Sans } from "next/font/google";
+import { Noto_Sans } from "next/font/google";
 import "./globals.css";
 
 import { Providers } from "@/components/providers";
 
-const dmSans = DM_Sans({
+const notoSans = Noto_Sans({
   subsets: ["latin"],
   variable: "--font-sans",
+  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
@@ -43,7 +44,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${dmSans.variable} ${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${notoSans.variable} ${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <Providers>{children}</Providers>
       </body>
