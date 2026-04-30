@@ -15,6 +15,8 @@ describe("ai-evaluation schema", () => {
       growth_trajectory: 0,
       company_reputation: 0,
       jd_alignment: 0,
+      education_match: 0,
+      internship_relevance: 0,
     });
     assert.equal(s, 30);
     const flat = computeAiCompositeScore({
@@ -22,8 +24,26 @@ describe("ai-evaluation schema", () => {
       growth_trajectory: 70,
       company_reputation: 60,
       jd_alignment: 75,
+      education_match: 50,
+      internship_relevance: 50,
     });
     assert.ok(flat > 70 && flat < 76);
+  });
+
+  it("applies fresher boost policy", () => {
+    const fresher = computeAiCompositeScore(
+      {
+        project_complexity: 60,
+        growth_trajectory: 20,
+        company_reputation: 20,
+        jd_alignment: 70,
+        education_match: 75,
+        internship_relevance: 80,
+      },
+      0,
+    );
+    // 0.30*60 + 0.70*70 + 5 + 5 = 77
+    assert.equal(fresher, 77);
   });
 
   it("resolveAiBlendWeight", () => {
@@ -46,6 +66,8 @@ describe("ai-evaluation schema", () => {
       growth_trajectory: 50,
       company_reputation: 50,
       jd_alignment: 50,
+      education_match: 60,
+      internship_relevance: 60,
       confidence: 0.5,
       summary: "short",
       risks: [],
@@ -59,6 +81,8 @@ describe("ai-evaluation schema", () => {
       growth_trajectory: 65,
       company_reputation: 55,
       jd_alignment: 72,
+      education_match: 68,
+      internship_relevance: 63,
       confidence: 0.82,
       summary: "Solid alignment with role requirements.",
       risks: ["Limited production scale"],

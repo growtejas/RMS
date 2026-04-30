@@ -1,9 +1,15 @@
 "use client";
 
 // Migrated from legacy Vite SPA.
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Plus, Edit, Trash2, Search } from "lucide-react";
 import { apiClient } from "@/lib/api/client";
+import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Input } from "@/components/ui/Input";
+import { Loader } from "@/components/ui/Loader";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/Table";
 import {
   cachedApiGet,
   invalidateCachedApiGetByUrlSubstring,
@@ -54,6 +60,7 @@ type CompanyRoleResponse = {
   role_description?: string | null;
   is_active: boolean;
   created_at?: string | null;
+  created_by?: string | null;
 };
 
 type NewItemState = {
@@ -107,14 +114,20 @@ const MasterDataManager: React.FC = () => {
   const [editingItem, setEditingItem] = useState<MasterDataItem | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
   const [newItem, setNewItem] = useState<NewItemState>({
     name: "",
     description: "",
     type: "skill",
   });
+  const [addSaveAttempted, setAddSaveAttempted] = useState(false);
+  const [editSaveAttempted, setEditSaveAttempted] = useState(false);
   const fetchSkills = async () => {
     setIsLoading(true);
     setError(null);
+    setSuccess(null);
     try {
       const rows = await cachedApiGet<SkillResponse[]>("/skills/");
       const mapped = rows.map((skill) =>
@@ -201,7 +214,7 @@ const MasterDataManager: React.FC = () => {
           name: role.role_name,
           type: "company_role",
           description: role.role_description ?? "",
-          createdBy: "System",
+          createdBy: role.created_by?.trim() ? role.created_by : "System",
           createdAt: formatDate(role.created_at),
           isActive: role.is_active ?? true,
         }),
@@ -231,10 +244,13 @@ const MasterDataManager: React.FC = () => {
       setNewItem((prev) => ({ ...prev, type: "company_role" }));
     }
   }, [activeTab]);
+  useEffect(() => {
+    setPage(1);
+  }, [activeTab, searchTerm]);
 
   const handleAddItem = async () => {
     if (!newItem.name.trim()) {
-      window.alert("Name is required.");
+      setAddSaveAttempted(true);
       return;
     }
 
@@ -271,6 +287,7 @@ const MasterDataManager: React.FC = () => {
 
       setShowAddModal(false);
       setNewItem({ name: "", description: "", type: "skill" });
+      setSuccess(`${activeTab.slice(0, -1)} added successfully.`);
     } catch (err) {
       setError(getApiErrorMessage(err, "Failed to add item"));
     } finally {
@@ -285,6 +302,7 @@ const MasterDataManager: React.FC = () => {
 
     setIsLoading(true);
     setError(null);
+    setSuccess(null);
     try {
       if (activeTab === "skills") {
         await apiClient.delete(`/skills/${id}`);
@@ -303,6 +321,7 @@ const MasterDataManager: React.FC = () => {
         invalidateCachedApiGetByUrlSubstring("/locations/");
         await fetchLocations();
       }
+      setSuccess("Item deleted successfully.");
     } catch (err) {
       setError(getApiErrorMessage(err, "Failed to delete"));
     } finally {
@@ -312,18 +331,20 @@ const MasterDataManager: React.FC = () => {
 
   const handleEditItem = (item: MasterDataItem) => {
     setError(null);
+    setEditSaveAttempted(false);
     setEditingItem(item);
     setShowEditModal(true);
   };
 
   const handleSaveEdit = async () => {
     if (!editingItem || !editingItem.name.trim()) {
-      window.alert("Name is required.");
+      setEditSaveAttempted(true);
       return;
     }
 
     setIsLoading(true);
     setError(null);
+    setSuccess(null);
     try {
       if (editingItem.type === "skill") {
         await apiClient.patch(`/skills/${editingItem.id}`, {
@@ -355,6 +376,7 @@ const MasterDataManager: React.FC = () => {
 
       setShowEditModal(false);
       setEditingItem(null);
+      setSuccess("Item updated successfully.");
     } catch (err) {
       setError(getApiErrorMessage(err, "Failed to update"));
     } finally {
@@ -374,56 +396,71 @@ const MasterDataManager: React.FC = () => {
   const filteredItems = currentItems.filter((item) =>
     item.name.toLowerCase().includes(searchTerm.toLowerCase()),
   );
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+  const pagedItems = filteredItems.slice((page - 1) * pageSize, page * pageSize);
+
+  const canSaveNew = useMemo(
+    () => Boolean(newItem.name.trim()),
+    [newItem.name],
+  );
+
+  const canSaveEdit = useMemo(
+    () => Boolean(editingItem?.name.trim()),
+    [editingItem],
+  );
 
   return (
     <div className="master-data-manager">
       <div className="data-manager-header">
-        <div className="header-left">
-          <h2>
-            Master Data Management for Skills, Locations, Departments, and
-            Company Roles
-          </h2>
-          {/* <p className="subtitle">
-            Create dropdown options for{" "}
-            <strong>Skills, Locations, Departments, and Company Roles</strong>.
-          </p> */}
-        </div>
-        <button
+        <PageHeader
+          title="Master Data Management"
+          subtitle="Manage skills, locations, departments, and company roles."
+        />
+        <Button
           className="add-button"
           onClick={() => {
             setError(null);
+            setAddSaveAttempted(false);
             setShowAddModal(true);
           }}
         >
           <Plus size={16} />
           Add New
-        </button>
+        </Button>
       </div>
 
       {/* Tabs */}
       <div className="data-tabs">
-        <button
+        <Button
+          variant={activeTab === "skills" ? "primary" : "secondary"}
+          size="sm"
           className={`tab-button ${activeTab === "skills" ? "active" : ""}`}
           onClick={() => setActiveTab("skills")}
         >
-          <span>Skills</span>
+          <span>Skills </span>
           <span className="tab-count">{skills.length}</span>
-        </button>
-        <button
+        </Button>
+        <Button
+          variant={activeTab === "locations" ? "primary" : "secondary"}
+          size="sm"
           className={`tab-button ${activeTab === "locations" ? "active" : ""}`}
           onClick={() => setActiveTab("locations")}
         >
           <span>Locations</span>
           <span className="tab-count">{locations.length}</span>
-        </button>
-        <button
+        </Button>
+        <Button
+          variant={activeTab === "departments" ? "primary" : "secondary"}
+          size="sm"
           className={`tab-button ${activeTab === "departments" ? "active" : ""}`}
           onClick={() => setActiveTab("departments")}
         >
           <span>Departments</span>
           <span className="tab-count">{departments.length}</span>
-        </button>
-        <button
+        </Button>
+        <Button
+          variant={activeTab === "company-roles" ? "primary" : "secondary"}
+          size="sm"
           className={`tab-button ${
             activeTab === "company-roles" ? "active" : ""
           }`}
@@ -431,89 +468,104 @@ const MasterDataManager: React.FC = () => {
         >
           <span>Company Roles</span>
           <span className="tab-count">{companyRoles.length}</span>
-        </button>
+        </Button>
       </div>
 
       {/* Search */}
       <div className="data-controls">
         <div className="search-box">
           <Search size={18} />
-          <input
+          <Input
             type="text"
             placeholder={`Search ${activeTab.replace("-", " ")}...`}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        {/* <div className="control-buttons">
-          <button className="control-button">
-            <Filter size={16} />
-            Filter
-          </button>
-          <button className="control-button">
-            <Download size={16} />
-            Export
-          </button>
-          <button className="control-button">
-            <Upload size={16} />
-            Import
-          </button>
-        </div> */}
       </div>
 
       {/* Data Table */}
+      {success ? (
+        <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+          {success}
+        </div>
+      ) : null}
       <div className="data-table-container">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Created By</th>
-              <th>Created At</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table className="border-0 shadow-none">
+          <THead>
+            <TR>
+              <TH>Name</TH>
+              <TH>Created By</TH>
+              <TH>Created At</TH>
+              <TH>Actions</TH>
+            </TR>
+          </THead>
+          <TBody>
             {isLoading && (
-              <tr>
-                <td colSpan={4} className="table-loading">
-                  Loading {activeTab}...
-                </td>
-              </tr>
+              <TR>
+                <TD colSpan={4}>
+                  <Loader label={`Loading ${activeTab}...`} />
+                </TD>
+              </TR>
             )}
-            {filteredItems.map((item) => (
-              <tr key={item.id}>
-                <td>
+            {pagedItems.map((item) => (
+              <TR key={item.id}>
+                <TD>
                   <div className="item-name">{item.name}</div>
-                </td>
-                <td>{item.createdBy}</td>
-                <td>{item.createdAt}</td>
-                <td>
+                </TD>
+                <TD>{item.createdBy}</TD>
+                <TD>{item.createdAt}</TD>
+                <TD>
                   <div className="action-buttons">
-                    <button
-                      className="action-button edit"
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       title="Edit"
                       onClick={() => handleEditItem(item)}
                     >
                       <Edit size={14} />
-                    </button>
-                    <button
-                      className="action-button delete"
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
                       title="Delete"
                       onClick={() => handleDeleteItem(item.id)}
                     >
                       <Trash2 size={14} />
-                    </button>
+                    </Button>
                   </div>
-                </td>
-              </tr>
+                </TD>
+              </TR>
             ))}
-          </tbody>
-        </table>
+          </TBody>
+        </Table>
         {!isLoading && filteredItems.length === 0 && (
-          <div className="empty-state">
-            <p>
-              {error ? error : `No ${activeTab} found. Add your first item!`}
-            </p>
+          <EmptyState
+            title={error ? "Could not load records" : `No ${activeTab} found`}
+            description={error ?? "Add your first item to get started."}
+          />
+        )}
+        {filteredItems.length > pageSize && (
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              disabled={page === 1}
+            >
+              Previous
+            </Button>
+            <span className="text-sm text-[--color-text-subtle]">
+              Page {page} of {totalPages}
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+              disabled={page === totalPages}
+            >
+              Next
+            </Button>
           </div>
         )}
       </div>
@@ -529,12 +581,12 @@ const MasterDataManager: React.FC = () => {
                   Provide the details for the new {activeTab.slice(0, -1)}
                 </p>
               </div>
-              <button
+              <Button
                 className="close-button"
                 onClick={() => setShowAddModal(false)}
               >
                 ×
-              </button>
+              </Button>
             </div>
             <div className="modal-body edit-user-body">
               {error && (
@@ -549,7 +601,7 @@ const MasterDataManager: React.FC = () => {
                   <label>
                     {activeTab === "locations" ? "City *" : "Name *"}
                   </label>
-                  <input
+                  <Input
                     type="text"
                     value={newItem.name}
                     onChange={(e) =>
@@ -560,12 +612,18 @@ const MasterDataManager: React.FC = () => {
                         ? "e.g. Bengaluru"
                         : `Enter ${activeTab.slice(0, -1)} name`
                     }
+                    aria-invalid={addSaveAttempted && !newItem.name.trim()}
                   />
+                  {addSaveAttempted && !newItem.name.trim() ? (
+                    <p className="mt-1 text-sm text-red-600">
+                      {activeTab === "locations" ? "City is required." : "Name is required."}
+                    </p>
+                  ) : null}
                 </div>
                 {activeTab === "locations" && (
                   <div className="form-group">
                     <label>Country</label>
-                    <input
+                    <Input
                       type="text"
                       value={newItem.description}
                       onChange={(e) =>
@@ -581,7 +639,7 @@ const MasterDataManager: React.FC = () => {
                 {activeTab === "company-roles" && (
                   <div className="form-group">
                     <label>Description</label>
-                    <input
+                    <Input
                       type="text"
                       value={newItem.description}
                       onChange={(e) =>
@@ -597,19 +655,18 @@ const MasterDataManager: React.FC = () => {
               </div>
             </div>
             <div className="modal-footer">
-              <button
-                className="cancel-button"
+              <Button
+                variant="secondary"
                 onClick={() => setShowAddModal(false)}
               >
                 Cancel
-              </button>
-              <button
-                className="save-button"
+              </Button>
+              <Button
                 onClick={handleAddItem}
-                disabled={isLoading}
+                disabled={!canSaveNew || isLoading}
               >
                 {isLoading ? "Saving…" : `Save ${activeTab.slice(0, -1)}`}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -621,7 +678,7 @@ const MasterDataManager: React.FC = () => {
           <div className="modal-content">
             <div className="modal-header">
               <h3>Edit {editingItem.type}</h3>
-              <button
+              <Button
                 className="close-button"
                 onClick={() => {
                   setShowEditModal(false);
@@ -629,7 +686,7 @@ const MasterDataManager: React.FC = () => {
                 }}
               >
                 ×
-              </button>
+              </Button>
             </div>
             <div className="modal-body">
               {error && (
@@ -639,7 +696,7 @@ const MasterDataManager: React.FC = () => {
                 <label>
                   {editingItem.type === "location" ? "City *" : "Name *"}
                 </label>
-                <input
+                <Input
                   type="text"
                   value={editingItem.name}
                   onChange={(e) =>
@@ -653,12 +710,18 @@ const MasterDataManager: React.FC = () => {
                       ? "e.g. Bengaluru"
                       : `Enter ${editingItem.type} name`
                   }
+                  aria-invalid={editSaveAttempted && !editingItem.name.trim()}
                 />
+                {editSaveAttempted && !editingItem.name.trim() ? (
+                  <p className="mt-1 text-sm text-red-600">
+                    {editingItem.type === "location" ? "City is required." : "Name is required."}
+                  </p>
+                ) : null}
               </div>
               {editingItem.type === "location" && (
                 <div className="form-group">
                   <label>Country</label>
-                  <input
+                  <Input
                     type="text"
                     value={editingItem.description}
                     onChange={(e) =>
@@ -674,7 +737,7 @@ const MasterDataManager: React.FC = () => {
               {editingItem.type === "company_role" && (
                 <div className="form-group">
                   <label>Description</label>
-                  <input
+                  <Input
                     type="text"
                     value={editingItem.description}
                     onChange={(e) =>
@@ -689,18 +752,21 @@ const MasterDataManager: React.FC = () => {
               )}
             </div>
             <div className="modal-footer">
-              <button
-                className="cancel-button"
+              <Button
+                variant="secondary"
                 onClick={() => {
                   setShowEditModal(false);
                   setEditingItem(null);
                 }}
               >
                 Cancel
-              </button>
-              <button className="save-button" onClick={handleSaveEdit}>
+              </Button>
+              <Button
+                onClick={handleSaveEdit}
+                disabled={!canSaveEdit || isLoading}
+              >
                 Save Changes
-              </button>
+              </Button>
             </div>
           </div>
         </div>

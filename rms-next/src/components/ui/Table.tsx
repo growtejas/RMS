@@ -61,11 +61,13 @@ export function TH({
 export function TD({
   children,
   className = "",
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return <td className={`px-4 py-3 ${className}`}>{children}</td>;
+  ...rest
+}: React.TdHTMLAttributes<HTMLTableCellElement>) {
+  return (
+    <td {...rest} className={`px-4 py-3 ${className}`}>
+      {children}
+    </td>
+  );
 }
 
 export function TBody({ children }: { children: React.ReactNode }) {

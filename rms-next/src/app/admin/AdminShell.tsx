@@ -8,6 +8,7 @@ import AdminSidebar from "@/components/admin/AdminSidebar";
 import Header from "@/components/Header";
 import AdminHeader from "@/components/admin/AdminHeader";
 import PageShell from "@/components/common/PageShell";
+import HrPageLayout from "@/components/hr/HrPageLayout";
 import "@/styles/hr/hr-dashboard.css";
 
 export default function AdminShell({
@@ -120,7 +121,11 @@ export default function AdminShell({
             }}
           />
 
-          <section className="admin-content-area">{children}</section>
+          <section className="admin-content-area admin-content-area--top-start">
+            <HrPageLayout maxWidthClass="max-w-none w-full">
+              {children}
+            </HrPageLayout>
+          </section>
         </div>
       </div>
     </PageShell>

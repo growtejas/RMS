@@ -46,3 +46,29 @@ export async function listRecentBulkJobs(organizationId: string, limit = 20) {
     .orderBy(desc(bulkImportJobs.createdAt))
     .limit(limit);
 }
+
+export async function markBulkImportJobRunning(id: string) {
+  const db = getDb();
+  await db
+    .update(bulkImportJobs)
+    .set({ status: "running", errorMessage: null, updatedAt: new Date() })
+    .where(eq(bulkImportJobs.id, id));
+}
+
+export async function updateBulkImportJobSummary(params: {
+  id: string;
+  resultSummary: Record<string, unknown>;
+  status?: string;
+  errorMessage?: string | null;
+}) {
+  const db = getDb();
+  await db
+    .update(bulkImportJobs)
+    .set({
+      resultSummary: params.resultSummary,
+      ...(params.status ? { status: params.status } : {}),
+      ...(params.errorMessage !== undefined ? { errorMessage: params.errorMessage } : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(bulkImportJobs.id, params.id));
+}

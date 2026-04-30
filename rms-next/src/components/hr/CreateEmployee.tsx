@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
+import { toast } from "sonner";
 import { apiClient } from "@/lib/api/client";
 import {
   cachedApiGet,
@@ -28,6 +29,9 @@ import {
   validateFinanceStep,
   validateSkillsContactsStep,
 } from "./create-employee/validation";
+import { Button } from "@/components/ui/Button";
+import { HrFormFooter } from "@/components/hr/HrFormFooter";
+import { Loader } from "@/components/ui/Loader";
 
 type StepId = "core" | "skills" | "deployment" | "finance";
 
@@ -364,6 +368,15 @@ const CreateEmployee: React.FC = () => {
     ? validateStep(currentStepId)
     : { isValid: false, errors: {} };
 
+  const fullFormValid = useMemo(() => {
+    return (
+      validateCoreStep(formData, roles.length > 0).isValid &&
+      validateSkillsContactsStep(formData).isValid &&
+      validateDeploymentStep(formData).isValid &&
+      validateFinanceStep(formData).isValid
+    );
+  }, [formData, roles.length]);
+
   const scrollToFirstError = () => {
     setTimeout(() => {
       const firstError = document.querySelector(
@@ -521,7 +534,9 @@ const CreateEmployee: React.FC = () => {
         setError(message);
       }
 
-      setSuccess(`Employee ${formData.core.empId} onboarded successfully.`);
+      const msg = `Employee ${formData.core.empId} onboarded successfully.`;
+      setSuccess(msg);
+      toast.success(msg);
       invalidateCachedApiGetByUrlSubstring("/employees/");
       const nextIdRes = await apiClient.get<{ emp_id: string }>(
         "/employees/next-id",
@@ -544,6 +559,7 @@ const CreateEmployee: React.FC = () => {
           ? submitError.message
           : "Failed to onboard employee. Please try again.";
       setError(message);
+      toast.error(message);
     } finally {
       submitInFlight.current = false;
       setIsSubmitting(false);
@@ -553,11 +569,8 @@ const CreateEmployee: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="create-employee-container">
-        <div className="form-loading-overlay">
-          <div className="spinner"></div>
-          <p>Loading onboarding data...</p>
-        </div>
+      <div className="create-employee-container create-employee-initial-load">
+        <Loader label="Loading onboarding data…" />
       </div>
     );
   }
@@ -698,7 +711,11 @@ const CreateEmployee: React.FC = () => {
               <button
                 type="submit"
                 className="submit-button"
-                disabled={isSubmitting || !currentStepValidation.isValid}
+                disabled={
+                  isSubmitting ||
+                  !currentStepValidation.isValid ||
+                  !fullFormValid
+                }
               >
                 {isSubmitting ? "Creating Employee..." : "Create Employee"}
               </button>
@@ -752,30 +769,24 @@ const CreateEmployee: React.FC = () => {
             <p style={{ margin: "0 0 20px", color: "var(--text-secondary)" }}>
               Are you sure you want to create this employee?
             </p>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: "12px",
-              }}
-            >
-              <button
+            <HrFormFooter>
+              <Button
                 type="button"
-                className="action-button"
+                variant="secondary"
                 onClick={handleCancelConfirm}
                 disabled={isSubmitting}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="action-button primary"
+                variant="primary"
                 onClick={handleConfirmSubmit}
-                disabled={isSubmitting}
+                disabled={isSubmitting || !fullFormValid}
               >
                 {isSubmitting ? "Submitting..." : "Confirm"}
-              </button>
-            </div>
+              </Button>
+            </HrFormFooter>
           </div>
         </div>
       )}

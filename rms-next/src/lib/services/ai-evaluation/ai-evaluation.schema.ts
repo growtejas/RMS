@@ -6,6 +6,10 @@ export const aiEvaluationOutputSchema = z.object({
   growth_trajectory: z.number().min(0).max(100),
   company_reputation: z.number().min(0).max(100),
   jd_alignment: z.number().min(0).max(100),
+  // Backward-compatible defaults keep scoring operational when some model
+  // responses omit these newer dimensions.
+  education_match: z.number().min(0).max(100).optional().default(50),
+  internship_relevance: z.number().min(0).max(100).optional().default(50),
   confidence: z.number().min(0).max(1),
   summary: z.string().min(10).max(4000),
   risks: z.array(z.string().max(500)).max(30),
@@ -60,6 +64,18 @@ function resolveAiDimensionWeights(requiredExperienceYears: number | null | unde
   company: number;
   jd: number;
 } {
+  const req = Number(requiredExperienceYears);
+  // Freshers should be scored primarily on potential signals (skills + projects),
+  // not legacy-career signals like company brand or trajectory.
+  if (Number.isFinite(req) && req <= 1) {
+    return {
+      project: 0.45,
+      growth: 0.1,
+      company: 0.05,
+      jd: 0.4,
+    };
+  }
+
   const softness = resolveExperienceSoftness(requiredExperienceYears);
   // Keep all dimensions active, but progressively soften strict JD alignment
   // and reward potential signals (projects + growth) more.
@@ -83,7 +99,23 @@ export function computeAiCompositeScore(b: {
   growth_trajectory: number;
   company_reputation: number;
   jd_alignment: number;
+  education_match: number;
+  internship_relevance: number;
 }, requiredExperienceYears?: number | null): number {
+  const req = Number(requiredExperienceYears);
+  // Requested fresher policy:
+  // - project_complexity: 30%
+  // - jd_alignment: 70%
+  // - education_match: +5 bonus points
+  // - internship_relevance: +5 bonus points
+  if (Number.isFinite(req) && req <= 1) {
+    const base = 0.3 * b.project_complexity + 0.7 * b.jd_alignment;
+    const educationBonus = b.education_match >= 60 ? 5 : 0;
+    const internshipBonus = b.internship_relevance >= 60 ? 5 : 0;
+    const boosted = base + educationBonus + internshipBonus;
+    return Math.max(0, Math.min(100, Number(boosted.toFixed(2))));
+  }
+
   const w = resolveAiDimensionWeights(requiredExperienceYears);
   const raw =
     w.project * b.project_complexity +

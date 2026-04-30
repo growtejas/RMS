@@ -3,10 +3,20 @@ import { eq } from "drizzle-orm";
 import type { ApiUser } from "@/lib/auth/api-guard";
 import { assertTaOwnershipForCandidate } from "@/lib/auth/ta-ownership";
 import { getDb } from "@/lib/db";
-import { auditLog, interviewPanelists, interviews } from "@/lib/db/schema";
+import {
+  auditLog,
+  interviewPanelists,
+  interviews,
+  requisitionItems,
+} from "@/lib/db/schema";
+import * as feedbackRepo from "@/lib/repositories/interview-feedback-repo";
 import { HttpError } from "@/lib/http/http-error";
 import * as repo from "@/lib/repositories/candidates-repo";
 import * as ivRepo from "@/lib/repositories/interviews-repo";
+import {
+  runSideEffectsAfterInterviewCreateV2,
+  runSideEffectsAfterInterviewPatch,
+} from "@/lib/services/interview-lifecycle-side-effects";
 import type {
   InterviewCreateInput,
   InterviewCreateLegacy,
@@ -49,6 +59,40 @@ function panelistsToJson(
   }));
 }
 
+function panelSummary(
+  panelists: Array<{ userId: number | null; displayName: string }> | InterviewPanelistJson[],
+): string {
+  const names = panelists
+    .map((p) => ("displayName" in p ? p.displayName : p.display_name))
+    .map((name) => name.trim())
+    .filter(Boolean);
+  if (names.length === 0) {
+    return "none";
+  }
+  return names.join(", ");
+}
+
+function interviewToInterviewerJson(
+  row: repo.InterviewRow,
+  options?: {
+    panelists?: InterviewPanelistJson[];
+    extras?: {
+      candidate_name?: string;
+      candidate_email?: string | null;
+      requisition_id?: number | null;
+      role_position?: string | null;
+    };
+  },
+) {
+  const base = interviewToJson(row, options);
+  return {
+    ...base,
+    notes: null,
+    feedback: null,
+    google_calendar_event_id: null,
+  };
+}
+
 function interviewToJson(
   row: repo.InterviewRow,
   options?: {
@@ -74,6 +118,7 @@ function interviewToJson(
     end_time: row.endTime.toISOString(),
     timezone: row.timezone,
     meeting_link: row.meetingLink ?? null,
+    google_calendar_event_id: row.googleCalendarEventId ?? null,
     location: row.location ?? null,
     notes: row.notes ?? null,
     status: row.status,
@@ -175,6 +220,114 @@ export async function getInterviewJson(interviewId: number, organizationId: stri
   });
 }
 
+async function rolePositionForItem(itemId: number): Promise<string | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({ rp: requisitionItems.rolePosition })
+    .from(requisitionItems)
+    .where(eq(requisitionItems.itemId, itemId))
+    .limit(1);
+  return row?.rp ?? null;
+}
+
+export async function listMyInterviewsAsPanelistJson(user: ApiUser) {
+  const rows = await ivRepo.listPanelistOnlyInterviews({
+    organizationId: user.organizationId,
+    userId: user.userId,
+  });
+  const ids = rows.map((r) => r.interview.id);
+  const panelMap = await attachPanelistsMap(ids);
+  return rows.map((r) =>
+    interviewToInterviewerJson(r.interview, {
+      panelists: panelMap.get(r.interview.id) ?? [],
+      extras: {
+        candidate_name: r.candidateFullName,
+        candidate_email: r.candidateEmail,
+        requisition_id: r.requisitionId,
+        role_position: r.rolePosition,
+      },
+    }),
+  );
+}
+
+export async function getInterviewerInterviewDetail(interviewId: number, user: ApiUser) {
+  const allowed = await ivRepo.userIsPanelistForInterview({
+    organizationId: user.organizationId,
+    userId: user.userId,
+    interviewId,
+  });
+  if (!allowed) {
+    return null;
+  }
+
+  const panelRow = await ivRepo.findPanelistRowForUserOnInterview({
+    interviewId,
+    userId: user.userId,
+  });
+  if (!panelRow?.userId) {
+    return null;
+  }
+
+  const row = await repo.selectInterviewById(interviewId, user.organizationId);
+  if (!row) {
+    return null;
+  }
+
+  const cand = await repo.selectCandidateById(row.candidateId, user.organizationId);
+  if (!cand) {
+    return null;
+  }
+
+  const panelMap = await attachPanelistsMap([interviewId]);
+  const rolePosition = await rolePositionForItem(cand.requisitionItemId);
+
+  const interview = interviewToInterviewerJson(row, {
+    panelists: panelMap.get(interviewId) ?? [],
+    extras: {
+      candidate_name: cand.fullName,
+      candidate_email: cand.email,
+      requisition_id: cand.requisitionId,
+      role_position: rolePosition,
+    },
+  });
+
+  const myPanelist: InterviewPanelistJson = {
+    id: panelRow.id,
+    user_id: panelRow.userId ?? null,
+    display_name: panelRow.displayName,
+    role_label: panelRow.roleLabel ?? null,
+  };
+
+  const sc = await feedbackRepo.findScorecardForInterviewPanelist(
+    interviewId,
+    panelRow.id,
+  );
+
+  const expYears =
+    cand.totalExperienceYears != null ? String(cand.totalExperienceYears) : null;
+
+  return {
+    interview,
+    candidate_preview: {
+      full_name: cand.fullName,
+      email: cand.email,
+      resume_path: cand.resumePath ?? null,
+      candidate_skills: cand.candidateSkills ?? null,
+      total_experience_years: expYears,
+      education_raw: cand.educationRaw ?? null,
+    },
+    my_panelist: myPanelist,
+    my_scorecard: sc
+      ? {
+          id: sc.id,
+          scores: sc.scores,
+          notes: sc.notes ?? null,
+          submitted_at: sc.submittedAt.toISOString(),
+        }
+      : null,
+  };
+}
+
 export async function createInterviewJson(payload: InterviewCreateInput, user: ApiUser) {
   if (isV2Payload(payload)) {
     return createInterviewV2(payload, user);
@@ -191,19 +344,8 @@ export async function createInterviewAsManagerJson(
     throw new HttpError(404, "Requisition item not found");
   }
 
-  const owned = meta.raisedBy === user.userId;
-  const panelist = await ivRepo.managerIsPanelistForCandidateItem({
-    organizationId: user.organizationId,
-    managerUserId: user.userId,
-    candidateId: payload.candidate_id,
-    requisitionItemId: payload.requisition_item_id,
-  });
-
-  if (!owned && !panelist) {
-    throw new HttpError(403, "Not authorized to schedule interviews for this role");
-  }
-
   // Reuse the same core validations and conflict checks as TA/HR/Admin scheduling.
+  // Manager route already enforces role guard + organization scoping at API/service level.
   return createInterviewV2(payload, user, { skipOwnership: true });
 }
 
@@ -364,7 +506,7 @@ async function createInterviewV2(
 
   const db = getDb();
   try {
-    return await db.transaction(async (tx) => {
+    const out = await db.transaction(async (tx) => {
       const [row] = await tx
         .insert(interviews)
         .values({
@@ -418,8 +560,28 @@ async function createInterviewV2(
           panelists: panelistsToJson(panelRows),
         }),
         warnings,
+        _createdId: row.id,
       };
     });
+    const fresh = await repo.selectInterviewById(out._createdId, user.organizationId);
+    if (fresh) {
+      void runSideEffectsAfterInterviewCreateV2({
+        user,
+        app,
+        cand: {
+          candidateId: cand.candidateId,
+          fullName: cand.fullName,
+          email: cand.email,
+          requisitionId: cand.requisitionId,
+        },
+        row: fresh,
+        payload,
+        interviewerLabel: primaryLabel,
+      }).catch(() => {});
+    }
+    const { _createdId, ...rest } = out;
+    void _createdId;
+    return rest;
   } catch (e) {
     if (pgCode(e) === "23505") {
       throw new HttpError(
@@ -567,6 +729,8 @@ export async function patchInterviewJson(
 
   const oldStatus = existing.status;
   const oldResult = existing.result;
+  const oldPanelRows = await ivRepo.listPanelistsForInterviews([interviewId]);
+  const oldPanel = panelSummary(oldPanelRows);
 
   const timeChanged =
     (scheduledAt != null &&
@@ -647,12 +811,29 @@ export async function patchInterviewJson(
         changes.push("interviewers replaced");
       }
 
-      if (changes.length) {
+      const nextPanelRows = await tx
+        .select()
+        .from(interviewPanelists)
+        .where(eq(interviewPanelists.interviewId, interviewId));
+      const newPanel = panelSummary(nextPanelRows);
+      const oldTime = `${existing.scheduledAt.toISOString()} -> ${existing.endTime.toISOString()}`;
+      const newTime = `${(scheduledAt ?? existing.scheduledAt).toISOString()} -> ${(endTime ?? existing.endTime).toISOString()}`;
+
+      if (changes.length || timeChanged || patch.interviewer_ids != null) {
         await repo.insertInterviewAuditUpdate({
           interviewId,
           performedBy: user.userId,
-          oldValue: `status=${oldStatus}, result=${oldResult}`,
-          newValue: changes.join("; "),
+          oldValue: JSON.stringify({
+            status: oldStatus,
+            result: oldResult,
+            old_time: oldTime,
+            old_panel: oldPanel,
+          }),
+          newValue: JSON.stringify({
+            changes,
+            ...(timeChanged ? { new_time: newTime } : {}),
+            ...(patch.interviewer_ids != null ? { new_panel: newPanel } : {}),
+          }),
         });
       }
 
@@ -660,12 +841,20 @@ export async function patchInterviewJson(
     });
 
     const panelMap = await attachPanelistsMap([interviewId]);
-    return {
+    const res = {
       interview: interviewToJson(row, {
         panelists: panelMap.get(interviewId) ?? [],
       }),
       warnings,
     };
+    void runSideEffectsAfterInterviewPatch({
+      user,
+      updated: row,
+      timeChanged,
+      newStatus: patch.status,
+      rescheduleReason: patch.reschedule_reason?.trim() ?? null,
+    }).catch(() => {});
+    return res;
   } catch (e) {
     if (pgCode(e) === "23505") {
       throw new HttpError(409, "Update conflicts with an existing interview constraint");

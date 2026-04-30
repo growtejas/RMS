@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
@@ -8,17 +7,15 @@ import {
   insertScorecard,
   listScorecardsForInterview,
 } from "@/lib/repositories/interview-feedback-repo";
+import {
+  aggregateScorecardRatings,
+  interviewScorecardPostBody,
+} from "@/lib/validators/interview-scorecard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type Ctx = { params: { interviewId: string } };
-
-const postSchema = z.object({
-  panelist_id: z.number().int().positive().optional(),
-  scores: z.record(z.string(), z.unknown()),
-  notes: z.string().optional(),
-});
 
 function parseId(s: string): number | NextResponse {
   const id = Number.parseInt(s, 10);
@@ -46,7 +43,8 @@ export async function GET(req: Request, { params }: Ctx) {
     if (!rows) {
       return NextResponse.json({ detail: "Interview not found" }, { status: 404 });
     }
-    return NextResponse.json({ scorecards: rows });
+    const aggregate = aggregateScorecardRatings(rows);
+    return NextResponse.json({ scorecards: rows, aggregate });
   } catch (e) {
     return referenceWriteCatch(e, "[GET .../scorecards]");
   }
@@ -66,16 +64,16 @@ export async function POST(req: Request, { params }: Ctx) {
     if (interviewId instanceof NextResponse) {
       return interviewId;
     }
-    const parsed = await parseJsonBody(req, postSchema);
+    const parsed = await parseJsonBody(req, interviewScorecardPostBody);
     if (!parsed.ok) {
       return parsed.response;
     }
     const row = await insertScorecard({
       interviewId,
       organizationId: user.organizationId,
-      panelistId: parsed.data.panelist_id,
-      scores: parsed.data.scores,
-      notes: parsed.data.notes,
+      panelistId: parsed.data.panelist_id ?? undefined,
+      scores: parsed.data.scores as Record<string, unknown>,
+      notes: parsed.data.notes ?? undefined,
       submittedBy: user.userId,
     });
     if (!row) {

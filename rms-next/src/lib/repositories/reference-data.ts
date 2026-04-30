@@ -37,6 +37,7 @@ export type CompanyRoleApiRow = {
   role_name: string;
   role_description: string | null;
   is_active: boolean;
+  created_by: string | null;
   created_at: string | null;
 };
 
@@ -85,21 +86,33 @@ export async function listSkillsWithMeta(): Promise<SkillApiRow[]> {
     .orderBy(asc(skills.skillName));
 
   const auditByEntity = await mapAuditCreators("skill");
-  const userIds = Array.from(
+  const auditIds = Array.from(
     new Set(
       Array.from(auditByEntity.values())
         .map((a) => a.performedBy)
         .filter((id): id is number => id != null && Number.isFinite(id)),
     ),
   );
-  const usersById = await findUsernamesByIds(userIds);
+  const columnIds = new Set<number>();
+  for (const skill of skillRows) {
+    if (skill.createdBy != null) {
+      columnIds.add(skill.createdBy);
+    }
+  }
+  const mergedIds = Array.from(
+    new Set([...auditIds, ...columnIds]),
+  );
+  const usersById = await findUsernamesByIds(mergedIds);
 
   return skillRows.map((skill) => {
     const audit = auditByEntity.get(String(skill.skillId));
-    const createdBy =
-      audit?.performedBy != null
-        ? usersById.get(audit.performedBy) ?? null
-        : null;
+    let createdBy: string | null = null;
+    if (audit?.performedBy != null) {
+      createdBy = usersById.get(audit.performedBy) ?? null;
+    }
+    if (!createdBy && skill.createdBy != null) {
+      createdBy = usersById.get(skill.createdBy) ?? null;
+    }
     return {
       skill_id: skill.skillId,
       skill_name: skill.skillName,
@@ -183,11 +196,29 @@ export async function listCompanyRolesFiltered(
         .where(eq(companyRoles.isActive, true))
         .orderBy(asc(companyRoles.roleName));
 
-  return rows.map((r) => ({
-    role_id: r.roleId,
-    role_name: r.roleName,
-    role_description: r.roleDescription,
-    is_active: r.isActive,
-    created_at: iso(r.createdAt ?? null),
-  }));
+  const auditByEntity = await mapAuditCreators("company_role");
+  const userIds = Array.from(
+    new Set(
+      Array.from(auditByEntity.values())
+        .map((a) => a.performedBy)
+        .filter((id): id is number => id != null && Number.isFinite(id)),
+    ),
+  );
+  const usersById = await findUsernamesByIds(userIds);
+
+  return rows.map((r) => {
+    const audit = auditByEntity.get(String(r.roleId));
+    const created_by =
+      audit?.performedBy != null
+        ? usersById.get(audit.performedBy) ?? null
+        : null;
+    return {
+      role_id: r.roleId,
+      role_name: r.roleName,
+      role_description: r.roleDescription,
+      is_active: r.isActive,
+      created_by,
+      created_at: iso(r.createdAt ?? null),
+    };
+  });
 }

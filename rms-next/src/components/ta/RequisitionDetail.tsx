@@ -36,6 +36,7 @@ import {
   Ban,
   Search,
   UserCheck,
+  Mail,
   Phone,
   Gift,
   DollarSign,
@@ -67,25 +68,32 @@ import {
   fetchApplicationsPipeline,
   fetchCandidatesFromApplications,
   fetchInterviews,
-  fetchRequisitionItemRanking,
   createCandidate,
+  fetchRequisitionItemRanking,
   recomputeRequisitionItemRanking,
   runAiEvaluationForRequisitionItem,
   uploadResume,
   getCandidateActionErrorMessage,
   updateCandidateStageCompatible,
+  sendShortlistEmail,
   type ApplicationRecord,
   type ApplicationsAtsBucketsResponse,
   type ApplicationsPipelineResponse,
   type Candidate,
   type CandidateCreate,
   type Interview,
-  type RequisitionItemRankingCandidate,
   type RequisitionItemRankingResponse,
 } from "@/lib/api/candidateApi";
+import { useAtsAiScorePolling, useAtsTabInitialLoad } from "@/hooks/useAtsBoard";
+import AtsBucketBoard from "@/components/ta/ats/AtsBucketBoard";
+import PipelineOverview from "@/components/ta/requisition-advanced/PipelineOverview";
+import RankingConfigPanel from "@/components/ta/requisition-advanced/RankingConfigPanel";
+import CandidateFiltersBar from "@/components/ta/requisition-advanced/CandidateFiltersBar";
+import type { PipelineJdFeedback } from "@/components/ta/requisition-advanced/types";
 import { InterviewStatusBadge } from "@/components/interviews/InterviewStatusBadge";
 import { interviewUi } from "@/components/interviews/interview-ui-theme";
 import { Table, TBody, THead, TD, TH, TR } from "@/components/ui/Table";
+import BulkResumeUploadPanel from "@/components/candidates/BulkResumeUploadPanel";
 import "../../styles/hr/hr-dashboard.css";
 
 interface RequisitionDetailsProps {
@@ -424,6 +432,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [newCandidateReferral, setNewCandidateReferral] = useState(false);
   const [newCandidateSkills, setNewCandidateSkills] = useState("");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [candidateUploadMode, setCandidateUploadMode] = useState<"single" | "bulk">(
+    "single",
+  );
   const [addingCandidate, setAddingCandidate] = useState(false);
   const [candidateStageFilter, setCandidateStageFilter] =
     useState<string>("all");
@@ -431,13 +442,14 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     number | "all"
   >("all");
   const [atsBoardItemId, setAtsBoardItemId] = useState<number | null>(null);
-  const [atsBoardLoading, setAtsBoardLoading] = useState(false);
-  const [atsBoardRanking, setAtsBoardRanking] =
-    useState<RequisitionItemRankingResponse | null>(null);
   const [reqInterviews, setReqInterviews] = useState<Interview[]>([]);
   const [reqInterviewsLoading, setReqInterviewsLoading] = useState(false);
   const [shortlistBulkAppIds, setShortlistBulkAppIds] = useState<number[]>([]);
   const [shortlistBulkWorking, setShortlistBulkWorking] = useState(false);
+  const [sendShortlistEmailAppId, setSendShortlistEmailAppId] = useState<
+    number | null
+  >(null);
+  const [shortlistEmailOk, setShortlistEmailOk] = useState<string | null>(null);
   const [pipelineCompact, setPipelineCompact] =
     useState<ApplicationsPipelineResponse | null>(null);
   const [pipelineFull, setPipelineFull] =
@@ -455,6 +467,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [rankingError, setRankingError] = useState<string | null>(null);
   const [atsBucketsData, setAtsBucketsData] =
     useState<ApplicationsAtsBucketsResponse | null>(null);
+  const [atsBucketsError, setAtsBucketsError] = useState<string | null>(null);
   const [pipelineJdTextDraft, setPipelineJdTextDraft] = useState("");
   const [useRequisitionJd, setUseRequisitionJd] = useState(true);
   const [pipelineJdSaving, setPipelineJdSaving] = useState(false);
@@ -462,8 +475,12 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const [pipelineJdMessage, setPipelineJdMessage] = useState<string | null>(
     null,
   );
+  const [pipelineJdFeedback, setPipelineJdFeedback] =
+    useState<PipelineJdFeedback>("neutral");
   const pipelineJdFileInputRef = useRef<HTMLInputElement>(null);
   const lastAtsFocusRefreshAtRef = useRef<number>(0);
+  const pipelineCompactLoadInFlightRef = useRef(false);
+  const atsAutoAiEvalRunKeyRef = useRef<string | null>(null);
   const [rankingRequiredSkillsDraft, setRankingRequiredSkillsDraft] =
     useState("");
   /** Phase 2: hide pipeline board, ranking, buckets, and Kanban unless expanded. */
@@ -571,7 +588,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         ai_summary?: string;
       }
     >();
-    for (const rc of atsBoardRanking?.ranked_candidates ?? []) {
+    for (const rc of rankingData?.ranked_candidates ?? []) {
       m.set(rc.candidate_id, {
         final_score: rc.score.final_score,
         ai_status: rc.score.ai_status,
@@ -579,7 +596,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       });
     }
     return m;
-  }, [atsBoardRanking]);
+  }, [rankingData]);
 
   const atsBoardExperienceFlagByCandidateId = useMemo(() => {
     const m = new Map<number, ExperienceFitFlag>();
@@ -588,7 +605,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     for (const c of candidates) {
       profileYearsByCandidateId.set(c.candidate_id, c.total_experience_years ?? null);
     }
-    for (const rc of atsBoardRanking?.ranked_candidates ?? []) {
+    for (const rc of rankingData?.ranked_candidates ?? []) {
       const candidateYearsFromRanking =
         rc.explain.ranking_signals?.ats?.experience_years ?? null;
       const candidateYears =
@@ -601,7 +618,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       }
     }
     return m;
-  }, [atsBoardRanking, atsBoardRequiredExperienceYears, candidates]);
+  }, [rankingData, atsBoardRequiredExperienceYears, candidates]);
 
   const candidateFromApplicationRecord = useCallback(
     (app: ApplicationRecord): Candidate => ({
@@ -636,35 +653,6 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     [candidates, candidateFromApplicationRecord, openCandidateModal],
   );
 
-  /** Ranking snapshot rows may include candidates not yet merged into `candidates` state — still open evaluate modal. */
-  const openEvaluateFromRankedRow = useCallback(
-    (rc: RequisitionItemRankingCandidate) => {
-      const existing = candidates.find((c) => c.candidate_id === rc.candidate_id);
-      if (existing) {
-        openCandidateModal(existing, "evaluate");
-        return;
-      }
-      const reqId = rankingData?.req_id;
-      if (reqId == null) return;
-      const minimal: Candidate = {
-        candidate_id: rc.candidate_id,
-        requisition_item_id: rc.requisition_item_id,
-        requisition_id: reqId,
-        full_name: rc.full_name,
-        email: rc.email,
-        phone: null,
-        resume_path: null,
-        current_stage: rc.current_stage,
-        added_by: null,
-        created_at: null,
-        updated_at: null,
-        interviews: [],
-      };
-      openCandidateModal(minimal, "evaluate");
-    },
-    [candidates, openCandidateModal, rankingData?.req_id],
-  );
-
   const rankingBreakdownSnippet = (breakdown: Record<string, unknown>) => {
     const ai = breakdown.ai_summary;
     if (typeof ai === "string" && ai.trim()) {
@@ -694,6 +682,51 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         ["ta", "hr", "admin", "owner", "manager"].includes(r.toLowerCase()),
       ),
     [userRoles],
+  );
+
+  const requisitionLineOptions = useMemo(
+    () =>
+      (ticket?.items ?? []).map((it) => ({
+        numericItemId: it.numericItemId,
+        skill: it.skill,
+        level: it.level,
+      })),
+    [ticket?.items],
+  );
+
+  const showIgnoredCustomJdNote = useMemo(
+    () =>
+      useRequisitionJd &&
+      !!pipelineRankingTargetItem &&
+      (Boolean(pipelineRankingTargetItem.pipelineJdText?.trim()) ||
+        Boolean(pipelineRankingTargetItem.pipelineJdFileKey)),
+    [useRequisitionJd, pipelineRankingTargetItem],
+  );
+
+  const openEvaluateFromPipelineRecord = useCallback(
+    (app: ApplicationRecord) => {
+      openCandidateModal(
+        {
+          candidate_id: app.candidate_id,
+          application_id: app.application_id,
+          requisition_item_id: app.requisition_item_id,
+          requisition_id: app.requisition_id,
+          full_name: app.candidate.full_name,
+          email: app.candidate.email,
+          phone: app.candidate.phone,
+          resume_path: null,
+          current_stage: app.current_stage,
+          added_by: app.created_by,
+          source: app.source,
+          created_at: app.created_at,
+          updated_at: app.updated_at,
+          stage_history: app.stage_history ?? [],
+          interviews: [],
+        },
+        "evaluate",
+      );
+    },
+    [openCandidateModal],
   );
 
   const parseReqId = (value?: string | null) => {
@@ -780,16 +813,16 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     return {
       id: `REQ-${req.req_id}`,
       ticketId: `REQ-${req.req_id}`,
-      projectName: req.project_name ?? "—",
+      projectName: req.project_name ?? "-",
       projectCode: `REQ-${req.req_id}`,
-      client: req.client_name ?? "—",
-      projectManager: req.raised_by ? `User #${req.raised_by}` : "—",
+      client: req.client_name ?? "-",
+      projectManager: req.raised_by ? `User #${req.raised_by}` : "-",
       requiredBy: req.required_by_date ?? "",
-      workMode: req.work_mode ?? "—",
-      location: req.office_location ?? "—",
-      priority: req.priority ?? "—",
-      overallStatus: req.overall_status ?? "—",
-      justification: req.justification ?? "—",
+      workMode: req.work_mode ?? "-",
+      location: req.office_location ?? "-",
+      priority: req.priority ?? "-",
+      overallStatus: req.overall_status ?? "-",
+      justification: req.justification ?? "-",
       dateCreated: req.created_at ?? "",
       assignedTA: assignedTAId ? `User #${assignedTAId}` : "Unassigned",
       assignedTAId,
@@ -808,9 +841,9 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
           id: `ITEM-${item.item_id}`,
           numericItemId: item.item_id, // Phase 7: Numeric ID for API
           skill: item.role_position,
-          level: item.skill_level ?? "—",
+          level: item.skill_level ?? "-",
           experience: item.experience_years ?? 0,
-          education: item.education_requirement ?? "—",
+          education: item.education_requirement ?? "-",
           itemStatus: item.item_status,
           description: item.job_description,
           assignedTAId: item.assigned_ta ?? null, // Phase 7: Item-level TA
@@ -981,6 +1014,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   const loadPipelineCompact = useCallback(async () => {
     const reqId = parseReqId(effectiveTicketId);
     if (!reqId) return;
+    if (pipelineCompactLoadInFlightRef.current) return;
+    pipelineCompactLoadInFlightRef.current = true;
     setPipelineLoading(true);
     try {
       const data = await fetchApplicationsPipeline({
@@ -994,6 +1029,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       setPipelineCompact(null);
     } finally {
       setPipelineLoading(false);
+      pipelineCompactLoadInFlightRef.current = false;
     }
   }, [effectiveTicketId, candidateItemFilter]);
 
@@ -1015,12 +1051,21 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     }
   }, [effectiveTicketId, candidateItemFilter]);
 
+  const handlePipelineSectionRefresh = useCallback(() => {
+    void loadPipelineCompact();
+    if (expandedPipelineStage) {
+      setPipelineFull(null);
+      void loadPipelineFull();
+    }
+  }, [loadPipelineCompact, loadPipelineFull, expandedPipelineStage]);
+
   const loadRanking = useCallback(
     async (forceRecompute = false) => {
       if (!rankingItemId) {
         setRankingData(null);
         setRankingError(null);
         setAtsBucketsData(null);
+        setAtsBucketsError(null);
         return;
       }
       if (forceRecompute) {
@@ -1029,6 +1074,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         setRankingLoading(true);
       }
       setRankingError(null);
+      setAtsBucketsError(null);
       try {
         if (forceRecompute) {
           await recomputeRequisitionItemRanking(rankingItemId);
@@ -1038,12 +1084,17 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
         try {
           const ab = await fetchApplicationsAtsBuckets(rankingItemId);
           setAtsBucketsData(ab);
+          setAtsBucketsError(null);
         } catch {
           setAtsBucketsData(null);
+          setAtsBucketsError(
+            "Could not load quality buckets. Use Refresh to try again.",
+          );
         }
       } catch {
         setRankingData(null);
         setAtsBucketsData(null);
+        setAtsBucketsError(null);
         setRankingError("Unable to load ranking for this position.");
       } finally {
         setRankingLoading(false);
@@ -1053,10 +1104,26 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     [rankingItemId],
   );
 
-  const runAiEvalAllPresent = useCallback(async () => {
+  const runAiEvalAllPresent = useCallback(async (recomputeFirst = false) => {
     if (!rankingItemId) return;
+    if (recomputeFirst) {
+      try {
+        await recomputeRequisitionItemRanking(rankingItemId);
+      } catch {
+        // Continue with best-effort fetch below.
+      }
+    }
+    // Always read a fresh ranking snapshot so newly created/bulk-uploaded candidates
+    // are included even before React state reconciliation completes.
+    let sourceRanking = rankingData;
+    try {
+      sourceRanking = await fetchRequisitionItemRanking(rankingItemId, { aiEval: true });
+      setRankingData(sourceRanking);
+    } catch {
+      // Keep existing in-memory ranking data as fallback.
+    }
     const ids = Array.from(
-      new Set((rankingData?.ranked_candidates ?? []).map((rc) => rc.candidate_id)),
+      new Set((sourceRanking?.ranked_candidates ?? []).map((rc) => rc.candidate_id)),
     );
     if (ids.length === 0) {
       setTransitionError("No ranked candidates found to evaluate.");
@@ -1078,6 +1145,57 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       setAiEvalWorking(false);
     }
   }, [loadRanking, rankingItemId, rankingData?.ranked_candidates]);
+
+  const runAiEvalForUnscoredCandidates = useCallback(async () => {
+    if (!rankingItemId) return;
+    let sourceRanking = rankingData;
+    try {
+      sourceRanking = await fetchRequisitionItemRanking(rankingItemId, { aiEval: true });
+      setRankingData(sourceRanking);
+    } catch {
+      // Keep existing in-memory ranking data as fallback.
+    }
+
+    const unscored = (sourceRanking?.ranked_candidates ?? []).filter(
+      (rc) =>
+        rc.score.ai_status !== "OK" ||
+        rc.score.final_score == null ||
+        !Number.isFinite(rc.score.final_score),
+    );
+    const ids = Array.from(new Set(unscored.map((rc) => rc.candidate_id)));
+    if (ids.length === 0) {
+      return;
+    }
+
+    setAiEvalWorking(true);
+    setTransitionError(null);
+    try {
+      await runAiEvaluationForRequisitionItem(rankingItemId, {
+        candidate_ids: ids,
+        force: false,
+      });
+      await loadRanking(false);
+      const labelList = unscored
+        .map((c) => c.full_name)
+        .filter(Boolean)
+        .slice(0, 3)
+        .join(", ");
+      const more = unscored.length > 3 ? ` +${unscored.length - 3} more` : "";
+      setTransitionSuccess(
+        `Recovered scores for ${unscored.length} unscored candidate(s): ${labelList}${more}`,
+      );
+      setTimeout(() => setTransitionSuccess(null), 4000);
+    } catch (err: unknown) {
+      setTransitionError(
+        getCandidateActionErrorMessage(
+          err,
+          "Some candidates were unscored. Automatic recovery failed.",
+        ),
+      );
+    } finally {
+      setAiEvalWorking(false);
+    }
+  }, [loadRanking, rankingItemId, rankingData]);
 
   const refetchRequisition = useCallback(async () => {
     const reqId = parseReqId(effectiveTicketId);
@@ -1108,6 +1226,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       (pipelineRankingTargetItem.rankingRequiredSkills ?? []).join(", "),
     );
     setPipelineJdMessage(null);
+    setPipelineJdFeedback("neutral");
   }, [
     pipelineRankingTargetItem?.numericItemId,
     pipelineRankingTargetItem?.pipelineRankingUseRequisitionJd,
@@ -1121,6 +1240,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     const itemId = pipelineRankingTargetItem.numericItemId;
     setPipelineJdSaving(true);
     setPipelineJdMessage(null);
+    setPipelineJdFeedback("neutral");
     try {
       const body: Record<string, unknown> = {
         use_requisition_jd: useRequisitionJd,
@@ -1141,6 +1261,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       );
       await refetchRequisition();
       setPipelineJdMessage("Saved.");
+      setPipelineJdFeedback("success");
       void loadRanking(true);
     } catch (err: unknown) {
       setPipelineJdMessage(
@@ -1149,6 +1270,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
           "Failed to save ranking JD settings",
         ),
       );
+      setPipelineJdFeedback("error");
     } finally {
       setPipelineJdSaving(false);
     }
@@ -1159,6 +1281,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     const itemId = pipelineRankingTargetItem.numericItemId;
     setPipelineJdUploading(true);
     setPipelineJdMessage(null);
+    setPipelineJdFeedback("neutral");
     try {
       const fd = new FormData();
       fd.append("jd_file", file);
@@ -1171,11 +1294,13 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
       setPipelineJdMessage(
         "PDF uploaded. Rankings were recomputed for this item.",
       );
+      setPipelineJdFeedback("success");
       void loadRanking(true);
     } catch (err: unknown) {
       setPipelineJdMessage(
         getCandidateActionErrorMessage(err, "Failed to upload ranking JD PDF"),
       );
+      setPipelineJdFeedback("error");
     } finally {
       setPipelineJdUploading(false);
     }
@@ -1186,17 +1311,20 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     const itemId = pipelineRankingTargetItem.numericItemId;
     setPipelineJdUploading(true);
     setPipelineJdMessage(null);
+    setPipelineJdFeedback("neutral");
     try {
       await apiClient.delete(
         `/requisitions/items/${itemId}/pipeline-ranking-jd/upload`,
       );
       await refetchRequisition();
       setPipelineJdMessage("Pipeline ranking PDF removed.");
+      setPipelineJdFeedback("success");
       void loadRanking(true);
     } catch (err: unknown) {
       setPipelineJdMessage(
-        getCandidateActionErrorMessage(err, "Failed to remove ranking JD PDF"),
+        getCandidateActionErrorMessage(err, "Failed to remove ranking PDF"),
       );
+      setPipelineJdFeedback("error");
     } finally {
       setPipelineJdUploading(false);
     }
@@ -1219,95 +1347,47 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     });
   }, [ticket?.items]);
 
-  useEffect(() => {
-    if (activeTab !== "ats" || atsBoardItemId == null) {
-      return;
-    }
-    let cancelled = false;
-    setAtsBoardLoading(true);
-    void Promise.all([
-      fetchRequisitionItemRanking(atsBoardItemId, { aiEval: true }),
-      fetchApplicationsAtsBuckets(atsBoardItemId),
-    ])
-      .then(([ranking, ab]) => {
-        if (!cancelled) {
-          setAtsBoardRanking(ranking);
-          setAtsBucketsData(ab);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAtsBoardRanking(null);
-          setAtsBucketsData(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setAtsBoardLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab, atsBoardItemId]);
+  useAtsTabInitialLoad(activeTab, rankingItemId, loadRanking);
+  useAtsAiScorePolling(
+    activeTab === "ats" && rankingItemId != null,
+    rankingItemId,
+    atsBucketsData,
+    rankingData,
+    setRankingData,
+  );
 
   useEffect(() => {
-    if (activeTab !== "ats" || atsBoardItemId == null) {
+    if (activeTab !== "ats" || rankingItemId == null || aiEvalWorking) {
       return;
     }
-    const itemId = atsBoardItemId;
-    // Non-blocking polling: keep refreshing ranking while any score is still pending.
-    if (!atsBucketsData) {
+    const pendingIds = Array.from(
+      new Set(
+        (rankingData?.ranked_candidates ?? [])
+          .filter(
+            (r) =>
+              r.score.ai_status !== "OK" ||
+              r.score.final_score == null ||
+              !Number.isFinite(r.score.final_score),
+          )
+          .map((r) => r.candidate_id),
+      ),
+    );
+    if (pendingIds.length === 0) {
+      atsAutoAiEvalRunKeyRef.current = null;
       return;
     }
-    const candidateIdsInBoard = new Set<number>();
-    for (const b of ["BEST", "VERY_GOOD", "GOOD", "AVERAGE", "NOT_SUITABLE", "UNRANKED"] as const) {
-      for (const app of atsBucketsData[b] ?? []) {
-        candidateIdsInBoard.add(app.candidate_id);
-      }
-    }
-    const hasPending = Array.from(candidateIdsInBoard).some((cid) => {
-      const s = atsBoardScoreByCandidateId.get(cid);
-      return !s || s.ai_status !== "OK" || s.final_score == null;
-    });
-    if (!hasPending) {
+    const runKey = `${rankingItemId}:${pendingIds.sort((a, b) => a - b).join(",")}`;
+    if (atsAutoAiEvalRunKeyRef.current === runKey) {
       return;
     }
-
-    let cancelled = false;
-    let attempts = 0;
-    const maxAttempts = 12;
-    const intervalMs = 4000;
-
-    async function tick() {
-      if (cancelled) return;
-      attempts += 1;
-      try {
-        const ranking = await fetchRequisitionItemRanking(itemId, { aiEval: true });
-        if (!cancelled) {
-          setAtsBoardRanking(ranking);
-        }
-      } catch {
-        // ignore transient errors; keep polling within budget
-      }
-      if (cancelled) return;
-      if (attempts >= maxAttempts) return;
-
-      const stillPending = Array.from(candidateIdsInBoard).some((cid) => {
-        const s = atsBoardScoreByCandidateId.get(cid);
-        return !s || s.ai_status !== "OK" || s.final_score == null;
-      });
-      if (!stillPending) return;
-      setTimeout(tick, intervalMs);
-    }
-
-    setTimeout(tick, intervalMs);
-    return () => {
-      cancelled = true;
-    };
+    atsAutoAiEvalRunKeyRef.current = runKey;
+    void runAiEvalForUnscoredCandidates();
   }, [
     activeTab,
-    atsBoardItemId,
-    atsBucketsData,
-    atsBoardScoreByCandidateId,
+    rankingItemId,
+    rankingData?.ranked_candidates,
+    aiEvalWorking,
+    runAiEvalForUnscoredCandidates,
   ]);
 
   useEffect(() => {
@@ -1375,6 +1455,23 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
   }, [activeTab, pipelineAdvancedOpen, loadPipelineCompact]);
 
   useEffect(() => {
+    if (activeTab !== "ats") {
+      return;
+    }
+    if (candidateItemFilter === "all") {
+      return;
+    }
+    const n =
+      typeof candidateItemFilter === "number"
+        ? candidateItemFilter
+        : Number.parseInt(String(candidateItemFilter), 10);
+    if (Number.isNaN(n) || n <= 0) {
+      return;
+    }
+    setAtsBoardItemId((current) => (current === n ? current : n));
+  }, [activeTab, candidateItemFilter, setAtsBoardItemId]);
+
+  useEffect(() => {
     if (!expandedPipelineStage) {
       return;
     }
@@ -1388,15 +1485,6 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     setExpandedPipelineStage(null);
     setPipelineFull(null);
   }, [candidateItemFilter]);
-
-  // Auto-open / item-switch should not force recompute; that can reset buckets while
-  // AI evaluations are still pending. Use explicit Recompute button for hard refresh.
-  useEffect(() => {
-    if (activeTab !== "ats" || !pipelineAdvancedOpen) {
-      return;
-    }
-    void loadRanking(false);
-  }, [activeTab, pipelineAdvancedOpen, loadRanking]);
 
   // Load JD PDF for viewer when modal opens (item-level endpoint)
   useEffect(() => {
@@ -1484,10 +1572,46 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
     }
   };
 
+  const handleSendShortlistEmail = async (applicationId: number) => {
+    setSendShortlistEmailAppId(applicationId);
+    setTransitionError(null);
+    try {
+      const r = await sendShortlistEmail(applicationId);
+      if (r.enqueued) {
+        if (r.real_email) {
+          setShortlistEmailOk("Shortlist email was sent to the candidate’s inbox.");
+        } else {
+          setShortlistEmailOk(
+            r.hint?.trim() ||
+              "This server is not using SMTP (or a webhook), so the message was not delivered to a real inbox. Check the Next.js server terminal for the log, or set SMTP_HOST + SMTP_USER/SMTP_PASS in .env.local and restart dev.",
+          );
+        }
+        window.setTimeout(() => setShortlistEmailOk(null), r.real_email ? 5000 : 12000);
+      } else {
+        setShortlistEmailOk(
+          r.message?.trim() ||
+            "No new email was queued. Check that lifecycle notifications are enabled.",
+        );
+        window.setTimeout(() => setShortlistEmailOk(null), 8000);
+      }
+    } catch (err: unknown) {
+      setShortlistEmailOk(null);
+      setTransitionError(
+        getCandidateActionErrorMessage(
+          err,
+          "Could not send shortlist email. Try again or check your connection.",
+        ),
+      );
+    } finally {
+      setSendShortlistEmailAppId(null);
+    }
+  };
+
   // ---- Add candidate handler ----
   const handleAddCandidate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ticket || !addCandidateItemId) return;
+    if (candidateUploadMode === "bulk") return;
     setAddingCandidate(true);
     setTransitionError(null);
     try {
@@ -2276,7 +2400,7 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
               ○ {completionStats.pending} Pending
             </span>
             <span>✕ {completionStats.cancelled} Cancelled</span>
-            <span>📊 {completionStats.totalItems} Total</span>
+            <span> {completionStats.totalItems} Total</span>
           </div>
           {/* Phase 5: Auto-closure indicator */}
           {completionStats.progress === 100 &&
@@ -3483,7 +3607,11 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                           >
                             {itemCandidates.map((c) => (
                               <div
-                                key={c.candidate_id}
+                                key={
+                                  c.application_id != null
+                                    ? `app-${c.application_id}`
+                                    : `c-${c.candidate_id}-${c.requisition_item_id}`
+                                }
                                 style={{
                                   padding: "10px 12px",
                                   backgroundColor: "var(--bg-primary)",
@@ -3850,6 +3978,38 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
               >
                 Add New Candidate
               </div>
+              <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
+                <button
+                  type="button"
+                  className="action-button"
+                  style={{
+                    fontSize: "12px",
+                    padding: "6px 12px",
+                    border:
+                      candidateUploadMode === "single"
+                        ? "2px solid var(--primary-accent)"
+                        : "1px solid var(--border-subtle)",
+                  }}
+                  onClick={() => setCandidateUploadMode("single")}
+                >
+                  Upload Resume
+                </button>
+                <button
+                  type="button"
+                  className="action-button"
+                  style={{
+                    fontSize: "12px",
+                    padding: "6px 12px",
+                    border:
+                      candidateUploadMode === "bulk"
+                        ? "2px solid var(--primary-accent)"
+                        : "1px solid var(--border-subtle)",
+                  }}
+                  onClick={() => setCandidateUploadMode("bulk")}
+                >
+                  Bulk Upload
+                </button>
+              </div>
               <div
                 style={{
                   display: "flex",
@@ -3905,7 +4065,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                     type="text"
                     value={newCandidateName}
                     onChange={(e) => setNewCandidateName(e.target.value)}
-                    required
+                    required={candidateUploadMode === "single"}
+                    disabled={candidateUploadMode === "bulk"}
                     placeholder="e.g., Tejas Patil"
                     style={{
                       width: "100%",
@@ -3931,7 +4092,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                     type="email"
                     value={newCandidateEmail}
                     onChange={(e) => setNewCandidateEmail(e.target.value)}
-                    required
+                    required={candidateUploadMode === "single"}
+                    disabled={candidateUploadMode === "bulk"}
                     placeholder="tejas@example.com"
                     style={{
                       width: "100%",
@@ -3943,6 +4105,50 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   />
                 </div>
               </div>
+              {candidateUploadMode === "bulk" && (
+                <div style={{ marginBottom: "16px" }}>
+                  <BulkResumeUploadPanel
+                    requisitionItemId={addCandidateItemId}
+                    disabled={addingCandidate}
+                    onCompleted={() => {
+                      void (async () => {
+                        void loadCandidates();
+                        void loadPipelineCompact();
+                        if (!addCandidateItemId) return;
+
+                        // Use the same proven flow as single-candidate add:
+                        // recompute ranking snapshot -> evaluate all present candidates.
+                        await recomputeRequisitionItemRanking(addCandidateItemId);
+                        const nextRanking = await fetchRequisitionItemRanking(
+                          addCandidateItemId,
+                          { aiEval: false },
+                        );
+                        const ids = Array.from(
+                          new Set(
+                            (nextRanking?.ranked_candidates ?? []).map(
+                              (rc) => rc.candidate_id,
+                            ),
+                          ),
+                        );
+                        if (ids.length > 0) {
+                          await runAiEvaluationForRequisitionItem(addCandidateItemId, {
+                            candidate_ids: ids,
+                            force: false,
+                          });
+                        }
+
+                        // If user is viewing ATS for the same item, refresh board immediately.
+                        if (rankingItemId === addCandidateItemId) {
+                          await loadRanking(false);
+                          // Final reconciliation pass for late writes from worker/DB.
+                          await new Promise((resolve) => setTimeout(resolve, 2500));
+                          await loadRanking(false);
+                        }
+                      })();
+                    }}
+                  />
+                </div>
+              )}
               <div
                 style={{
                   display: "flex",
@@ -4132,9 +4338,11 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                   className="action-button primary"
                   style={{ fontSize: "12px", padding: "8px 16px" }}
                   disabled={
-                    addingCandidate ||
-                    !newCandidateName.trim() ||
-                    !newCandidateEmail.trim()
+                    candidateUploadMode === "bulk"
+                      ? true
+                      : addingCandidate ||
+                        !newCandidateName.trim() ||
+                        !newCandidateEmail.trim()
                   }
                 >
                   {addingCandidate ? "Adding..." : "Add Candidate"}
@@ -4187,21 +4395,8 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
               type="button"
               className="action-button"
               style={{ fontSize: "11px", padding: "6px 12px" }}
-              disabled={!atsBoardItemId || atsBoardLoading}
-              onClick={() => {
-                if (!atsBoardItemId) return;
-                void (async () => {
-                  setAtsBoardLoading(true);
-                  try {
-                    const ab = await fetchApplicationsAtsBuckets(atsBoardItemId);
-                    setAtsBucketsData(ab);
-                  } catch {
-                    setAtsBucketsData(null);
-                  } finally {
-                    setAtsBoardLoading(false);
-                  }
-                })();
-              }}
+              disabled={!rankingItemId || rankingLoading || rankingRefreshing}
+              onClick={() => void loadRanking(false)}
             >
               <RefreshCw size={12} style={{ marginRight: "4px" }} />
               Refresh buckets
@@ -4232,315 +4427,19 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
               Click a card for read-only evaluation and shortlist. Interview scheduling
               and pipeline moves are on the Shortlisted and Interviews tabs.
             </p>
-            {atsBoardLoading ? (
-              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                Loading ATS buckets…
-              </div>
-            ) : !atsBucketsData ? (
-              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                No bucket data yet for this line. Open ranking settings below or
-                refresh.
-              </div>
-            ) : (
-              <>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "10px",
-                    overflowX: "auto",
-                    paddingBottom: "8px",
-                  }}
-                >
-                  {(
-                    [
-                      "BEST",
-                      "VERY_GOOD",
-                      "GOOD",
-                      "AVERAGE",
-                      "NOT_SUITABLE",
-                    ] as const
-                  ).map((bucketKey) => {
-                    const labels: Record<string, string> = {
-                      BEST: "Best",
-                      VERY_GOOD: "Very good",
-                      GOOD: "Good",
-                      AVERAGE: "Average",
-                      NOT_SUITABLE: "Not suitable",
-                    };
-                    const apps = atsBucketsData[bucketKey] ?? [];
-                    return (
-                      <div
-                        key={bucketKey}
-                        style={{
-                          minWidth: "160px",
-                          flex: "0 0 auto",
-                          border: "1px solid var(--border-subtle)",
-                          borderRadius: "8px",
-                          padding: "8px",
-                          backgroundColor: "var(--bg-primary)",
-                          maxHeight: "360px",
-                          overflowY: "auto",
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontSize: "11px",
-                            fontWeight: 600,
-                            marginBottom: "6px",
-                          }}
-                        >
-                          {labels[bucketKey] ?? bucketKey}{" "}
-                          <span style={{ color: "var(--text-tertiary)" }}>
-                            ({apps.length}
-                            {atsBucketsData.meta?.truncated?.[bucketKey] ? "+" : ""}
-                            )
-                          </span>
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "6px",
-                          }}
-                        >
-                          {apps.map((app) => {
-                            const bd = app.ranking?.breakdown;
-                            const snippet = bd ? rankingBreakdownSnippet(bd) : "";
-                            const fallbackYears =
-                              bd && typeof bd === "object"
-                                ? (() => {
-                                    const exp = (
-                                      bd as {
-                                        ranking_signals?: { ats?: { experience_years?: number | null } };
-                                      }
-                                    ).ranking_signals?.ats?.experience_years;
-                                    return exp ?? null;
-                                  })()
-                                : null;
-                            const expFlag =
-                              atsBoardExperienceFlagByCandidateId.get(app.candidate_id) ??
-                              resolveExperienceFitFlag(
-                                atsBoardRequiredExperienceYears,
-                                fallbackYears,
-                              );
-                            return (
-                              <div
-                                key={app.application_id}
-                                role="button"
-                                tabIndex={0}
-                                onClick={() => openEvaluateFromAtsApp(app)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" || e.key === " ") {
-                                    e.preventDefault();
-                                    openEvaluateFromAtsApp(app);
-                                  }
-                                }}
-                                style={{
-                                  fontSize: "11px",
-                                  padding: "8px 10px",
-                                  borderRadius: "8px",
-                                  border: "1px solid var(--border-subtle)",
-                                  cursor: "pointer",
-                                  lineHeight: 1.35,
-                                  backgroundColor: "var(--bg-secondary)",
-                                }}
-                              >
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "flex-start",
-                                    justifyContent: "space-between",
-                                    gap: "6px",
-                                  }}
-                                >
-                                  <span style={{ fontWeight: 600 }}>
-                                    {app.candidate.full_name}
-                                  </span>
-                                  {(() => {
-                                    const s = atsBoardScoreByCandidateId.get(app.candidate_id);
-                                    const status = s?.ai_status ?? "PENDING";
-                                    const score = s?.final_score ?? null;
-                                    return (
-                                      <span
-                                        style={{
-                                          display: "inline-flex",
-                                          alignItems: "center",
-                                          gap: "6px",
-                                          fontWeight: 700,
-                                          fontSize: "11px",
-                                        }}
-                                      >
-                                        <span>
-                                          {status === "OK" && score != null
-                                            ? Math.round(score)
-                                            : "—"}
-                                        </span>
-                                        {status !== "OK" ? (
-                                          <span
-                                            style={{
-                                              fontWeight: 600,
-                                              fontSize: "10px",
-                                              color: "var(--text-tertiary)",
-                                            }}
-                                          >
-                                            {status}
-                                          </span>
-                                        ) : null}
-                                      </span>
-                                    );
-                                  })()}
-                                </div>
-                                {snippet ? (
-                                  <div
-                                    style={{
-                                      color: "var(--text-tertiary)",
-                                      fontSize: "10px",
-                                      marginTop: "4px",
-                                    }}
-                                  >
-                                    {snippet}
-                                  </div>
-                                ) : null}
-                                {expFlag ? (
-                                  <div
-                                    style={{
-                                      marginTop: "5px",
-                                    }}
-                                  >
-                                    <span
-                                      style={{
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        fontSize: "10px",
-                                        fontWeight: 700,
-                                        padding: "2px 6px",
-                                        borderRadius: "999px",
-                                        backgroundColor:
-                                          expFlag.tone === "red"
-                                            ? "#FEE2E2"
-                                            : expFlag.tone === "blue"
-                                              ? "#DBEAFE"
-                                              : "#DCFCE7",
-                                        color:
-                                          expFlag.tone === "red"
-                                            ? "#991B1B"
-                                            : expFlag.tone === "blue"
-                                              ? "#1E3A8A"
-                                              : "#166534",
-                                      }}
-                                    >
-                                      {expFlag.label}
-                                    </span>
-                                  </div>
-                                ) : null}
-                                <div
-                                  style={{
-                                    color: "var(--text-tertiary)",
-                                    fontSize: "10px",
-                                    marginTop: "4px",
-                                  }}
-                                >
-                                  {app.current_stage}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div style={{ marginTop: "12px" }}>
-                  <div style={{ fontSize: "11px", fontWeight: 600, marginBottom: "6px" }}>
-                    Unranked
-                  </div>
-                  <div style={{ display: "flex", gap: "10px", overflowX: "auto" }}>
-                    {(atsBucketsData.UNRANKED ?? []).length === 0 ? (
-                      <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
-                        None
-                      </span>
-                    ) : (
-                      (atsBucketsData.UNRANKED ?? []).map((app) => {
-                        const bd = app.ranking?.breakdown;
-                        const fallbackYears =
-                          bd && typeof bd === "object"
-                            ? (() => {
-                                const exp = (
-                                  bd as {
-                                    ranking_signals?: { ats?: { experience_years?: number | null } };
-                                  }
-                                ).ranking_signals?.ats?.experience_years;
-                                return exp ?? null;
-                              })()
-                            : null;
-                        const expFlag =
-                          atsBoardExperienceFlagByCandidateId.get(app.candidate_id) ??
-                          resolveExperienceFitFlag(
-                            atsBoardRequiredExperienceYears,
-                            fallbackYears,
-                          );
-                        return (
-                          <div
-                            key={app.application_id}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => openEvaluateFromAtsApp(app)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                openEvaluateFromAtsApp(app);
-                              }
-                            }}
-                            style={{
-                              fontSize: "11px",
-                              padding: "8px 10px",
-                              borderRadius: "8px",
-                              border: "1px solid var(--border-subtle)",
-                              cursor: "pointer",
-                              minWidth: "120px",
-                              backgroundColor: "var(--bg-primary)",
-                            }}
-                          >
-                            <div style={{ fontWeight: 600 }}>{app.candidate.full_name}</div>
-                            {expFlag ? (
-                              <div style={{ marginTop: "4px" }}>
-                                <span
-                                  style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    fontSize: "10px",
-                                    fontWeight: 700,
-                                    padding: "2px 6px",
-                                    borderRadius: "999px",
-                                    backgroundColor:
-                                      expFlag.tone === "red"
-                                        ? "#FEE2E2"
-                                        : expFlag.tone === "blue"
-                                          ? "#DBEAFE"
-                                          : "#DCFCE7",
-                                    color:
-                                      expFlag.tone === "red"
-                                        ? "#991B1B"
-                                        : expFlag.tone === "blue"
-                                          ? "#1E3A8A"
-                                          : "#166534",
-                                  }}
-                                >
-                                  {expFlag.label}
-                                </span>
-                              </div>
-                            ) : null}
-                            <div style={{ fontSize: "10px", color: "var(--text-tertiary)" }}>
-                              {app.current_stage}
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
+            <AtsBucketBoard
+              loading={rankingLoading}
+              rankingError={rankingError}
+              bucketsError={atsBucketsError}
+              atsBucketsData={atsBucketsData}
+              scoreByCandidateId={atsBoardScoreByCandidateId}
+              experienceFlagByCandidateId={atsBoardExperienceFlagByCandidateId}
+              requiredExperienceYears={atsBoardRequiredExperienceYears}
+              resolveExperienceFit={resolveExperienceFitFlag}
+              onOpenApp={openEvaluateFromAtsApp}
+              rankingBreakdownSnippet={rankingBreakdownSnippet}
+              onRetryLoad={() => void loadRanking(false)}
+            />
           </div>
 
           <details
@@ -4559,629 +4458,70 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                 userSelect: "none",
               }}
             >
-              Ranking settings, pipeline board, and filters (advanced)
+              Pipeline, ranking, and filters (advanced)
             </summary>
 
-          {/* Phase 4 board columns (compact counters + full-stage expand) */}
-          <div
-            style={{
-              marginBottom: "20px",
-              padding: "14px",
-              borderRadius: "12px",
-              border: "1px solid var(--border-subtle)",
-              backgroundColor: "var(--bg-secondary)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: "10px",
-              }}
-            >
-              <div style={{ fontSize: "13px", fontWeight: 600 }}>
-                Applications Pipeline Board
-              </div>
-              <button
-                className="action-button"
-                onClick={() => {
-                  void loadPipelineCompact();
-                  if (expandedPipelineStage) {
-                    setPipelineFull(null);
-                    void loadPipelineFull();
-                  }
-                }}
-                style={{ fontSize: "11px", padding: "4px 10px" }}
-              >
-                <RefreshCw size={12} style={{ marginRight: "4px" }} />
-                Refresh
-              </button>
-            </div>
-
-            {pipelineLoading ? (
-              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                Loading compact counters...
-              </div>
-            ) : (
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                {[
-                  "Sourced",
-                  "Shortlisted",
-                  "Interviewing",
-                  "Offered",
-                  "Hired",
-                  "Rejected",
-                ].map((stage) => {
-                  const isExpanded = expandedPipelineStage === stage;
-                  return (
-                    <button
-                      key={stage}
-                      onClick={() =>
-                        setExpandedPipelineStage((prev) =>
-                          prev === stage ? null : stage,
-                        )
-                      }
-                      style={{
-                        border: isExpanded
-                          ? "2px solid var(--primary-accent)"
-                          : "1px solid var(--border-subtle)",
-                        borderRadius: "10px",
-                        padding: "8px 12px",
-                        background: isExpanded
-                          ? "rgba(59,130,246,0.08)"
-                          : "var(--bg-primary)",
-                        cursor: "pointer",
-                        minWidth: "132px",
-                        textAlign: "left",
-                      }}
-                    >
-                      <div style={{ fontSize: "12px", fontWeight: 600 }}>{stage}</div>
-                      <div
-                        style={{
-                          fontSize: "18px",
-                          fontWeight: 700,
-                          color: "var(--text-primary)",
-                        }}
-                      >
-                        {pipelineCountByStage[stage] ?? 0}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {expandedPipelineStage && (
-              <div style={{ marginTop: "12px" }}>
-                <div
-                  style={{
-                    fontSize: "12px",
-                    color: "var(--text-tertiary)",
-                    marginBottom: "8px",
-                  }}
-                >
-                  Expanded stage: {expandedPipelineStage}
-                </div>
-                {pipelineFullLoading ? (
-                  <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                    Loading full stage details...
-                  </div>
-                ) : expandedStageApplications.length === 0 ? (
-                  <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                    No applications in this stage.
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {expandedStageApplications.map((app) => (
-                      <div
-                        key={app.application_id}
-                        onClick={() =>
-                          openCandidateModal(
-                            {
-                              candidate_id: app.candidate_id,
-                              application_id: app.application_id,
-                              requisition_item_id: app.requisition_item_id,
-                              requisition_id: app.requisition_id,
-                              full_name: app.candidate.full_name,
-                              email: app.candidate.email,
-                              phone: app.candidate.phone,
-                              resume_path: null,
-                              current_stage: app.current_stage,
-                              added_by: app.created_by,
-                              source: app.source,
-                              created_at: app.created_at,
-                              updated_at: app.updated_at,
-                              stage_history: app.stage_history ?? [],
-                              interviews: [],
-                            },
-                            "evaluate",
-                          )
-                        }
-                        style={{
-                          padding: "10px 12px",
-                          borderRadius: "8px",
-                          border: "1px solid var(--border-subtle)",
-                          backgroundColor: "var(--bg-primary)",
-                          cursor: "pointer",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                        }}
-                      >
-                        <div>
-                          <div style={{ fontSize: "13px", fontWeight: 600 }}>
-                            {app.candidate.full_name}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              color: "var(--text-secondary)",
-                            }}
-                          >
-                            {app.candidate.email}
-                          </div>
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "11px",
-                            color: "var(--text-tertiary)",
-                          }}
-                        >
-                          App #{app.application_id}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Phase 5 ranking visibility panel */}
-          <div
-            style={{
-              marginBottom: "20px",
-              padding: "14px",
-              borderRadius: "12px",
-              border: "1px solid var(--border-subtle)",
-              backgroundColor: "var(--bg-secondary)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "10px",
-                flexWrap: "wrap",
-                marginBottom: "10px",
-              }}
-            >
-              <div>
-                <div style={{ fontSize: "13px", fontWeight: 600 }}>
-                  Ranking & Semantic Fit
-                </div>
-                <div style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
-                  Keyword + semantic/vector + business scoring
-                </div>
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  flexWrap: "wrap",
-                }}
-              >
-                <select
-                  value={rankingItemId ?? ""}
-                  onChange={(e) => setAtsBoardItemId(Number(e.target.value))}
-                  style={{
-                    padding: "6px 10px",
-                    borderRadius: "8px",
-                    border: "1px solid var(--border-subtle)",
-                    fontSize: "12px",
-                    backgroundColor: "var(--bg-primary)",
-                    color: "var(--text-primary)",
-                  }}
-                >
-                  {ticket.items.map((item) => (
-                    <option key={item.numericItemId} value={item.numericItemId}>
-                      Item #{item.numericItemId} - {item.skill}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="action-button"
-                  onClick={() => void loadRanking(false)}
-                  style={{ fontSize: "11px", padding: "4px 10px" }}
-                >
-                  <RefreshCw size={12} style={{ marginRight: "4px" }} />
-                  Refresh
-                </button>
-                <button
-                  className="action-button primary"
-                  onClick={() => void loadRanking(true)}
-                  style={{ fontSize: "11px", padding: "4px 10px" }}
-                >
-                  {rankingRefreshing ? "Recomputing..." : "Recompute"}
-                </button>
-                <button
-                  className="action-button"
-                  disabled={aiEvalWorking || !rankingItemId}
-                  onClick={() => void runAiEvalAllPresent()}
-                  style={{ fontSize: "11px", padding: "4px 10px" }}
-                  title="Runs AI evaluation for all currently ranked candidates and stores results."
-                >
-                  {aiEvalWorking ? "AI evaluating..." : "AI Eval (All)"}
-                </button>
-              </div>
-            </div>
-
-            <div
-              style={{
-                marginBottom: "12px",
-                paddingBottom: "12px",
-                borderBottom: "1px solid var(--border-subtle)",
-              }}
-            >
-              <div style={{ fontSize: "12px", fontWeight: 600, marginBottom: "4px" }}>
-                Ranking job description (ATS)
-              </div>
-              <div
-                style={{
-                  fontSize: "11px",
-                  color: "var(--text-tertiary)",
-                  marginBottom: "10px",
-                  lineHeight: 1.45,
-                }}
-              >
-                Optional text or PDF used only to rank candidates for the selected
-                item. It does not replace the manager&apos;s requisition JD on the
-                item.
-              </div>
-              {!canEditPipelineRankingJd ? (
-                <div style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
-                  TA, HR, Admin, Owner, or Manager role is required to change these
-                  settings.
-                </div>
-              ) : null}
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  fontSize: "12px",
-                  cursor: canEditPipelineRankingJd ? "pointer" : "default",
-                  marginBottom: "10px",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={useRequisitionJd}
-                  disabled={!canEditPipelineRankingJd}
-                  onChange={(e) => setUseRequisitionJd(e.target.checked)}
-                />
-                <span>Use same JD as requisition (manager item + header PDFs)</span>
-              </label>
-              {!useRequisitionJd ? (
-                <>
-                  <textarea
-                    value={pipelineJdTextDraft}
-                    onChange={(e) => setPipelineJdTextDraft(e.target.value)}
-                    disabled={!canEditPipelineRankingJd || pipelineJdSaving}
-                    placeholder="Paste or type a JD for ranking..."
-                    rows={5}
-                    style={{
-                      width: "100%",
-                      boxSizing: "border-box",
-                      padding: "8px 10px",
-                      borderRadius: "8px",
-                      border: "1px solid var(--border-subtle)",
-                      fontSize: "12px",
-                      fontFamily: "inherit",
-                      resize: "vertical",
-                      backgroundColor: "var(--bg-primary)",
-                      color: "var(--text-primary)",
-                    }}
-                  />
-                  <input
-                    ref={pipelineJdFileInputRef}
-                    type="file"
-                    accept=".pdf,application/pdf"
-                    style={{ display: "none" }}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      e.target.value = "";
-                      if (file) void uploadPipelineRankingJdPdf(file);
-                    }}
-                  />
-                  <div
-                    style={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      gap: "8px",
-                      marginTop: "8px",
-                      alignItems: "center",
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="action-button"
-                      disabled={
-                        !canEditPipelineRankingJd || pipelineJdUploading
-                      }
-                      onClick={() => pipelineJdFileInputRef.current?.click()}
-                      style={{ fontSize: "11px", padding: "4px 10px" }}
-                    >
-                      <Upload size={12} style={{ marginRight: "4px" }} />
-                      {pipelineJdUploading ? "Uploading..." : "Upload ranking PDF"}
-                    </button>
-                    {pipelineRankingTargetItem?.pipelineJdFileKey ? (
-                      <button
-                        type="button"
-                        className="action-button"
-                        disabled={
-                          !canEditPipelineRankingJd || pipelineJdUploading
-                        }
-                        onClick={() => void removePipelineRankingJdPdf()}
-                        style={{ fontSize: "11px", padding: "4px 10px" }}
-                      >
-                        Remove ranking PDF
-                      </button>
-                    ) : null}
-                  </div>
-                </>
-              ) : null}
-              {useRequisitionJd &&
-              pipelineRankingTargetItem &&
-              (Boolean(pipelineRankingTargetItem.pipelineJdText?.trim()) ||
-                Boolean(pipelineRankingTargetItem.pipelineJdFileKey)) ? (
-                <div
-                  style={{
-                    fontSize: "11px",
-                    color: "var(--text-tertiary)",
-                    marginTop: "8px",
-                    lineHeight: 1.45,
-                  }}
-                >
-                  Custom ranking text or PDF is saved but ignored while
-                  &quot;Use same JD as requisition&quot; is checked.
-                </div>
-              ) : null}
-              {!useRequisitionJd && pipelineRankingTargetItem?.pipelineJdFileKey ? (
-                <div
-                  style={{
-                    fontSize: "11px",
-                    color: "var(--text-secondary)",
-                    marginTop: "6px",
-                  }}
-                >
-                  A custom ranking PDF is attached for this item (combined with the
-                  text above when both are present).
-                </div>
-              ) : null}
-              <div style={{ marginTop: "12px" }}>
-                <label
-                  style={{
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    display: "block",
-                    marginBottom: "6px",
-                  }}
-                >
-                  ATS required skills (optional)
-                </label>
-                <div
-                  style={{
-                    fontSize: "11px",
-                    color: "var(--text-tertiary)",
-                    marginBottom: "6px",
-                    lineHeight: 1.45,
-                  }}
-                >
-                  Comma-separated list. Overrides Primary/Secondary parsing from item
-                  requirements when non-empty.
-                </div>
-                <textarea
-                  value={rankingRequiredSkillsDraft}
-                  onChange={(e) => setRankingRequiredSkillsDraft(e.target.value)}
-                  disabled={!canEditPipelineRankingJd || pipelineJdSaving}
-                  placeholder="e.g. React, Node.js, PostgreSQL"
-                  rows={2}
-                  style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    padding: "8px 10px",
-                    borderRadius: "8px",
-                    border: "1px solid var(--border-subtle)",
-                    fontSize: "12px",
-                    fontFamily: "inherit",
-                    resize: "vertical",
-                    backgroundColor: "var(--bg-primary)",
-                    color: "var(--text-primary)",
-                  }}
-                />
-              </div>
-              <div style={{ marginTop: "10px" }}>
-                <button
-                  type="button"
-                  className="action-button primary"
-                  disabled={
-                    !canEditPipelineRankingJd ||
-                    pipelineJdSaving ||
-                    !pipelineRankingTargetItem
-                  }
-                  onClick={() => void savePipelineRankingJdSettings()}
-                  style={{ fontSize: "11px", padding: "4px 10px" }}
-                >
-                  {pipelineJdSaving ? "Saving..." : "Save ranking JD settings"}
-                </button>
-              </div>
-              {pipelineJdMessage ? (
-                <div
-                  style={{
-                    marginTop: "8px",
-                    fontSize: "11px",
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  {pipelineJdMessage}
-                </div>
-              ) : null}
-            </div>
-
-            {rankingLoading ? (
-              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                Loading ranking...
-              </div>
-            ) : rankingError ? (
-              <div style={{ fontSize: "12px", color: "var(--error)" }}>{rankingError}</div>
-            ) : !rankingData ? (
-              <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                Ranking not available for this position yet.
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "8px",
-                    flexWrap: "wrap",
-                    fontSize: "11px",
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  <span>Version: {rankingData.ranking_version}</span>
-                  <span>Total: {rankingData.total_candidates}</span>
-                  <span>
-                    Generated: {new Date(rankingData.generated_at).toLocaleString()}
-                  </span>
-                </div>
-
-                <div style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-                  Candidate ranking preview is hidden on this page. Use the ATS evaluation board,
-                  pipeline board, and filters above to manage candidates.
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Filters: Item and Stage */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "12px",
-              marginBottom: "20px",
-            }}
-          >
-            {/* Item filter */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "12px",
-                flexWrap: "wrap",
-              }}
-            >
-              <label
-                style={{
-                  fontSize: "12px",
-                  fontWeight: 500,
-                  color: "var(--text-secondary)",
-                }}
-              >
-                Filter by Position:
-              </label>
-              <select
-                value={
-                  candidateItemFilter === "all" ? "all" : candidateItemFilter
-                }
-                onChange={(e) =>
-                  setCandidateItemFilter(
-                    e.target.value === "all" ? "all" : Number(e.target.value),
-                  )
-                }
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--border-subtle)",
-                  fontSize: "12px",
-                  backgroundColor: "var(--bg-primary)",
-                  color: "var(--text-primary)",
-                  cursor: "pointer",
-                  minWidth: "200px",
-                }}
-              >
-                <option value="all">All Positions</option>
-                {ticket.items.map((item) => {
-                  const itemCandidateCount =
-                    candidatesByItemId.get(item.numericItemId)?.length ?? 0;
-                  return (
-                    <option key={item.numericItemId} value={item.numericItemId}>
-                      {item.skill} ({itemCandidateCount})
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-
-            {/* Stage filter tabs */}
-            <div
-              style={{
-                display: "flex",
-                gap: "8px",
-                flexWrap: "wrap",
-              }}
-            >
-              {[
-                "all",
-                "Sourced",
-                "Shortlisted",
-                "Interviewing",
-                "Offered",
-                "Hired",
-                "Rejected",
-              ].map((stage) => {
-                const filteredByItem =
-                  candidateItemFilter === "all"
-                    ? candidates
-                    : (candidatesByItemId.get(candidateItemFilter) ?? []);
-                const count =
-                  stage === "all"
-                    ? filteredByItem.length
-                    : filteredByItem.filter((c) => c.current_stage === stage)
-                        .length;
-                const isActive = candidateStageFilter === stage;
-                return (
-                  <button
-                    key={stage}
-                    onClick={() => setCandidateStageFilter(stage)}
-                    style={{
-                      padding: "6px 14px",
-                      borderRadius: "20px",
-                      fontSize: "12px",
-                      fontWeight: isActive ? 600 : 400,
-                      border: isActive
-                        ? "2px solid var(--primary-accent)"
-                        : "1px solid var(--border-subtle)",
-                      backgroundColor: isActive
-                        ? "rgba(59,130,246,0.08)"
-                        : "transparent",
-                      color: isActive
-                        ? "var(--primary-accent)"
-                        : "var(--text-secondary)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {stage === "all" ? "All" : stage} ({count})
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+            <PipelineOverview
+              pipelineLoading={pipelineLoading}
+              pipelineCountByStage={pipelineCountByStage}
+              expandedPipelineStage={expandedPipelineStage}
+              onToggleStage={(stage) =>
+                setExpandedPipelineStage((prev) =>
+                  prev === stage ? null : stage,
+                )
+              }
+              onRefresh={handlePipelineSectionRefresh}
+              refreshDisabled={pipelineLoading}
+              pipelineFullLoading={pipelineFullLoading}
+              expandedStageApplications={expandedStageApplications}
+              onOpenStageApplication={openEvaluateFromPipelineRecord}
+            />
+            <RankingConfigPanel
+              rankingItemId={rankingItemId}
+              onLineChange={setAtsBoardItemId}
+              lineOptions={requisitionLineOptions}
+              onRefreshRanking={() => void loadRanking(false)}
+              onRecompute={() => void loadRanking(true)}
+              onAiEvalAll={() => void runAiEvalAllPresent()}
+              rankingLoading={rankingLoading}
+              rankingRefreshing={rankingRefreshing}
+              rankingError={rankingError}
+              rankingData={rankingData}
+              aiEvalWorking={aiEvalWorking}
+              canEditPipelineRankingJd={canEditPipelineRankingJd}
+              useRequisitionJd={useRequisitionJd}
+              onUseRequisitionJdChange={setUseRequisitionJd}
+              pipelineJdTextDraft={pipelineJdTextDraft}
+              onPipelineJdTextDraftChange={setPipelineJdTextDraft}
+              rankingRequiredSkillsDraft={rankingRequiredSkillsDraft}
+              onRankingRequiredSkillsDraftChange={setRankingRequiredSkillsDraft}
+              pipelineJdFileInputRef={pipelineJdFileInputRef}
+              onPickPdfFile={(file) => void uploadPipelineRankingJdPdf(file)}
+              onClickUploadPdf={() => pipelineJdFileInputRef.current?.click()}
+              onClickRemovePdf={() => void removePipelineRankingJdPdf()}
+              pipelineJdUploading={pipelineJdUploading}
+              pipelineJdSaving={pipelineJdSaving}
+              onSaveJdSettings={() => void savePipelineRankingJdSettings()}
+              pipelineJdMessage={pipelineJdMessage}
+              pipelineJdFeedback={pipelineJdFeedback}
+              hasAttachedRankingPdf={Boolean(
+                pipelineRankingTargetItem?.pipelineJdFileKey,
+              )}
+              showIgnoredCustomJdNote={showIgnoredCustomJdNote}
+              showCustomPdfNote={
+                !useRequisitionJd &&
+                Boolean(pipelineRankingTargetItem?.pipelineJdFileKey)
+              }
+              pipelineRankingTargetItem={pipelineRankingTargetItem}
+            />
+            <CandidateFiltersBar
+              candidateItemFilter={candidateItemFilter}
+              onCandidateItemFilterChange={setCandidateItemFilter}
+              candidateStageFilter={candidateStageFilter}
+              onCandidateStageFilterChange={setCandidateStageFilter}
+              items={requisitionLineOptions}
+              candidates={candidates}
+            />
 
           {/* Candidate cards (Kanban-style by stage) */}
           {candidatesLoading ? (
@@ -5260,7 +4600,11 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
 
                   return (
                     <div
-                      key={c.candidate_id}
+                      key={
+                        c.application_id != null
+                          ? `app-${c.application_id}`
+                          : `c-${c.candidate_id}-${c.requisition_item_id}`
+                      }
                       onClick={() => openCandidateModal(c, "evaluate")}
                       style={{
                         padding: "16px 20px",
@@ -5400,6 +4744,44 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                     color: "var(--error)",
                     cursor: "pointer",
                   }}
+                >
+                  ×
+                </button>
+              </div>
+            ) : null}
+            {shortlistEmailOk ? (
+              <div
+                style={{
+                  marginBottom: "14px",
+                  padding: "10px 14px",
+                  borderRadius: "10px",
+                  backgroundColor: "rgba(16, 185, 129, 0.1)",
+                  border: "1px solid rgba(16, 185, 129, 0.25)",
+                  color: "var(--text-primary)",
+                  fontSize: "13px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <CheckCircle
+                  size={16}
+                  style={{ color: "rgb(5, 150, 105)", flexShrink: 0 }}
+                />
+                {shortlistEmailOk}
+                <button
+                  type="button"
+                  onClick={() => setShortlistEmailOk(null)}
+                  style={{
+                    marginLeft: "auto",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "16px",
+                    lineHeight: 1,
+                    opacity: 0.6,
+                  }}
+                  aria-label="Dismiss"
                 >
                   ×
                 </button>
@@ -5626,14 +5008,44 @@ const RequisitionDetail: React.FC<RequisitionDetailsProps> = ({
                                 borderBottom: "1px solid var(--border-subtle)",
                               }}
                             >
-                              <button
-                                type="button"
-                                className="action-button"
-                                style={{ fontSize: "11px", padding: "4px 10px" }}
-                                onClick={() => openCandidateModal(c, "execute")}
+                              <div
+                                style={{
+                                  display: "flex",
+                                  flexWrap: "wrap",
+                                  gap: "6px",
+                                  alignItems: "center",
+                                }}
                               >
-                                Open
-                              </button>
+                                <button
+                                  type="button"
+                                  className="action-button"
+                                  style={{ fontSize: "11px", padding: "4px 10px" }}
+                                  onClick={() => openCandidateModal(c, "execute")}
+                                >
+                                  Open
+                                </button>
+                                {appId != null ? (
+                                  <button
+                                    type="button"
+                                    className="action-button"
+                                    style={{
+                                      fontSize: "11px",
+                                      padding: "4px 10px",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                    }}
+                                    disabled={sendShortlistEmailAppId === appId}
+                                    onClick={() => void handleSendShortlistEmail(appId)}
+                                    title="Send the shortlist notification email to this candidate"
+                                  >
+                                    <Mail size={12} />
+                                    {sendShortlistEmailAppId === appId
+                                      ? "Sending…"
+                                      : "Send email"}
+                                  </button>
+                                ) : null}
+                              </div>
                             </td>
                           </tr>
                         );

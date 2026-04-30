@@ -896,7 +896,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
         <Table className="[&_th]:py-3.5 [&_td]:py-4 [&_td]:align-top [&_tbody_tr:hover]:bg-slate-50/70">
           <THead>
             <TR>
-              <TH>Req ID</TH>
+              <TH className="w-[1%] whitespace-nowrap text-center">Req ID</TH>
               <TH>Project &amp; Client</TH>
               <TH>Positions</TH>
               <TH>Priority</TH>
@@ -997,15 +997,18 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                 return (
                   <React.Fragment key={req.id}>
                     <tr>
-                      <td>
+                      <td className="text-center whitespace-nowrap">
                         <div
                           style={{
                             display: "flex",
                             alignItems: "center",
+                            justifyContent: "center",
                             gap: "8px",
                           }}
                         >
-                          <strong>{req.id}</strong>
+                          <strong className="font-mono text-sm tabular-nums">
+                            {req.id}
+                          </strong>
                           {isAssignedToMe && (
                             <div
                               style={{

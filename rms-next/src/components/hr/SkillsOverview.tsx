@@ -1,107 +1,64 @@
 "use client";
 
-// components/hr/SkillsOverview.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { cachedApiGet } from "@/lib/api/cached-api-get";
+import { Layers } from "lucide-react";
 
-interface SkillCapability {
-  skillId: number;
-  skillName: string;
-  totalEmployees: number;
-  proficiency: {
-    junior: number;
-    mid: number;
-    senior: number;
-  };
-}
+import { HrEmptyState } from "@/components/hr/HrEmptyState";
+import { HrPaginationBar } from "@/components/hr/HrPaginationBar";
+import { HrToolbarCard } from "@/components/hr/HrToolbarCard";
+import { useHrSkillsSummaryQuery } from "@/hooks/hr/use-hr-queries";
+
+const PAGE_SIZE = 15;
 
 const SkillsOverview: React.FC = () => {
-  const [skillsData, setSkillsData] = useState<SkillCapability[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
-  useEffect(() => {
-    let isMounted = true;
-    const controller = new AbortController();
-
-    const fetchSkills = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        const rows = await cachedApiGet<
-          {
-            skill_id: number;
-            skill_name: string;
-            total_employees: number;
-            proficiency: {
-              junior: number;
-              mid: number;
-              senior: number;
-            };
-          }[]
-        >("/hr/skills-summary", { signal: controller.signal });
-
-        if (!isMounted) return;
-        setSkillsData(
-          rows.map((row) => ({
-            skillId: row.skill_id,
-            skillName: row.skill_name,
-            totalEmployees: row.total_employees,
-            proficiency: row.proficiency,
-          })),
-        );
-      } catch (err) {
-        if (!isMounted) return;
-        const message =
-          err instanceof Error ? err.message : "Failed to load skills";
-        setError(message);
-      } finally {
-        if (isMounted) setIsLoading(false);
-      }
-    };
-
-    fetchSkills();
-
-    return () => {
-      isMounted = false;
-      controller.abort();
-    };
-  }, []);
+  const skillsQuery = useHrSkillsSummaryQuery(true);
+  const skillsRows = skillsQuery.data;
+  const isLoading = skillsQuery.isPending;
+  const error =
+    skillsQuery.error instanceof Error
+      ? skillsQuery.error.message
+      : skillsQuery.isError
+        ? "Failed to load skills"
+        : null;
 
   const filteredSkills = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return skillsData;
+    const skillsData = skillsRows ?? [];
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return skillsData;
     return skillsData.filter((skill) =>
-      skill.skillName.toLowerCase().includes(query),
+      skill.skillName.toLowerCase().includes(q),
     );
-  }, [skillsData, searchQuery]);
+  }, [skillsRows, searchQuery]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery]);
+
+  const pagedSkills = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return filteredSkills.slice(start, start + PAGE_SIZE);
+  }, [filteredSkills, page]);
 
   return (
     <>
-      {/* Page Header
-      <div className="manager-header">
-        <h2>Skills & Capability Overview</h2>
-        <p className="subtitle">
-          Organization-wide visibility into employee skills and proficiency.
-        </p>
-      </div> */}
-
-      {/* Search */}
-      <div className="log-filters">
-        <div className="filter-group">
-          <div className="search-box">
-            <input
-              type="text"
-              placeholder="Search skill (e.g. React, Java, QA)..."
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-            />
+      <HrToolbarCard>
+        <div className="log-filters">
+          <div className="filter-group">
+            <div className="search-box">
+              <input
+                type="text"
+                placeholder="Search skill (e.g. React, Java, QA)..."
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+              />
+            </div>
           </div>
         </div>
-      </div>
+      </HrToolbarCard>
 
-      {/* Skills Table */}
       <div className="data-table-container">
         <table className="data-table">
           <thead>
@@ -115,44 +72,67 @@ const SkillsOverview: React.FC = () => {
           </thead>
 
           <tbody>
-            {filteredSkills.map((skill) => (
-              <tr key={skill.skillName}>
-                <td>
-                  <strong>{skill.skillName}</strong>
+            {isLoading && (
+              <tr>
+                <td colSpan={5}>
+                  <div className="tickets-empty-state">Loading skills…</div>
                 </td>
-
-                <td>{skill.totalEmployees}</td>
-
-                <td>{skill.proficiency.junior}</td>
-
-                <td>{skill.proficiency.mid}</td>
-
-                <td>{skill.proficiency.senior}</td>
               </tr>
-            ))}
+            )}
+
+            {!isLoading && error && (
+              <tr>
+                <td colSpan={5}>
+                  <div
+                    className="tickets-empty-state"
+                    style={{ color: "var(--error)" }}
+                  >
+                    {error}
+                  </div>
+                </td>
+              </tr>
+            )}
+
+            {!isLoading &&
+              !error &&
+              pagedSkills.map((skill) => (
+                <tr key={skill.skillId}>
+                  <td>
+                    <strong>{skill.skillName}</strong>
+                  </td>
+
+                  <td>{skill.totalEmployees}</td>
+
+                  <td>{skill.proficiency.junior}</td>
+
+                  <td>{skill.proficiency.mid}</td>
+
+                  <td>{skill.proficiency.senior}</td>
+                </tr>
+              ))}
 
             {!isLoading && !error && filteredSkills.length === 0 && (
               <tr>
-                <td colSpan={5}>
-                  <div className="empty-state">No skills found.</div>
+                <td colSpan={5} className="p-6">
+                  <HrEmptyState
+                    icon={Layers}
+                    title="No skills match your search"
+                    description="Try a different keyword or clear the search box."
+                  />
                 </td>
               </tr>
             )}
           </tbody>
         </table>
 
-        {isLoading && (
-          <div className="empty-state" style={{ paddingTop: "16px" }}>
-            Loading skills…
-          </div>
-        )}
-
-        {!isLoading && error && (
-          <div
-            className="empty-state"
-            style={{ color: "var(--error)", paddingTop: "16px" }}
-          >
-            {error}
+        {!isLoading && !error && filteredSkills.length > 0 && (
+          <div className="mt-4 px-1">
+            <HrPaginationBar
+              page={page}
+              pageSize={PAGE_SIZE}
+              total={filteredSkills.length}
+              onPageChange={setPage}
+            />
           </div>
         )}
       </div>

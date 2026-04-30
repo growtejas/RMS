@@ -194,6 +194,8 @@ export async function removeLocation(userId: number, locationId: number) {
 }
 
 export async function createCompanyRole(
+  userId: number,
+  username: string,
   rawName: string,
   roleDescription: string | null | undefined,
 ) {
@@ -205,12 +207,17 @@ export async function createCompanyRole(
   if (existing) {
     throw new HttpError(400, "Role name already exists");
   }
-  const row = await repo.createCompanyRole(roleName, roleDescription ?? null);
+  const row = await repo.createCompanyRole(
+    userId,
+    roleName,
+    roleDescription ?? null,
+  );
   return {
     role_id: row.roleId,
     role_name: row.roleName,
     role_description: row.roleDescription,
     is_active: row.isActive,
+    created_by: username,
     created_at: companyRoleCreatedAt(row.createdAt),
   };
 }

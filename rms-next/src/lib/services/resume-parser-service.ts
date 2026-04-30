@@ -203,8 +203,44 @@ function extractEmails(text: string): string[] {
 }
 
 function extractPhones(text: string): string[] {
-  const matches = text.match(/(?:\+?\d[\d\s-]{7,}\d)/g) ?? [];
-  return Array.from(new Set(matches.map((m) => m.replace(/\s+/g, " ").trim()))).slice(0, 5);
+  const matches = text.match(/(?:\+?\d[\d\s().-]{7,}\d)/g) ?? [];
+  const normalized = matches
+    .map((m) => m.trim())
+    .map((m) => {
+      const hasPlus = m.startsWith("+");
+      const digits = m.replace(/\D/g, "");
+      return hasPlus ? `+${digits}` : digits;
+    })
+    .filter((m) => {
+      const digits = m.replace(/\D/g, "");
+      return digits.length >= 8 && digits.length <= 15;
+    });
+  return Array.from(new Set(normalized)).slice(0, 5);
+}
+
+function extractFullName(text: string): string | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 30);
+  const blocked = new RegExp(
+    "\\b(resume|curriculum|vitae|email|phone|mobile|contact|address|skills|experience|education|summary|objective|linkedin|github)\\b",
+    "i",
+  );
+  for (const line of lines) {
+    if (line.length < 4 || line.length > 60) continue;
+    if (line.includes("@")) continue;
+    if (/\d/.test(line)) continue;
+    if (blocked.test(line)) continue;
+    const cleaned = line.replace(/[^a-zA-Z .'-]/g, " ").replace(/\s+/g, " ").trim();
+    const parts = cleaned.split(" ").filter(Boolean);
+    if (parts.length < 2 || parts.length > 4) continue;
+    const validParts = parts.every((p) => /^[A-Za-z][A-Za-z'.-]{1,}$/.test(p));
+    if (!validParts) continue;
+    return cleaned.slice(0, 150);
+  }
+  return null;
 }
 
 function meaningfulExtract(text: string): boolean {
@@ -213,8 +249,9 @@ function meaningfulExtract(text: string): boolean {
 
 function toParsedData(text: string, fallback: NormalizedInboundCandidate): Record<string, unknown> {
   const excerpt = text.slice(0, MAX_RAW_TEXT_CHARS);
+  const parsedName = extractFullName(excerpt);
   return {
-    full_name: fallback.fullName,
+    full_name: parsedName ?? fallback.fullName ?? null,
     emails: extractEmails(excerpt),
     phones: extractPhones(excerpt),
     skills: extractSkills(excerpt),

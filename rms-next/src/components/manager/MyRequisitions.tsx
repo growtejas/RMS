@@ -75,11 +75,23 @@ const parsePriority = (priority: string): Exclude<PriorityValue, "all"> => {
   return "medium";
 };
 
-const MyRequisitions: React.FC = () => {
+export type MyRequisitionsVariant = "mine" | "org";
+
+type MyRequisitionsProps = {
+  /** `mine` = only requisitions you raised. `org` = all requisitions in the organization (shared manager view). */
+  variant?: MyRequisitionsVariant;
+};
+
+const MyRequisitions: React.FC<MyRequisitionsProps> = ({
+  variant = "mine",
+}) => {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { requisitions, isLoading, error, reload } = useManagerRequisitionList();
+  const { requisitions, isLoading, error, reload } = useManagerRequisitionList(
+    variant === "org" ? "org" : "mine",
+  );
+  const colSpan = variant === "org" ? 10 : 9;
 
   const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
   const [statusFilter, setStatusFilter] = useState<StatusValue>(() => {
@@ -231,6 +243,8 @@ const MyRequisitions: React.FC = () => {
         req.project_name,
         req.client_name ?? "",
         req.overall_status,
+        variant === "org" && req.raised_by != null ? `user ${req.raised_by}` : "",
+        variant === "org" && req.raised_by != null ? String(req.raised_by) : "",
       ]
         .join(" ")
         .toLowerCase();
@@ -271,7 +285,7 @@ const MyRequisitions: React.FC = () => {
     });
 
     return sorted;
-  }, [priorityFilter, query, requisitions, sortBy, statusFilter]);
+  }, [priorityFilter, query, requisitions, sortBy, statusFilter, variant]);
 
   const pageCount = Math.max(1, Math.ceil(filteredAndSorted.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
@@ -289,15 +303,19 @@ const MyRequisitions: React.FC = () => {
     <div className="space-y-4">
       <div className="bg-white rounded-xl shadow-sm p-6">
         <div className="manager-header">
-          <h2>My Requisitions</h2>
+          <h2>{variant === "org" ? "All Requisitions" : "My Requisitions"}</h2>
           <p className="subtitle">
-            Track progress, identify bottlenecks, and drill into requisition details.
+            {variant === "org"
+              ? "Every requisition in your organization. View-only; ownership and workflows stay with the raising manager, HR, and TA."
+              : "Requisitions you raised. Track progress, identify bottlenecks, and drill into details."}
           </p>
         </div>
 
         <div className="grid grid-cols-4 gap-3 mt-4">
           <div className="rounded-lg border border-slate-200 p-4 bg-slate-50">
-            <div className="text-xs text-slate-500">Total Requisitions</div>
+            <div className="text-xs text-slate-500">
+              {variant === "org" ? "Total (org)" : "Total (mine)"}
+            </div>
             <div className="text-2xl font-semibold text-slate-900">
               {requisitions.length}
             </div>
@@ -336,7 +354,11 @@ const MyRequisitions: React.FC = () => {
                   setPage(1);
                   setQueryParams({ q: next, page: 1 });
                 }}
-                placeholder="REQ ID, project, client, status"
+                placeholder={
+                variant === "org"
+                  ? "REQ ID, project, client, status, raised-by user id"
+                  : "REQ ID, project, client, status"
+              }
                 className="w-full border-0 outline-none bg-transparent px-2 py-2 text-sm"
               />
             </div>
@@ -428,6 +450,7 @@ const MyRequisitions: React.FC = () => {
           <thead>
             <tr>
               <th>Req ID</th>
+              {variant === "org" ? <th>Raised by</th> : null}
               <th>Project</th>
               <th>Client</th>
               <th>Status</th>
@@ -442,7 +465,7 @@ const MyRequisitions: React.FC = () => {
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={9}>
+                <td colSpan={colSpan}>
                   <div className="empty-state">Loading requisitions…</div>
                 </td>
               </tr>
@@ -450,7 +473,7 @@ const MyRequisitions: React.FC = () => {
 
             {!isLoading && error && (
               <tr>
-                <td colSpan={9}>
+                <td colSpan={colSpan}>
                   <div
                     className="empty-state"
                     style={{ color: "var(--error)" }}
@@ -463,8 +486,12 @@ const MyRequisitions: React.FC = () => {
 
             {!isLoading && !error && requisitions.length === 0 && (
               <tr>
-                <td colSpan={9}>
-                  <div className="empty-state">No requisitions found.</div>
+                <td colSpan={colSpan}>
+                  <div className="empty-state">
+                    {variant === "org"
+                      ? "No requisitions found for your organization."
+                      : "No requisitions found."}
+                  </div>
                 </td>
               </tr>
             )}
@@ -474,7 +501,7 @@ const MyRequisitions: React.FC = () => {
               filteredAndSorted.length === 0 &&
               requisitions.length > 0 && (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={colSpan}>
                     <div className="empty-state">
                       No requisitions match the selected filters.
                     </div>
@@ -489,6 +516,11 @@ const MyRequisitions: React.FC = () => {
                   <td>
                     <strong>REQ-{req.req_id}</strong>
                   </td>
+                  {variant === "org" ? (
+                    <td className="text-slate-600 text-sm">
+                      {req.raised_by != null ? `User #${req.raised_by}` : "—"}
+                    </td>
+                  ) : null}
                   <td>{req.project_name || "—"}</td>
                   <td>{req.client_name || "—"}</td>
                   <td>
@@ -560,7 +592,9 @@ const MyRequisitions: React.FC = () => {
         )}
 
         <div className="mt-4 text-xs text-slate-500">
-          This view is read-only. Item status, assignments, and closure are handled by HR/TA workflows.
+          {variant === "org"
+            ? "Browse-only list of every requisition in the org. Draft edits and ownership rules still apply on the detail page. Item status and assignments follow HR/TA workflows."
+            : "This view is read-only for list actions. Item status, assignments, and closure are handled by HR/TA workflows."}
         </div>
       </div>
     </div>

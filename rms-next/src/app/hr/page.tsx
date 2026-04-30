@@ -1,4 +1,5 @@
-/** HR home content is rendered by `HrShell` when path is `/hr`. */
+import HrHomeDashboard from "@/components/hr/HrHomeDashboard";
+
 export default function HrHomePage() {
-  return null;
+  return <HrHomeDashboard />;
 }

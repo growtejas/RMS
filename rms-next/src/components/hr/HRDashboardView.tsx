@@ -6,7 +6,8 @@
  * Uses proper service layer, RBAC, and follows architecture conventions.
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import {
   Users,
@@ -19,11 +20,9 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useAuth } from "@/contexts/useAuth";
-import {
-  hrDashboardService,
-  HRMetrics,
-  type RecentActivity,
-} from "@/lib/api/hrDashboardService";
+import { HRMetrics } from "@/lib/api/hrDashboardService";
+import { hrQueryKeys } from "@/lib/hr/query-keys";
+import { useHrDashboardQuery } from "@/hooks/hr/use-hr-queries";
 import HRPendingApprovals from "./HRPendingApprovals";
 import ItemBudgetApprovalPanel from "./ItemBudgetApprovalPanel";
 
@@ -34,8 +33,6 @@ import ItemBudgetApprovalPanel from "./ItemBudgetApprovalPanel";
 interface HRDashboardProps {
   onViewRequisition?: (reqId: number) => void;
 }
-
-type LoadingState = "idle" | "loading" | "success" | "error";
 
 // ============================================
 // Metric Card Component
@@ -159,13 +156,7 @@ const ErrorView: React.FC<ErrorViewProps> = ({ message, onRetry }) => (
 const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
   const { user } = useAuth();
   const router = useRouter();
-
-  // State
-  const [loadingState, setLoadingState] = useState<LoadingState>("idle");
-  const [errorMessage, setErrorMessage] = useState<string>("");
-  const [metrics, setMetrics] = useState<HRMetrics | null>(null);
-  const [, setRecentActivity] = useState<RecentActivity[]>([]);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const queryClient = useQueryClient();
 
   // Tab state for approval views
   const [approvalTab, setApprovalTab] = useState<"budget" | "hr">("budget");
@@ -177,56 +168,27 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
     return normalizedRoles.includes("hr") || normalizedRoles.includes("admin");
   }, [user]);
 
-  // Fetch dashboard data
-  const fetchDashboardData = useCallback(
-    async (showLoader: boolean = true) => {
-      if (!hasHRAccess) return;
+  const dashboardQuery = useHrDashboardQuery(hasHRAccess);
+  const metrics: HRMetrics | null = dashboardQuery.data?.metrics ?? null;
+  const loadingState = dashboardQuery.isPending
+    ? ("loading" as const)
+    : dashboardQuery.isError
+      ? ("error" as const)
+      : ("success" as const);
+  const errorMessage =
+    dashboardQuery.error instanceof Error
+      ? dashboardQuery.error.message
+      : dashboardQuery.isError
+        ? "Unable to load dashboard data"
+        : "";
+  const isRefreshing = dashboardQuery.isFetching && !dashboardQuery.isPending;
 
-      const controller = new AbortController();
+  const invalidateDashboard = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: hrQueryKeys.dashboard });
+  }, [queryClient]);
 
-      try {
-        if (showLoader) {
-          setLoadingState("loading");
-        } else {
-          setIsRefreshing(true);
-        }
-        setErrorMessage("");
-
-        const data = await hrDashboardService.getDashboardData(
-          controller.signal,
-        );
-
-        setMetrics(data.metrics);
-        setRecentActivity(data.recent_activity);
-        setLoadingState("success");
-      } catch (error) {
-        if (controller.signal.aborted) return;
-
-        const errMsg =
-          error instanceof Error
-            ? error.message
-            : "Unable to load dashboard data";
-        setErrorMessage(errMsg);
-        setLoadingState("error");
-      } finally {
-        setIsRefreshing(false);
-      }
-
-      return () => controller.abort();
-    },
-    [hasHRAccess],
-  );
-
-  // Initial load
-  useEffect(() => {
-    if (hasHRAccess) {
-      fetchDashboardData();
-    }
-  }, [hasHRAccess, fetchDashboardData]);
-
-  // Handle refresh
   const handleRefresh = () => {
-    fetchDashboardData(false);
+    void dashboardQuery.refetch();
   };
 
   // Handle view requisition
@@ -263,7 +225,7 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
         </div>
         <ErrorView
           message={errorMessage}
-          onRetry={() => fetchDashboardData()}
+          onRetry={() => void dashboardQuery.refetch()}
         />
       </div>
     );
@@ -377,7 +339,7 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onViewRequisition }) => {
             {approvalTab === "hr" && (
               <HRPendingApprovals
                 onViewRequisition={handleViewRequisition}
-                onActionComplete={() => fetchDashboardData(false)}
+                onActionComplete={invalidateDashboard}
               />
             )}
           </div>

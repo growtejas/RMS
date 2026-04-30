@@ -358,6 +358,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   border-bottom: 1px solid var(--border-light);
   box-shadow: var(--shadow-sm);
   flex-shrink: 0;
@@ -370,6 +371,7 @@ body {
   display: flex;
   align-items: center;
   gap: 18px;
+  flex-shrink: 0;
 }
 
 .search-bar {
@@ -446,6 +448,7 @@ body {
   letter-spacing: -0.02em;
   color: var(--text-primary);
   margin-bottom: 2px;
+  line-height: 1.2;
 }
 
 .header-title p {
@@ -1358,12 +1361,39 @@ body {
 
 @media (max-width: 768px) {
   .admin-header {
-    padding: 0 24px;
-    height: 64px;
+    padding: 10px 16px;
+    height: auto;
+    min-height: 64px;
+    align-items: flex-start;
   }
 
   .admin-content-area {
     padding: 24px;
+  }
+
+  .header-title {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .header-title h1 {
+    font-size: 18px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 0;
+  }
+
+  .header-title p {
+    display: none;
+  }
+
+  .header-user {
+    gap: 10px;
+  }
+
+  .header-user .user-info {
+    display: none;
   }
 
   .master-data-manager,
@@ -1384,15 +1414,15 @@ body {
 
 @media (max-width: 480px) {
   .admin-header {
-    padding: 0 20px;
+    padding: 8px 12px;
   }
 
   .admin-content-area {
     padding: 20px 16px;
   }
 
-  .header-user .user-info {
-    display: none;
+  .header-title h1 {
+    font-size: 16px;
   }
 
   .log-stats {

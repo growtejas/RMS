@@ -1,1 +1,21 @@
-{}
+{
+  "app/ta/requisitions/[id]/page.tsx -> @/components/ta/RequisitionDetail": {
+    "id": "app/ta/requisitions/[id]/page.tsx -> @/components/ta/RequisitionDetail",
+    "files": [
+      "static/css/_app-pages-browser_src_components_ta_RequisitionDetail_tsx.css",
+      "static/chunks/_app-pages-browser_src_components_ta_RequisitionDetail_tsx.js"
+    ]
+  },
+  "components/hr/HrTickets.tsx -> ./hr-tickets/MatchmakingPanel": {
+    "id": "components/hr/HrTickets.tsx -> ./hr-tickets/MatchmakingPanel",
+    "files": [
+      "static/chunks/_app-pages-browser_src_components_hr_hr-tickets_MatchmakingPanel_tsx.js"
+    ]
+  },
+  "components/hr/TicketDetails.tsx -> @/components/candidates/BulkResumeUploadPanel": {
+    "id": "components/hr/TicketDetails.tsx -> @/components/candidates/BulkResumeUploadPanel",
+    "files": [
+      "static/chunks/_app-pages-browser_src_components_candidates_BulkResumeUploadPanel_tsx.js"
+    ]
+  }
+}

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { and, eq } from "drizzle-orm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,10 +9,16 @@ import { normalizeRoleList } from "@/lib/auth/normalize-roles";
 import { cookieOptions, csrfCookieOptions, newCsrfToken, getCookie, ACCESS_COOKIE, REFRESH_COOKIE, CSRF_COOKIE } from "@/lib/auth/cookies";
 import { createAccessToken, createRefreshToken } from "@/lib/auth/jwt";
 import { hashPassword } from "@/lib/auth/password";
-import { listRoleNamesForUser, findUserByUsername } from "@/lib/repositories/auth-user";
+import { tryResolveBearerUserAllowInactive } from "@/lib/auth/api-guard";
+import {
+  listRoleNamesForUser,
+  findUserByEmail,
+  findUserByUsername,
+} from "@/lib/repositories/auth-user";
 import { organizationMembers, users, userOauthIdentities } from "@/lib/db/schema";
 import { resolveDefaultOrganizationId } from "@/lib/tenant/resolve-org";
 import { getGoogleOAuthRedirectUri } from "@/lib/integrations/google-oauth-redirect";
+import { persistGoogleUserToken } from "@/lib/integrations/google-calendar-meet";
 
 type GoogleTokenResponse = {
   access_token: string;
@@ -43,6 +50,30 @@ function safeRedirectPath(raw: string | null): string {
   return "/";
 }
 
+function usernameBaseFromEmail(email: string): string {
+  const localPart = email.split("@")[0] ?? "";
+  const cleaned = localPart
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, "")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .slice(0, 50);
+  return cleaned || "user";
+}
+
+async function resolveUniqueUsername(base: string): Promise<string> {
+  const trimmed = base.slice(0, 50);
+  const first = await findUserByUsername(trimmed);
+  if (!first) return trimmed;
+  for (let i = 2; i <= 9999; i += 1) {
+    const suffix = String(i);
+    const candidate = `${trimmed.slice(0, 50 - suffix.length)}${suffix}`;
+    // eslint-disable-next-line no-await-in-loop -- small bounded loop
+    const exists = await findUserByUsername(candidate);
+    if (!exists) return candidate;
+  }
+  return `${Date.now()}`.slice(-10);
+}
+
 /** Google OAuth callback: exchange code → userinfo, domain-gate, issue RMS session cookies. */
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -55,6 +86,15 @@ export async function GET(req: Request) {
   const nextPath = safeRedirectPath(nextCookie);
 
   if (!code || !state || !stateCookie || stateCookie !== state || !verifier) {
+    // If the browser already has a valid RMS session (e.g. stale callback URL
+    // after repeated OAuth starts), avoid bouncing back to login.
+    const existing = await tryResolveBearerUserAllowInactive(req);
+    if (existing) {
+      if (!existing.isActive || existing.roles.length === 0) {
+        return NextResponse.redirect(`${url.origin}/access-request`);
+      }
+      return NextResponse.redirect(`${url.origin}${nextPath || "/"}`);
+    }
     return NextResponse.redirect(`${url.origin}/login?error=oauth_state`);
   }
 
@@ -104,13 +144,66 @@ export async function GET(req: Request) {
 
   // Find or create user.
   const db = getDb();
-  let user = await findUserByUsername(email);
+  let user: Awaited<ReturnType<typeof findUserByUsername>> | null = null;
+  const [oauthBySub] = await db
+    .select({
+      userId: users.userId,
+      username: users.username,
+      email: users.email,
+      passwordHash: users.passwordHash,
+      isActive: users.isActive,
+      createdAt: users.createdAt,
+      lastLogin: users.lastLogin,
+      employeeId: users.employeeId,
+    })
+    .from(userOauthIdentities)
+    .innerJoin(users, eq(users.userId, userOauthIdentities.userId))
+    .where(
+      and(
+        eq(userOauthIdentities.provider, "google"),
+        eq(userOauthIdentities.providerSub, sub),
+      ),
+    )
+    .limit(1);
+  user = oauthBySub ?? null;
+  if (!user) {
+    const [oauthByEmail] = await db
+      .select({
+        userId: users.userId,
+        username: users.username,
+        email: users.email,
+        passwordHash: users.passwordHash,
+        isActive: users.isActive,
+        createdAt: users.createdAt,
+        lastLogin: users.lastLogin,
+        employeeId: users.employeeId,
+      })
+      .from(userOauthIdentities)
+      .innerJoin(users, eq(users.userId, userOauthIdentities.userId))
+      .where(
+        and(
+          eq(userOauthIdentities.provider, "google"),
+          eq(userOauthIdentities.email, email),
+        ),
+      )
+      .limit(1);
+    user = oauthByEmail ?? null;
+  }
+  if (!user) {
+    user = await findUserByEmail(email);
+  }
+  if (!user) {
+    // Legacy compatibility: old oauth users were created with username=email.
+    user = await findUserByUsername(email);
+  }
   if (!user) {
     const password = crypto.randomUUID() + crypto.randomUUID();
+    const username = await resolveUniqueUsername(usernameBaseFromEmail(email));
     const [created] = await db
       .insert(users)
       .values({
-        username: email,
+        username,
+        email,
         passwordHash: hashPassword(password),
         isActive: false,
         createdAt: new Date(),
@@ -120,6 +213,7 @@ export async function GET(req: Request) {
       .returning({
         userId: users.userId,
         username: users.username,
+        email: users.email,
         passwordHash: users.passwordHash,
         isActive: users.isActive,
         createdAt: users.createdAt,
@@ -127,6 +221,13 @@ export async function GET(req: Request) {
         employeeId: users.employeeId,
       });
     user = created ?? null;
+  }
+  if (!user.email || user.email !== email) {
+    await db
+      .update(users)
+      .set({ email })
+      .where(eq(users.userId, user.userId));
+    user = { ...user, email };
   }
   if (!user) {
     return NextResponse.redirect(`${url.origin}/login?error=user_create`);
@@ -138,6 +239,20 @@ export async function GET(req: Request) {
     .insert(organizationMembers)
     .values({ userId: user.userId, organizationId: defaultOrgId, isPrimary: true })
     .onConflictDoNothing();
+
+  // Persist Google token for Calendar/Meet generation (user-level; org fallback handled separately).
+  await persistGoogleUserToken({
+    organizationId: defaultOrgId,
+    userId: user.userId,
+    token: {
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      scope: tokens.scope,
+      token_type: tokens.token_type,
+      expiry_date:
+        Date.now() + Math.max(0, (tokens.expires_in ?? 3600) - 30) * 1000,
+    },
+  });
 
   // Upsert oauth identity.
   await db

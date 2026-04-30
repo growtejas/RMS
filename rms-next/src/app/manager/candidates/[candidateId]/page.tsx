@@ -3,6 +3,7 @@
 import React, { Suspense } from "react";
 import { useParams } from "next/navigation";
 
+import { Loader } from "@/components/ui/Loader";
 import CandidateProfileRouteClient from "@/components/shared/CandidateProfileRouteClient";
 
 function ManagerCandidateProfileInner() {
@@ -28,8 +29,8 @@ export default function ManagerCandidateProfilePage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-600">
-          Loading…
+        <div className="flex w-full min-w-0 flex-col items-center justify-center px-4 py-16 sm:min-h-[min(400px,55dvh)]">
+          <Loader label="Loading candidate…" />
         </div>
       }
     >

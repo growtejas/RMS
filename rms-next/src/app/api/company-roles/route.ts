@@ -50,6 +50,8 @@ export async function POST(req: Request) {
     }
 
     const body = await createCompanyRole(
+      user.userId,
+      user.username,
       parsed.data.role_name,
       parsed.data.role_description,
     );

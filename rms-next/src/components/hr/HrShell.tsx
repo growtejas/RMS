@@ -8,7 +8,6 @@ import Header from "@/components/Header";
 import HrHeader from "@/components/hr/HRHeader";
 import HrSidebar from "@/components/hr/HRSidebar";
 import "@/styles/hr/hr-dashboard.css";
-import HRDashboardView from "@/components/hr/HRDashboardView";
 import PageShell from "@/components/common/PageShell";
 
 export default function HrShell({ children }: { children: React.ReactNode }) {
@@ -84,8 +83,6 @@ export default function HrShell({ children }: { children: React.ReactNode }) {
     return null;
   }
 
-  const isHome = pathname === "/hr" || pathname === "/hr/";
-
   return (
     <PageShell maxWidth="none">
       <div className={`admin-dashboard ${collapsed ? "sidebar-collapsed" : ""}`}>
@@ -108,17 +105,7 @@ export default function HrShell({ children }: { children: React.ReactNode }) {
             }}
           />
 
-          <section className="admin-content-area">
-            {isHome ? (
-              <HRDashboardView
-                onViewRequisition={(reqId: number) => {
-                  router.push(`/hr/requisitions/${reqId}`);
-                }}
-              />
-            ) : (
-              children
-            )}
-          </section>
+          <section className="admin-content-area">{children}</section>
         </div>
       </div>
     </PageShell>

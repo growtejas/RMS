@@ -9,6 +9,7 @@ const CANONICAL: Record<string, string> = {
   ta: "TA",
   manager: "Manager",
   employee: "Employee",
+  interviewer: "Interviewer",
   system: "SYSTEM",
 };
 

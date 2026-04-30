@@ -12,6 +12,14 @@ import {
 
 import { apiClient } from "@/lib/api/client";
 import { cachedApiGet } from "@/lib/api/cached-api-get";
+import { Badge, type BadgeVariant } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Input } from "@/components/ui/Input";
+import { Loader } from "@/components/ui/Loader";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Select } from "@/components/ui/Select";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/Table";
 
 interface AuditLog {
   id: number;
@@ -91,6 +99,7 @@ const AuditLogViewer: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [summary, setSummary] = useState<AuditSummaryResponse>({
     total_logs: 0,
     warnings_errors: 0,
@@ -174,6 +183,7 @@ const AuditLogViewer: React.FC = () => {
   const fetchLogs = async (opts?: { page?: number; append?: boolean }) => {
     setIsLoading(true);
     setError(null);
+    setSuccess(null);
     try {
       const pageToFetch = opts?.page ?? 1;
       const data = await cachedApiGet<
@@ -273,6 +283,7 @@ const AuditLogViewer: React.FC = () => {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(blobUrl);
+      setSuccess("Audit log export downloaded successfully.");
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to export audit logs";
@@ -305,59 +316,64 @@ const AuditLogViewer: React.FC = () => {
     return `${log.action} ${log.entityName}`.trim();
   };
 
-  const getActionIcon = (action: string) => {
-    switch (action) {
+  const auditActionBadge = (action: string): {
+    label: string;
+    variant: BadgeVariant;
+  } => {
+    switch ((action || "").toUpperCase()) {
       case "CREATE":
-        return "🆕";
+        return { label: "Created", variant: "success" };
       case "UPDATE":
-        return "✏️";
+        return { label: "Updated", variant: "warning" };
       case "DELETE":
-        return "🗑️";
+        return { label: "Deleted", variant: "danger" };
       case "LOGIN":
-        return "🔐";
+        return { label: "Login", variant: "neutral" };
       case "LOGOUT":
-        return "🚪";
+        return { label: "Logout", variant: "neutral" };
       default:
-        return "📝";
+        return { label: action?.trim() || "Unknown", variant: "neutral" };
     }
   };
 
   return (
     <div className="audit-log-viewer">
       <div className="viewer-header">
-        <div className="header-left">
-          <h2>Audit Log Review </h2>
-          <p className="subtitle">
-            Write operations only - creates, updates, deletes, approvals, and
-            workflow changes. View/list actions are excluded.
-          </p>
-        </div>
+        <PageHeader
+          title="Audit Log Review"
+          subtitle="Write operations only: creates, updates, deletes, approvals, and workflow changes."
+        />
         <div className="header-actions">
-          <button
-            className="action-button"
+          <Button
+            variant="secondary"
             onClick={handleRefresh}
             disabled={isLoading}
           >
             <RefreshCw size={16} />
             {isLoading ? "Refreshing..." : "Refresh"}
-          </button>
-          <button
-            className="action-button"
+          </Button>
+          <Button
+            variant="secondary"
             onClick={handleExport}
             disabled={isExporting}
           >
             <Download size={16} />
             {isExporting ? "Exporting..." : "Export Logs"}
-          </button>
+          </Button>
         </div>
       </div>
+      {success ? (
+        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+          {success}
+        </div>
+      ) : null}
 
       {/* Filters */}
       <div className="log-filters">
         <div className="filter-group">
           <div className="search-box">
             <Search size={18} />
-            <input
+            <Input
               type="text"
               placeholder="Search logs..."
               value={filters.search}
@@ -371,7 +387,7 @@ const AuditLogViewer: React.FC = () => {
         <div className="filter-grid">
           <div className="filter-item">
             <label>From Date</label>
-            <input
+            <Input
               type="date"
               value={filters.dateFrom}
               onChange={(e) =>
@@ -381,7 +397,7 @@ const AuditLogViewer: React.FC = () => {
           </div>
           <div className="filter-item">
             <label>To Date</label>
-            <input
+            <Input
               type="date"
               value={filters.dateTo}
               onChange={(e) =>
@@ -391,7 +407,7 @@ const AuditLogViewer: React.FC = () => {
           </div>
           <div className="filter-item">
             <label>User</label>
-            <select
+            <Select
               value={filters.user}
               onChange={(e) => setFilters({ ...filters, user: e.target.value })}
             >
@@ -401,11 +417,11 @@ const AuditLogViewer: React.FC = () => {
                   {option.label}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           <div className="filter-item">
             <label>Action</label>
-            <select
+            <Select
               value={filters.action}
               onChange={(e) =>
                 setFilters({ ...filters, action: e.target.value })
@@ -418,7 +434,7 @@ const AuditLogViewer: React.FC = () => {
                 </option>
               ),
               )}
-            </select>
+            </Select>
           </div>
         </div>
         <div
@@ -426,14 +442,14 @@ const AuditLogViewer: React.FC = () => {
           role="group"
           aria-label="Filter actions"
         >
-          <button className="apply-filters-button" onClick={applyFilters}>
+          <Button className="apply-filters-button" onClick={applyFilters}>
             <Filter size={16} />
             Apply Filters
-          </button>
-          <button className="apply-filters-button" onClick={resetFilters}>
+          </Button>
+          <Button variant="secondary" className="apply-filters-button" onClick={resetFilters}>
             <RefreshCw size={16} />
             Reset Filters
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -465,59 +481,69 @@ const AuditLogViewer: React.FC = () => {
 
       {/* Log Table */}
       <div className="log-table-container">
-        <table className="log-table">
-          <thead>
-            <tr>
-              <th>Timestamp</th>
-              <th>User</th>
-              <th>Action</th>
-              <th>Entity</th>
-              <th>Details</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table className="border-0 shadow-none">
+          <THead>
+            <TR>
+              <TH>Timestamp</TH>
+              <TH>User</TH>
+              <TH>Action</TH>
+              <TH>Entity</TH>
+              <TH>Details</TH>
+            </TR>
+          </THead>
+          <TBody>
             {isLoading && (
-              <tr>
-                <td colSpan={5} className="table-loading">
-                  Loading audit logs...
-                </td>
-              </tr>
+              <TR>
+                <TD colSpan={5}>
+                  <Loader label="Loading audit logs..." />
+                </TD>
+              </TR>
             )}
-            {logs.map((log) => (
-              <tr key={log.id} className="log-row">
-                <td className="timestamp">
+            {logs.map((log) => {
+              const actionDisplay = auditActionBadge(log.action);
+              return (
+              <TR key={log.id} className="log-row">
+                <TD className="timestamp">
                   <div className="date">
                     {log.dateLabel}
                   </div>
                   <div className="time">
                     {log.timeLabel}
                   </div>
-                </td>
-                <td className="user-cell">
+                </TD>
+                <TD className="user-cell">
                   <span className="user-badge">
                     {log.userFullName || log.user}
                     {log.userRoles?.length
                       ? ` (${log.userRoles.join(", ")})`
                       : ""}
                   </span>
-                </td>
-                <td className="action-cell">
-                  <span className="action-icon">
-                    {getActionIcon(log.action)}
-                  </span>
-                  {log.action}
-                </td>
-                <td className="entity-cell">
+                </TD>
+                <TD className="action-cell">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant={actionDisplay.variant}
+                      className="normal-case tracking-normal text-xs"
+                    >
+                      {actionDisplay.label}
+                    </Badge>
+                    <span className="font-mono text-xs text-[var(--color-text-muted)]">
+                      {log.action}
+                    </span>
+                  </div>
+                </TD>
+                <TD className="entity-cell">
                   <div className="entity-type">{log.entityType}</div>
                   <div className="entity-name">{log.entityName}</div>
-                </td>
-                <td className="details-cell">
+                </TD>
+                <TD className="details-cell">
                   <div className="change-summary">{formatDetails(log)}</div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </TD>
+              </TR>
+            );
+            })}
+          </TBody>
+        </Table>
         {!isLoading && hasMore && (
           <div
             style={{
@@ -529,13 +555,9 @@ const AuditLogViewer: React.FC = () => {
               gap: "8px",
             }}
           >
-            <button
-              type="button"
-              className="action-button"
-              onClick={handleLoadMore}
-            >
+            <Button type="button" variant="secondary" onClick={handleLoadMore}>
               Load more audit logs
-            </button>
+            </Button>
             <span
               style={{
                 fontSize: "12px",
@@ -561,7 +583,10 @@ const AuditLogViewer: React.FC = () => {
         {!isLoading && logs.length === 0 && (
           <div className="empty-logs">
             <AlertTriangle size={48} />
-            <p>{error ?? "No audit logs found matching your filters"}</p>
+            <EmptyState
+              title={error ? "Failed to load audit logs" : "No audit logs found"}
+              description={error ?? "No records match the selected filters."}
+            />
           </div>
         )}
       </div>

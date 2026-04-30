@@ -3,6 +3,7 @@ import { apiClient } from "@/lib/api/client";
 import { useAuth } from "@/contexts/useAuth";
 import { PlainStatusText } from "@/components/common/PlainStatusText";
 import { PlainPriorityText } from "@/components/common/PlainPriorityText";
+import { Table, TBody, THead, TH, TR } from "@/components/ui/Table";
 
 /* ======================================================
    Types
@@ -47,10 +48,14 @@ interface MyRequisitionsProps {
    Helpers
    ====================================================== */
 
-const getSlaClass = (days: number) => {
-  if (days <= 3) return "critical";
-  if (days <= 7) return "warning";
-  return "";
+const getSlaPillClasses = (days: number) => {
+  if (days <= 3) {
+    return "border-red-200 bg-red-50 text-red-800";
+  }
+  if (days <= 7) {
+    return "border-amber-200 bg-amber-50 text-amber-900";
+  }
+  return "border-border bg-bg text-text-muted";
 };
 
 const getSlaDaysRemaining = (dateValue?: string | null): number => {
@@ -141,63 +146,26 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
         <p className="subtitle">Requisitions assigned to you</p>
       </div>
 
-      {/* Table */}
+      {/* Same table shell as TA /ta/requisitions (Requisitions.tsx) */}
       <div className="ticket-table-container">
-        <table className="ticket-table">
-          <thead>
-            <tr>
-              <th>Req ID</th>
-              <th>Project</th>
-              <th>Role</th>
-              <th>Status</th>
-              <th>Priority</th>
-              <th>SLA</th>
-              <th>Action</th>
-            </tr>
-          </thead>
+        <Table className="[&_th]:py-3.5 [&_td]:py-4 [&_td]:align-middle [&_tbody_tr:hover]:bg-slate-50/70">
+          <THead>
+            <TR>
+              <TH className="w-[1%] whitespace-nowrap text-center">Req ID</TH>
+              <TH>Project</TH>
+              <TH>Role</TH>
+              <TH>Status</TH>
+              <TH>Priority</TH>
+              <TH>SLA</TH>
+              <TH className="text-right">Action</TH>
+            </TR>
+          </THead>
 
-          <tbody>
-            {visibleRequisitions.slice(0, visibleCount).map((req) => (
-              <tr key={req.id}>
-                <td>
-                  <strong>{req.id}</strong>
-                </td>
-
-                <td>{req.project}</td>
-
-                <td>{req.role}</td>
-
-                <td>
-                  <PlainStatusText status={req.status} />
-                </td>
-
-                <td>
-                  <PlainPriorityText priority={req.priority} />
-                </td>
-
-                <td>
-                  <span
-                    className={`sla-timer ${getSlaClass(req.slaDaysRemaining)}`}
-                  >
-                    {req.slaDaysRemaining} days left
-                  </span>
-                </td>
-
-                <td>
-                  <button
-                    className="action-button primary"
-                    onClick={() => onViewRequisition?.(req.id)}
-                  >
-                    Continue Work
-                  </button>
-                </td>
-              </tr>
-            ))}
-
+          <TBody>
             {isLoading && (
               <tr>
-                <td colSpan={7}>
-                  <div className="tickets-empty-state">
+                <td colSpan={7} className="px-4 py-8">
+                  <div className="tickets-empty-state text-sm text-text-muted">
                     Loading requisitions…
                   </div>
                 </td>
@@ -206,10 +174,9 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
 
             {!isLoading && error && (
               <tr>
-                <td colSpan={7}>
+                <td colSpan={7} className="px-4 py-8">
                   <div
-                    className="tickets-empty-state"
-                    style={{ color: "var(--error)" }}
+                    className="tickets-empty-state text-sm text-red-700"
                   >
                     {error}
                   </div>
@@ -217,17 +184,67 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
               </tr>
             )}
 
-            {!isLoading && !error && visibleRequisitions.length === 0 && (
-              <tr>
-                <td colSpan={7}>
-                  <div className="tickets-empty-state">
-                    No requisitions assigned to you
-                  </div>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+            {!isLoading &&
+              !error &&
+              visibleRequisitions.slice(0, visibleCount).map((req) => (
+                <tr key={req.id}>
+                  <td className="text-center whitespace-nowrap">
+                    <strong className="font-mono text-sm font-semibold tabular-nums text-text">
+                      {req.id}
+                    </strong>
+                  </td>
+
+                  <td className="max-w-[200px]">
+                    <span className="line-clamp-2 text-text">{req.project}</span>
+                  </td>
+
+                  <td className="max-w-[260px]">
+                    <span className="line-clamp-2 text-sm text-text">
+                      {req.role}
+                    </span>
+                  </td>
+
+                  <td>
+                    <PlainStatusText status={req.status} />
+                  </td>
+
+                  <td>
+                    <PlainPriorityText priority={req.priority} />
+                  </td>
+
+                  <td>
+                    <span
+                      className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${getSlaPillClasses(req.slaDaysRemaining)}`}
+                    >
+                      {req.slaDaysRemaining} days left
+                    </span>
+                  </td>
+
+                  <td className="text-right">
+                    <button
+                      type="button"
+                      className="action-button primary inline-flex items-center justify-center text-xs font-semibold"
+                      onClick={() => onViewRequisition?.(req.id)}
+                    >
+                      Continue Work
+                    </button>
+                  </td>
+                </tr>
+              ))}
+
+            {!isLoading &&
+              !error &&
+              visibleRequisitions.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-10">
+                    <div className="tickets-empty-state text-sm text-text-muted">
+                      No requisitions assigned to you
+                    </div>
+                  </td>
+                </tr>
+              )}
+          </TBody>
+        </Table>
       </div>
 
       {!isLoading && !error && visibleRequisitions.length > visibleCount && (

@@ -8,6 +8,7 @@ import {
   ClipboardList,
   FilePlus,
   CalendarClock,
+  Layers,
   Menu,
   X,
 } from "lucide-react";
@@ -44,6 +45,11 @@ const ManagerSidebar: React.FC<ManagerSidebarProps> = ({
       href: "/manager/raise-requisition",
       label: "Raise Requisition",
       icon: <FilePlus size={20} />,
+    },
+    {
+      href: "/manager/all-requisitions",
+      label: "All Requisitions",
+      icon: <Layers size={20} />,
     },
     {
       href: "/manager/my-requisitions",

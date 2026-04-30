@@ -2,6 +2,9 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
+import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { Table, TBody, THead, TD, TH, TR } from "@/components/ui/Table";
 
 type AccessRequestRow = {
@@ -27,12 +30,15 @@ export default function AccessRequestsManager() {
   const [rows, setRows] = useState<AccessRequestRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [status, setStatus] = useState<"pending" | "approved" | "rejected">("pending");
   const [roleCatalog, setRoleCatalog] = useState<string[]>([]);
   const [selected, setSelected] = useState<AccessRequestRow | null>(null);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [working, setWorking] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   const loadCatalog = useCallback(async () => {
     try {
@@ -71,6 +77,10 @@ export default function AccessRequestsManager() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [status, rows.length]);
+
   const closeModal = () => {
     setSelected(null);
     setSelectedRoles([]);
@@ -97,6 +107,7 @@ export default function AccessRequestsManager() {
       }
       closeModal();
       await load();
+      setSuccess("Access request approved successfully.");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Approve failed");
     } finally {
@@ -120,6 +131,7 @@ export default function AccessRequestsManager() {
       }
       closeModal();
       await load();
+      setSuccess("Access request rejected successfully.");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Reject failed");
     } finally {
@@ -135,44 +147,56 @@ export default function AccessRequestsManager() {
       })),
     [],
   );
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const pagedRows = useMemo(
+    () => rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [page, rows],
+  );
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-8">
-      <div className="mb-4">
-        <div className="text-xl font-bold text-[var(--color-text)]">Access requests</div>
-        <div className="text-sm text-[var(--color-text-muted)]">
-          Review requests from users without roles / inactive accounts.
-        </div>
-      </div>
+    <div className="flex min-h-full w-full self-start flex-col justify-start px-6 pt-0 pb-8">
+      <PageHeader
+        title="Access requests"
+        subtitle="Review requests from users without roles / inactive accounts."
+      />
 
       <div className="mb-4 flex flex-wrap gap-2">
         {statusTabs.map((t) => (
-          <button
+          <Button
             key={t.key}
             type="button"
             onClick={() => setStatus(t.key)}
-            className={`rounded-xl border px-3 py-1.5 text-sm font-semibold ${
+            size="sm"
+            variant="secondary"
+            className={`${
               status === t.key
-                ? "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-text)]"
-                : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]"
+                ? "bg-[var(--color-surface-2)] text-[var(--color-text)]"
+                : "text-[var(--color-text-muted)]"
             }`}
           >
             {t.label}
-          </button>
+          </Button>
         ))}
-        <button
+        <Button
           type="button"
           onClick={() => void load()}
-          className="ml-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+          size="sm"
+          variant="secondary"
+          className="ml-auto"
           disabled={loading}
         >
           {loading ? "Refreshing…" : "Refresh"}
-        </button>
+        </Button>
       </div>
 
       {error ? (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">
           {error}
+        </div>
+      ) : null}
+      {success ? (
+        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+          {success}
         </div>
       ) : null}
 
@@ -191,13 +215,11 @@ export default function AccessRequestsManager() {
             {rows.length === 0 ? (
               <TR>
                 <td colSpan={5} className="px-4 py-3">
-                  <div className="py-6 text-sm text-[var(--color-text-muted)]">
-                    No {status} requests.
-                  </div>
+                  <EmptyState title={`No ${status} requests`} />
                 </td>
               </TR>
             ) : (
-              rows.map((r) => (
+              pagedRows.map((r) => (
                 <TR key={r.id}>
                   <TD>
                     <div className="font-semibold text-[var(--color-text)]">{r.username}</div>
@@ -218,9 +240,9 @@ export default function AccessRequestsManager() {
                   </TD>
                   <TD>
                     {r.status === "pending" ? (
-                      <button
+                      <Button
                         type="button"
-                        className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-sm font-semibold text-white hover:opacity-95"
+                        size="sm"
                         onClick={() => {
                           setSelected(r);
                           setSelectedRoles([]);
@@ -228,7 +250,7 @@ export default function AccessRequestsManager() {
                         }}
                       >
                         Review
-                      </button>
+                      </Button>
                     ) : (
                       <span className="text-sm text-[var(--color-text-muted)]">—</span>
                     )}
@@ -239,6 +261,29 @@ export default function AccessRequestsManager() {
           </TBody>
         </Table>
       </div>
+      {rows.length > PAGE_SIZE ? (
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+            disabled={page === 1}
+          >
+            Previous
+          </Button>
+          <span className="text-sm text-[var(--color-text-muted)]">
+            Page {page} of {totalPages}
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={page === totalPages}
+          >
+            Next
+          </Button>
+        </div>
+      ) : null}
 
       {selected ? (
         <div
@@ -264,13 +309,15 @@ export default function AccessRequestsManager() {
               {(roleCatalog.length ? roleCatalog : ["Employee", "TA", "HR", "Manager", "Admin", "Owner"]).map((role) => {
                 const on = selectedRoles.some((r) => r.toLowerCase() === role.toLowerCase());
                 return (
-                  <button
+                  <Button
                     key={role}
                     type="button"
-                    className={`rounded-xl border px-3 py-1.5 text-sm font-semibold ${
+                    size="sm"
+                    variant="secondary"
+                    className={`${
                       on
-                        ? "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-text)]"
-                        : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]"
+                        ? "bg-[var(--color-surface-2)] text-[var(--color-text)]"
+                        : "text-[var(--color-text-muted)]"
                     }`}
                     onClick={() =>
                       setSelectedRoles((prev) =>
@@ -281,7 +328,7 @@ export default function AccessRequestsManager() {
                     }
                   >
                     {role}
-                  </button>
+                  </Button>
                 );
               })}
             </div>
@@ -298,30 +345,32 @@ export default function AccessRequestsManager() {
             />
 
             <div className="flex gap-2">
-              <button
+              <Button
                 type="button"
-                className="flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-sm font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-60"
+                className="flex-1"
+                variant="secondary"
                 onClick={closeModal}
                 disabled={working}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:opacity-95 disabled:opacity-60"
+                className="flex-1"
+                variant="danger"
                 onClick={() => void reject()}
                 disabled={working}
               >
                 Reject
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="flex-1 rounded-xl bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-white hover:opacity-95 disabled:opacity-60"
+                className="flex-1"
                 onClick={() => void approve()}
                 disabled={working}
               >
                 Approve
-              </button>
+              </Button>
             </div>
           </div>
         </div>

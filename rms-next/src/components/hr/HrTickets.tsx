@@ -1,21 +1,25 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, {
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  memo,
+} from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import {
   Users,
   Target,
   Clock,
   CheckCircle,
   AlertCircle,
-  UserPlus,
-  Briefcase,
   Filter,
   Search,
   BarChart3,
 } from "lucide-react";
 import { apiClient } from "@/lib/api/client";
-import { cachedApiGet } from "@/lib/api/cached-api-get";
 import { getUsersListCached } from "@/lib/api/users-list-cache";
 import { useAuth } from "@/contexts/useAuth";
 import {
@@ -32,6 +36,26 @@ import {
   REQUISITION_STATUSES,
 } from "@/types/workflow";
 import { PlainPriorityText } from "@/components/common/PlainPriorityText";
+import { HrToolbarCard } from "@/components/hr/HrToolbarCard";
+import { HrPaginationBar } from "@/components/hr/HrPaginationBar";
+import { HrEmptyState } from "@/components/hr/HrEmptyState";
+import { useHrRequisitionsListQuery } from "@/hooks/hr/use-hr-queries";
+import type { BackendRequisition } from "@/types/hr-requisition-backend";
+import { toast } from "sonner";
+
+const MatchmakingPanel = dynamic(
+  () => import("./hr-tickets/MatchmakingPanel"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="rounded-2xl border border-border bg-surface p-8 text-sm text-text-muted">
+        Loading matchmaking…
+      </div>
+    ),
+  },
+);
+
+const REQUISITION_LIST_PAGE_SIZE = 20;
 /* ======================================================
    Types
    ====================================================== */
@@ -84,42 +108,6 @@ interface EmployeeMatch {
   availability: string;
   matchScore?: number;
   department: string;
-}
-
-interface BackendRequisitionItem {
-  item_id: number;
-  req_id: number;
-  role_position: string;
-  skill_level?: string | null;
-  experience_years?: number | null;
-  education_requirement?: string | null;
-  job_description: string;
-  requirements?: string | null;
-  item_status: string;
-  assigned_ta?: number | null;
-}
-
-interface BackendRequisition {
-  req_id: number;
-  project_name?: string | null;
-  client_name?: string | null;
-  office_location?: string | null;
-  work_mode?: string | null;
-  overall_status: string;
-  required_by_date?: string | null;
-  priority?: string | null;
-  created_at?: string | null;
-  raised_by?: number | null;
-  assigned_ta?: number | null;
-  assigned_at?: string | null;
-  budget_amount?: number | null;
-  budget_approved_by?: number | null;
-  approved_by?: number | null;
-  approval_history?: string | null;
-  rejection_reason?: string | null;
-  total_estimated_budget?: number | null;
-  total_approved_budget?: number | null;
-  items: BackendRequisitionItem[];
 }
 
 interface BackendUser {
@@ -260,28 +248,6 @@ const getStatusClass = (status: string): string => {
   }
 };
 
-/**
- * Map an item status to a ticket-status CSS class.
- * Uses canonical item status values only.
- */
-const getItemStatusClass = (status: string): string => {
-  switch (status) {
-    case "Pending":
-      return "ticket-status open";
-    case "Sourcing":
-    case "Shortlisted":
-    case "Interviewing":
-    case "Offered":
-      return "ticket-status in-progress";
-    case "Fulfilled":
-      return "ticket-status fulfilled";
-    case "Cancelled":
-      return "ticket-status closed";
-    default:
-      return "";
-  }
-};
-
 const calculateCompletion = (items: RequisitionItem[]) => {
   const total = items.length;
   const fulfilled = items.filter(
@@ -301,9 +267,11 @@ const calculateCompletion = (items: RequisitionItem[]) => {
    Component: HrKpiCards
    ====================================================== */
 
-const HrKpiCards: React.FC<{ requisitions: Requisition[] }> = ({
+const HrKpiCards = memo(function HrKpiCards({
   requisitions,
-}) => {
+}: {
+  requisitions: Requisition[];
+}) {
   const stats = {
     totalOpen: requisitions.filter((r) => {
       const s = normalizeStatus(r.overallStatus);
@@ -380,384 +348,7 @@ const HrKpiCards: React.FC<{ requisitions: Requisition[] }> = ({
       </div> */}
     </div>
   );
-};
-
-/* ======================================================
-   Component: MatchmakingPanel
-   ====================================================== */
-
-interface MatchmakingPanelProps {
-  requisition: Requisition;
-  employees: EmployeeMatch[];
-  onAssignEmployee: (itemId: string, empId: string) => void;
-  requesterDisplayName?: string;
-}
-
-const MatchmakingPanel: React.FC<MatchmakingPanelProps> = ({
-  requisition,
-  employees,
-  onAssignEmployee,
-  requesterDisplayName,
-}) => {
-  const [selectedItem, setSelectedItem] = useState<string | null>(null);
-
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr",
-        gap: "24px",
-        height: "100%",
-      }}
-    >
-      {/* Left Panel - Demand */}
-      <div
-        style={{
-          backgroundColor: "var(--bg-primary)",
-          borderRadius: "16px",
-          padding: "24px",
-          border: "1px solid var(--border-subtle)",
-        }}
-      >
-        <div style={{ marginBottom: "24px" }}>
-          <h3
-            style={{ fontSize: "16px", fontWeight: 600, marginBottom: "8px" }}
-          >
-            <Briefcase
-              size={16}
-              style={{ marginRight: "8px", verticalAlign: "middle" }}
-            />
-            Demand Details
-          </h3>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "12px",
-              marginBottom: "16px",
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: "12px",
-                  color: "var(--text-tertiary)",
-                  marginBottom: "4px",
-                }}
-              >
-                Requisition ID
-              </div>
-              <div style={{ fontWeight: 600 }}>{requisition.id}</div>
-            </div>
-            <div>
-              <div
-                style={{
-                  fontSize: "12px",
-                  color: "var(--text-tertiary)",
-                  marginBottom: "4px",
-                }}
-              >
-                Project
-              </div>
-              <div style={{ fontWeight: 600 }}>{requisition.project}</div>
-            </div>
-            <div>
-              <div
-                style={{
-                  fontSize: "12px",
-                  color: "var(--text-tertiary)",
-                  marginBottom: "4px",
-                }}
-              >
-                Client
-              </div>
-              <div>{requisition.client}</div>
-            </div>
-            <div>
-              <div
-                style={{
-                  fontSize: "12px",
-                  color: "var(--text-tertiary)",
-                  marginBottom: "4px",
-                }}
-              >
-                Raised By
-              </div>
-              <div>{requesterDisplayName ?? requisition.raisedBy}</div>
-            </div>
-          </div>
-        </div>
-
-        <h4
-          style={{
-            fontSize: "14px",
-            fontWeight: 600,
-            marginBottom: "16px",
-            color: "var(--text-primary)",
-          }}
-        >
-          Requisition Items ({requisition.items.length} positions)
-        </h4>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          {requisition.items.map((item) => (
-            <div
-              key={item.id}
-              style={{
-                padding: "16px",
-                borderRadius: "12px",
-                border:
-                  selectedItem === item.id
-                    ? "2px solid var(--primary-accent)"
-                    : "1px solid var(--border-subtle)",
-                backgroundColor:
-                  selectedItem === item.id
-                    ? "rgba(59, 130, 246, 0.05)"
-                    : "var(--bg-secondary)",
-                cursor: "pointer",
-                transition: "all 0.2s ease",
-              }}
-              onClick={() => setSelectedItem(item.id)}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: "8px",
-                }}
-              >
-                <div>
-                  <span className={getItemStatusClass(item.itemStatus)}>
-                    {item.itemStatus}
-                  </span>
-                  <strong style={{ marginLeft: "8px", fontSize: "14px" }}>
-                    {item.skill} ({item.level})
-                  </strong>
-                </div>
-                {item.assignedEmployeeName && (
-                  <div style={{ fontSize: "12px", color: "var(--success)" }}>
-                    ✓ Assigned: {item.assignedEmployeeName}
-                  </div>
-                )}
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
-                  gap: "8px",
-                  fontSize: "12px",
-                  color: "var(--text-secondary)",
-                }}
-              >
-                <div>Exp: {item.experience ?? "—"} years</div>
-                <div>Education: {item.education}</div>
-                <div>Status: {item.itemStatus}</div>
-              </div>
-
-              {item.itemStatus === "Pending" && selectedItem === item.id && (
-                <div style={{ marginTop: "12px" }}>
-                  <button
-                    className="action-button primary"
-                    style={{ fontSize: "12px", padding: "8px 16px" }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      // In real app, this would open a modal with employee selection
-                      const matchedEmployee = employees.find(
-                        (emp) =>
-                          emp.skill.includes(item.skill.split(" ")[0] ?? "") &&
-                          emp.level === item.level,
-                      );
-                      if (matchedEmployee) {
-                        onAssignEmployee?.(item.id, matchedEmployee.id);
-                      }
-                    }}
-                  >
-                    <UserPlus size={12} />
-                    Map Resource
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Right Panel - Employee Suggestions */}
-      <div
-        style={{
-          backgroundColor: "var(--bg-primary)",
-          borderRadius: "16px",
-          padding: "24px",
-          border: "1px solid var(--border-subtle)",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "24px",
-          }}
-        >
-          <h3 style={{ fontSize: "16px", fontWeight: 600 }}>
-            <Users
-              size={16}
-              style={{ marginRight: "8px", verticalAlign: "middle" }}
-            />
-            Suggested Employees
-          </h3>
-          <span style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-            {employees.length} matches found
-          </span>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          {employees.map((employee) => (
-            <div
-              key={employee.id}
-              style={{
-                padding: "16px",
-                borderRadius: "12px",
-                border: "1px solid var(--border-subtle)",
-                backgroundColor: "var(--bg-secondary)",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: "12px",
-                }}
-              >
-                <div>
-                  <strong style={{ fontSize: "14px" }}>{employee.name}</strong>
-                  <div
-                    style={{
-                      fontSize: "12px",
-                      color: "var(--text-secondary)",
-                      marginTop: "2px",
-                    }}
-                  >
-                    {employee.skill} • {employee.level} • {employee.department}
-                  </div>
-                </div>
-                <div
-                  style={{
-                    padding: "4px 8px",
-                    borderRadius: "20px",
-                    fontSize: "11px",
-                    fontWeight: 600,
-                    background:
-                      employee.availability === "Available"
-                        ? "rgba(16, 185, 129, 0.1)"
-                        : employee.availability === "Unknown"
-                          ? "rgba(148, 163, 184, 0.2)"
-                          : "rgba(245, 158, 11, 0.1)",
-                    color:
-                      employee.availability === "Available"
-                        ? "var(--success)"
-                        : employee.availability === "Unknown"
-                          ? "var(--text-tertiary)"
-                          : "var(--warning)",
-                  }}
-                >
-                  {employee.availability}
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
-                  gap: "8px",
-                  marginBottom: "12px",
-                  fontSize: "12px",
-                  color: "var(--text-secondary)",
-                }}
-              >
-                <div>📍 {employee.location}</div>
-                <div>📊 {employee.experience ?? "—"} years exp</div>
-                <div style={{ textAlign: "right" }}>
-                  <strong style={{ color: "var(--primary-accent)" }}>
-                    {employee.matchScore ?? "—"}% match
-                  </strong>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <div
-                  style={{ fontSize: "11px", color: "var(--text-tertiary)" }}
-                >
-                  ID: {employee.id}
-                </div>
-                <button
-                  className="action-button primary"
-                  style={{ fontSize: "11px", padding: "6px 12px" }}
-                  onClick={() => {
-                    if (selectedItem) {
-                      onAssignEmployee(selectedItem, employee.id);
-                    }
-                  }}
-                  disabled={!selectedItem}
-                >
-                  Assign to Selected Position
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {selectedItem && (
-          <div
-            style={{
-              marginTop: "24px",
-              padding: "16px",
-              backgroundColor: "rgba(59, 130, 246, 0.05)",
-              borderRadius: "12px",
-              border: "1px solid rgba(59, 130, 246, 0.1)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                marginBottom: "8px",
-              }}
-            >
-              <AlertCircle size={14} color="var(--primary-accent)" />
-              <strong style={{ fontSize: "12px" }}>Assignment Logic</strong>
-            </div>
-            <p
-              style={{
-                fontSize: "11px",
-                color: "var(--text-secondary)",
-                lineHeight: 1.4,
-              }}
-            >
-              When you assign an employee to a requisition item, the{" "}
-              <code>assigned_emp_id</code> field in the{" "}
-              <code>requisition_items</code> table will be updated, and the item
-              status will change to &quot;Fulfilled&quot;. The requisition will
-              remain
-              open until all items are fulfilled or cancelled.
-            </p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
+});
 /* ======================================================
    Main Component
    ====================================================== */
@@ -785,7 +376,6 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
   const [assignmentLoading, setAssignmentLoading] = useState<
     Record<number, boolean>
   >({});
-  const [assignmentToast, setAssignmentToast] = useState<string | null>(null);
   const [approvalLoading, setApprovalLoading] = useState<
     Record<number, boolean>
   >({});
@@ -813,11 +403,18 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
   const [expandedRejections, setExpandedRejections] = useState<
     Record<number, boolean>
   >({});
-  const [visibleCount, setVisibleCount] = useState(20);
+  const [listPage, setListPage] = useState(1);
 
-  // Reset visible slice when filters/search change
+  const requisitionsQuery = useHrRequisitionsListQuery(true);
+  const requisitionsBackendError =
+    requisitionsQuery.error instanceof Error
+      ? requisitionsQuery.error.message
+      : requisitionsQuery.error
+        ? "Failed to load requisitions"
+        : null;
+
   useEffect(() => {
-    setVisibleCount(20);
+    setListPage(1);
   }, [
     activeFilter,
     searchQuery,
@@ -899,27 +496,27 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
   };
 
   useEffect(() => {
-    let isMounted = true;
+    const data = requisitionsQuery.data;
+    const loading = requisitionsQuery.isPending;
+    const errMsg = requisitionsBackendError;
 
-    const fetchRequisitions = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        const data = await cachedApiGet<BackendRequisition[]>("/requisitions", {
-          cacheTtlMs: 20_000,
-        });
-        if (isMounted) {
-          setRequisitions(mapRequisitions(data ?? []));
-        }
-      } catch (err) {
-        if (!isMounted) return;
-        const message =
-          err instanceof Error ? err.message : "Failed to load requisitions";
-        setError(message);
-      } finally {
-        if (isMounted) setIsLoading(false);
-      }
-    };
+    if (loading) {
+      setIsLoading(true);
+      setError(null);
+      return;
+    }
+
+    setIsLoading(false);
+    setError(errMsg);
+    setRequisitions(data ? mapRequisitions(data) : []);
+  }, [
+    requisitionsQuery.data,
+    requisitionsQuery.isPending,
+    requisitionsBackendError,
+  ]);
+
+  useEffect(() => {
+    let isMounted = true;
 
     const fetchEmployees = async () => {
       try {
@@ -957,7 +554,6 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
       }
     };
 
-    fetchRequisitions();
     fetchEmployees();
     fetchTaUsers();
 
@@ -1078,6 +674,14 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
         req.client.toLowerCase().includes(searchQuery.toLowerCase()),
     );
 
+  const pagedListRequisitions = useMemo(() => {
+    const start = (listPage - 1) * REQUISITION_LIST_PAGE_SIZE;
+    return filteredRequisitions.slice(
+      start,
+      start + REQUISITION_LIST_PAGE_SIZE,
+    );
+  }, [filteredRequisitions, listPage]);
+
   const handleAssignEmployee = (itemId: string, empId: string) => {
     const employee = employees.find((emp) => emp.id === empId);
     if (!employee || !selectedRequisition) return;
@@ -1194,12 +798,11 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
     const selectedId = raw ? Number(raw) : NaN;
 
     if (!Number.isFinite(selectedId)) {
-      setAssignmentToast("Select a valid TA before confirming assignment.");
+      toast.warning("Select a valid TA before confirming assignment.");
       return;
     }
 
     setAssignmentLoading((prev) => ({ ...prev, [req.reqId]: true }));
-    setAssignmentToast(null);
 
     try {
       await apiClient.patch(`/requisitions/${req.reqId}/assign-ta`, {
@@ -1225,14 +828,13 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
           };
         }),
       });
-      setAssignmentToast(`Assigned ${label} to ${req.id}.`);
+      toast.success(`Assigned ${label} to ${req.id}.`);
       setAssignmentDrafts((prev) => ({ ...prev, [req.reqId]: "" }));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Assignment failed";
-      setAssignmentToast(message);
+      toast.error(message);
     } finally {
       setAssignmentLoading((prev) => ({ ...prev, [req.reqId]: false }));
-      setTimeout(() => setAssignmentToast(null), 3000);
     }
   };
 
@@ -1327,27 +929,6 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
       {/* KPI Cards */}
       <HrKpiCards requisitions={requisitions} />
 
-      {assignmentToast && (
-        <div
-          style={{
-            marginBottom: "16px",
-            padding: "10px 14px",
-            borderRadius: "10px",
-            backgroundColor: "rgba(16, 185, 129, 0.12)",
-            border: "1px solid rgba(16, 185, 129, 0.3)",
-            color: "var(--success)",
-            fontSize: "13px",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            animation: "fadeIn 0.2s ease",
-          }}
-        >
-          <CheckCircle size={14} />
-          {assignmentToast}
-        </div>
-      )}
-
       {/* Filter Chips */}
       <div className="filter-chips">
         <button
@@ -1393,96 +974,98 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
       </div>
 
       {/* Search and Filters */}
-      <div className="log-filters">
-        <div className="filter-group">
-          <div className="search-box">
-            <Search size={14} />
-            <input
-              type="text"
-              placeholder="Search requisitions by ID, project, or client..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+      <HrToolbarCard className="log-filters-wrap">
+        <div className="log-filters">
+          <div className="filter-group">
+            <div className="search-box">
+              <Search size={14} />
+              <input
+                type="text"
+                placeholder="Search requisitions by ID, project, or client..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
           </div>
-        </div>
 
-        <div className="filter-grid">
-          <div className="filter-item">
-            <label>Priority</label>
-            <select
-              value={priorityFilter}
-              onChange={(e) => setPriorityFilter(e.target.value)}
-            >
-              <option>All Priorities</option>
-              <option>High</option>
-              <option>Medium</option>
-              <option>Low</option>
-            </select>
-          </div>
-          <div className="filter-item">
-            <label>Status</label>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option>All Status</option>
-              {REQUISITION_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {getStatusLabel(s)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="filter-item">
-            <label>Location</label>
-            <select
-              value={locationFilter}
-              onChange={(e) => setLocationFilter(e.target.value)}
-            >
-              <option>All Locations</option>
-              {Array.from(
-                new Set(
-                  requisitions
-                    .map((req) => req.location)
-                    .filter((loc): loc is string =>
-                      Boolean(loc && loc !== "—"),
-                    ),
-                ),
-              )
-                .sort((a, b) => a.localeCompare(b))
-                .map((loc) => (
-                  <option key={loc} value={loc}>
-                    {loc}
+          <div className="filter-grid">
+            <div className="filter-item">
+              <label>Priority</label>
+              <select
+                value={priorityFilter}
+                onChange={(e) => setPriorityFilter(e.target.value)}
+              >
+                <option>All Priorities</option>
+                <option>High</option>
+                <option>Medium</option>
+                <option>Low</option>
+              </select>
+            </div>
+            <div className="filter-item">
+              <label>Status</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                <option>All Status</option>
+                {REQUISITION_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {getStatusLabel(s)}
                   </option>
                 ))}
-            </select>
-          </div>
-          <div className="filter-item">
-            <label>Work Mode</label>
-            <select
-              value={modeFilter}
-              onChange={(e) => setModeFilter(e.target.value)}
-            >
-              <option>All Modes</option>
-              {Array.from(
-                new Set(
-                  requisitions
-                    .map((req) => req.workMode)
-                    .filter((mode): mode is string =>
-                      Boolean(mode && mode !== "—"),
-                    ),
-                ),
-              )
-                .sort((a, b) => a.localeCompare(b))
-                .map((mode) => (
-                  <option key={mode} value={mode}>
-                    {mode}
-                  </option>
-                ))}
-            </select>
+              </select>
+            </div>
+            <div className="filter-item">
+              <label>Location</label>
+              <select
+                value={locationFilter}
+                onChange={(e) => setLocationFilter(e.target.value)}
+              >
+                <option>All Locations</option>
+                {Array.from(
+                  new Set(
+                    requisitions
+                      .map((req) => req.location)
+                      .filter((loc): loc is string =>
+                        Boolean(loc && loc !== "—"),
+                      ),
+                  ),
+                )
+                  .sort((a, b) => a.localeCompare(b))
+                  .map((loc) => (
+                    <option key={loc} value={loc}>
+                      {loc}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="filter-item">
+              <label>Work Mode</label>
+              <select
+                value={modeFilter}
+                onChange={(e) => setModeFilter(e.target.value)}
+              >
+                <option>All Modes</option>
+                {Array.from(
+                  new Set(
+                    requisitions
+                      .map((req) => req.workMode)
+                      .filter((mode): mode is string =>
+                        Boolean(mode && mode !== "—"),
+                      ),
+                  ),
+                )
+                  .sort((a, b) => a.localeCompare(b))
+                  .map((mode) => (
+                    <option key={mode} value={mode}>
+                      {mode}
+                    </option>
+                  ))}
+              </select>
+            </div>
           </div>
         </div>
-      </div>
+      </HrToolbarCard>
 
       {activeFilter === "approvals" && (
         <div className="approval-section">
@@ -1798,9 +1381,7 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
 
                   {!isLoading &&
                     !error &&
-                    filteredRequisitions
-                      .slice(0, visibleCount)
-                      .map((req) => {
+                    pagedListRequisitions.map((req) => {
                       const agingDays = getAgingDays(req.dateCreated);
                       const completion = calculateCompletion(req.items);
                       const isAssignedToMe = req.assignedTA === currentUser;
@@ -1823,8 +1404,11 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                             cursor: "pointer",
                           }}
                           onClick={() => {
-                            setSelectedRequisition(req);
+                            // Embedded mode: open right-side panel in-place.
+                            // Page mode: navigate directly to detail route without
+                            // briefly rendering the panel (prevents visual flicker).
                             if (onViewRequisition) {
+                              setSelectedRequisition(req);
                               handleViewRequisition(req.id);
                             } else {
                               router.push(`/hr/requisitions/${req.reqId}`);
@@ -2088,15 +1672,12 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
                     !error &&
                     filteredRequisitions.length === 0 && (
                       <tr>
-                        <td colSpan={8}>
-                          <div className="tickets-empty-state">
-                            <BarChart3
-                              size={48}
-                              style={{ marginBottom: "16px", opacity: 0.5 }}
-                            />
-                            <h3>No requisitions found</h3>
-                            <p>Try adjusting your filters or search criteria</p>
-                          </div>
+                        <td colSpan={8} className="p-6">
+                          <HrEmptyState
+                            icon={BarChart3}
+                            title="No requisitions found"
+                            description="Try adjusting your filters or search criteria."
+                          />
                         </td>
                       </tr>
                     )}
@@ -2104,30 +1685,17 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
               </table>
             </div>
 
-            {/* Load more + Quick Stats */}
-            {!isLoading &&
-              !error &&
-              filteredRequisitions.length > visibleCount && (
-                <div
-                  style={{
-                    marginTop: "16px",
-                    display: "flex",
-                    justifyContent: "center",
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="action-button"
-                    onClick={() =>
-                      setVisibleCount((prev) => prev + 20)
-                    }
-                  >
-                    Load more requisitions
-                  </button>
-                </div>
-              )}
+            {!isLoading && !error && filteredRequisitions.length > 0 && (
+              <div className="mt-4">
+                <HrPaginationBar
+                  page={listPage}
+                  pageSize={REQUISITION_LIST_PAGE_SIZE}
+                  total={filteredRequisitions.length}
+                  onPageChange={setListPage}
+                />
+              </div>
+            )}
 
-            {/* Quick Stats */}
             <div
               style={{
                 marginTop: "20px",
@@ -2140,7 +1708,8 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <div>
                   <strong>
-                    Showing {filteredRequisitions.length} requisitions
+                    {filteredRequisitions.length} match
+                    {filteredRequisitions.length !== 1 ? "es" : ""}
                     {filteredRequisitions.length !== requisitions.length &&
                       ` (filtered from ${requisitions.length} total)`}
                   </strong>

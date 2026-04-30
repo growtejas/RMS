@@ -15,7 +15,8 @@ export function Button({
   size?: Size;
 }) {
   const base =
-    "inline-flex items-center justify-center rounded-xl font-semibold transition outline-none " +
+    "inline-flex items-center justify-center rounded-xl font-semibold outline-none " +
+    "transition-colors duration-200 ease-out " +
     "focus-visible:ring-2 focus-visible:ring-accent/25 focus-visible:ring-offset-2 focus-visible:ring-offset-bg " +
     "disabled:cursor-not-allowed disabled:opacity-60";
 
@@ -27,11 +28,11 @@ export function Button({
 
   const variants: Record<Variant, string> = {
     primary:
-      "bg-gradient-to-b from-neutral-800 to-black text-white shadow-md hover:-translate-y-px hover:shadow-lg",
+      "bg-gradient-to-b from-neutral-800 to-black text-white shadow-md hover:from-neutral-900 hover:to-black hover:shadow-lg",
     secondary:
-      "border border-border bg-surface text-text shadow-sm hover:bg-surface-2",
+      "border border-border bg-surface text-text shadow-sm hover:bg-slate-100/90 hover:border-slate-300/90",
     danger:
-      "bg-danger text-white shadow-md hover:-translate-y-px hover:shadow-lg",
+      "bg-danger text-white shadow-md hover:bg-red-700",
   };
 
   return (

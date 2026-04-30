@@ -69,7 +69,20 @@ export const interviewPatchBody = z.object({
   reschedule_reason: z.string().max(2000).optional(),
 });
 
+export const interviewGenerateMeetLinkBody = z.object({
+  scheduled_at: isoDateTime,
+  end_time: isoDateTime,
+  timezone: z.string().min(1).max(50),
+  round_name: z.string().min(1).max(150).optional(),
+  round_type: z.string().min(1).max(50).optional(),
+  candidate_name: z.string().min(1).max(200).optional(),
+  interviewer_names: z.array(z.string().min(1).max(200)).optional(),
+});
+
 export type InterviewCreateV2 = z.infer<typeof interviewCreateBodyV2>;
 export type InterviewCreateLegacy = z.infer<typeof interviewCreateBodyLegacy>;
 export type InterviewCreateInput = z.infer<typeof interviewCreateBody>;
 export type InterviewPatchInput = z.infer<typeof interviewPatchBody>;
+export type InterviewGenerateMeetLinkInput = z.infer<
+  typeof interviewGenerateMeetLinkBody
+>;

@@ -12,7 +12,7 @@ import { PageShell } from "@/components/common/PageShell";
 export default function ManagerMetricsHome() {
   const router = useRouter();
   const [metrics, setMetrics] = useState<ManagerDashboardMetrics | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -110,12 +110,12 @@ export default function ManagerMetricsHome() {
             </div>
 
             {metrics &&
-            metrics.sla_risks.length === 0 &&
-            metrics.pending_positions_alerts.length === 0 ? (
+            (metrics.sla_risks?.length ?? 0) === 0 &&
+            (metrics.pending_positions_alerts?.length ?? 0) === 0 ? (
               <div className="empty-logs">No alerts at this time.</div>
             ) : (
               <div className="alert-row">
-                {metrics?.sla_risks.map((risk) => (
+                {(metrics?.sla_risks ?? []).map((risk) => (
                   <div
                     key={`sla-${risk.requisition_id}`}
                     className="alert-card"
@@ -150,7 +150,7 @@ export default function ManagerMetricsHome() {
                   </div>
                 ))}
 
-                {metrics?.pending_positions_alerts.map((alert) => (
+                {(metrics?.pending_positions_alerts ?? []).map((alert) => (
                   <div
                     key={`pending-${alert.requisition_id}`}
                     className="alert-card"

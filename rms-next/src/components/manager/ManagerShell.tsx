@@ -15,6 +15,7 @@ const viewLabels: Record<string, string> = {
   "manager-dashboard": "Dashboard",
   interviews: "Interviews",
   "raise-requisition": "Raise Requisition",
+  "all-requisitions": "All Requisitions",
   "my-requisitions": "My Requisitions",
   "requisition-audit": "Requisition Audit",
 };
@@ -38,6 +39,9 @@ export default function ManagerShell({
     const path = pathname;
     if (path.startsWith("/manager/raise-requisition")) {
       return viewLabels["raise-requisition"]!;
+    }
+    if (path.startsWith("/manager/all-requisitions")) {
+      return viewLabels["all-requisitions"]!;
     }
     if (path.startsWith("/manager/my-requisitions")) {
       return viewLabels["my-requisitions"]!;

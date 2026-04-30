@@ -25,10 +25,10 @@ export function getCandidateActionErrorMessage(
   };
   const body = ax?.response?.data;
   const message =
-    typeof body?.error === "string"
-      ? body.error
-      : typeof body?.detail === "string"
-        ? body.detail
+    typeof body?.detail === "string" && body.detail.trim().length > 0
+      ? body.detail
+      : typeof body?.error === "string"
+        ? body.error
         : undefined;
   if (ax?.response?.status === 403) {
     return typeof message === "string" && message.trim().length > 0
@@ -567,6 +567,32 @@ export async function getApplication(
   return data;
 }
 
+export async function sendShortlistEmail(applicationId: number): Promise<{
+  enqueued: boolean;
+  skipped: boolean;
+  notification_event_id: number | null;
+  message?: string;
+  real_email?: boolean;
+  hint?: string | null;
+}> {
+  const { data } = await apiClient.post<{
+    enqueued?: boolean;
+    skipped?: boolean;
+    notification_event_id?: number | null;
+    message?: string;
+    real_email?: boolean;
+    hint?: string | null;
+  }>(`/applications/${applicationId}/send-shortlist-email`, {});
+  return {
+    enqueued: Boolean(data.enqueued),
+    skipped: Boolean(data.skipped),
+    notification_event_id: data.notification_event_id ?? null,
+    message: data.message,
+    real_email: data.real_email,
+    hint: data.hint ?? null,
+  };
+}
+
 export async function fetchRequisitionItemRanking(
   itemId: number,
   options?: { aiEval?: boolean },
@@ -771,6 +797,88 @@ export async function fetchManagerInterviews(): Promise<Interview[]> {
   return data.data.interviews;
 }
 
+/** Assigned interviews for users with the Interviewer role (panelist scope). */
+export async function fetchMyInterviewerInterviews(): Promise<Interview[]> {
+  const { data } = await apiClient.get<
+    InterviewApiEnvelope<{ interviews: Interview[] }>
+  >("/interviews/my");
+  if (!data.success || !data.data) {
+    throw new Error(data.error ?? "Failed to load interviews");
+  }
+  return data.data.interviews;
+}
+
+export type InterviewerRecommendation =
+  | "strong_yes"
+  | "yes"
+  | "neutral"
+  | "no"
+  | "strong_no";
+
+export type InterviewerInterviewDetailResponse = {
+  interview: Interview;
+  candidate_preview: {
+    full_name: string;
+    email: string;
+    resume_path: string | null;
+    candidate_skills: string[] | null;
+    total_experience_years: string | null;
+    education_raw: string | null;
+  };
+  my_panelist: InterviewPanelist;
+  my_scorecard: {
+    id: number;
+    scores: unknown;
+    notes: string | null;
+    submitted_at: string;
+  } | null;
+};
+
+/** GET /api/interviews/:id when caller is Interviewer (panelist); staff callers receive `{ interview }` only. */
+export async function fetchInterviewerInterviewDetail(
+  interviewId: number,
+): Promise<InterviewerInterviewDetailResponse> {
+  const { data } = await apiClient.get<
+    InterviewApiEnvelope<InterviewerInterviewDetailResponse>
+  >(`/interviews/${interviewId}`);
+  if (!data.success || !data.data) {
+    throw new Error(data.error ?? "Failed to load interview");
+  }
+  return data.data;
+}
+
+export async function submitInterviewerFeedback(
+  interviewId: number,
+  payload: {
+    recommendation: InterviewerRecommendation;
+    strengths?: string | null;
+    weaknesses?: string | null;
+    notes?: string | null;
+  },
+): Promise<{
+  scorecard: {
+    id: number;
+    scores: unknown;
+    notes: string | null;
+    submitted_at: string;
+  };
+}> {
+  const { data } = await apiClient.post<
+    InterviewApiEnvelope<{
+      scorecard: {
+        id: number;
+        scores: unknown;
+        notes: string | null;
+        submitted_at: string;
+      };
+    }>
+  >(`/interviews/${interviewId}/feedback`, payload);
+  if (!data.success || !data.data) {
+    throw new Error(data.error ?? "Failed to submit feedback");
+  }
+  return data.data;
+}
+
 export async function createInterview(
   payload: InterviewCreatePayload,
 ): Promise<InterviewMutationResult> {
@@ -791,6 +899,32 @@ export async function createManagerInterview(
   >("/manager/interviews/schedule", payload);
   if (!data.success || !data.data) {
     throw new Error(data.error ?? "Failed to schedule interview");
+  }
+  return data.data;
+}
+
+export async function generateInterviewMeetLink(payload: {
+  scheduled_at: string;
+  end_time: string;
+  timezone: string;
+  round_name?: string;
+  round_type?: string;
+  candidate_name?: string;
+  interviewer_names?: string[];
+}): Promise<{
+  meeting_link: string;
+  google_calendar_event_id: string | null;
+  token_source: "user" | "org";
+}> {
+  const { data } = await apiClient.post<
+    InterviewApiEnvelope<{
+      meeting_link: string;
+      google_calendar_event_id: string | null;
+      token_source: "user" | "org";
+    }>
+  >("/interviews/generate-meet-link", payload);
+  if (!data.success || !data.data) {
+    throw new Error(data.error ?? "Failed to generate Google Meet link");
   }
   return data.data;
 }
@@ -831,4 +965,79 @@ export async function uploadResume(
     formData,
   );
   return data;
+}
+
+export type BulkResumeUploadStartResult = {
+  operationId: string;
+  accepted_files: number;
+  rejected_files: number;
+};
+
+export type BulkResumeStatusResult = {
+  operationId: string;
+  kind: string;
+  status: string;
+  total: number;
+  processed: number;
+  progress: number;
+  success_count: number;
+  failure_count: number;
+  skipped_count: number;
+  created_count?: number;
+  failed_count?: number;
+  failures: Array<{ file_name?: string; reason?: string }>;
+  error?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export async function startBulkResumeUpload(params: {
+  requisition_item_id: number;
+  files: File[];
+  duplicate_policy?: "skip" | "update" | "application_only";
+}): Promise<BulkResumeUploadStartResult> {
+  const formData = new FormData();
+  formData.append("requisition_item_id", String(params.requisition_item_id));
+  formData.append("duplicate_policy", params.duplicate_policy ?? "skip");
+  for (const f of params.files) {
+    formData.append("files", f);
+  }
+  const { data } = await apiClient.post<{
+    success: boolean;
+    data: BulkResumeUploadStartResult | null;
+    error: string | null;
+  }>("/candidates/bulk-upload", formData);
+  if (!data.success || !data.data) {
+    throw new Error(data.error ?? "Failed to start bulk upload");
+  }
+  return data.data;
+}
+
+export async function getBulkResumeStatus(
+  operationId: string,
+): Promise<BulkResumeStatusResult> {
+  const { data } = await apiClient.get<{
+    success: boolean;
+    data: BulkResumeStatusResult | null;
+    error: string | null;
+  }>(`/bulk-import/${operationId}/status`);
+  if (!data.success || !data.data) {
+    throw new Error(data.error ?? "Failed to load bulk status");
+  }
+  return data.data;
+}
+
+export async function retryFailedBulkResumeUpload(operationId: string): Promise<{
+  operationId: string;
+  retried_files: number;
+}> {
+  const { data } = await apiClient.post<{
+    success: boolean;
+    data: { operationId: string; retried_files: number } | null;
+    error: string | null;
+  }>(`/bulk-import/${operationId}/retry-failed`);
+  if (!data.success || !data.data) {
+    throw new Error(data.error ?? "Failed to retry failed resumes");
+  }
+  return data.data;
 }

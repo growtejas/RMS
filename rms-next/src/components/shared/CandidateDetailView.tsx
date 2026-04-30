@@ -30,6 +30,7 @@ import {
   fetchRequisitionItemRanking,
 } from "@/lib/api/candidateApi";
 import { InterviewScheduleForm } from "@/components/interviews/InterviewScheduleModal";
+import { Loader } from "@/components/ui/Loader";
 import {
   InterviewStatusBadge,
   normalizeInterviewStatus,
@@ -236,13 +237,12 @@ export default function CandidateDetailView({
             const reason = rr.llm_failure_reason ?? "llm_failed";
             const http = rr.llm_http_status != null ? ` (HTTP ${rr.llm_http_status})` : "";
             setEvaluationError(`AI evaluation failed: ${reason}${http}`);
-            // Allow retry later
-            aiEvalAutoAttemptedRef.current = null;
+            // Keep auto-attempt locked for this profile key to avoid request storms.
+            // User can still retry explicitly via the manual "Run AI Evaluation" action.
             return;
           }
           if (rr?.status === "disabled") {
             setEvaluationError("AI evaluation is disabled on this environment.");
-            aiEvalAutoAttemptedRef.current = null;
             return;
           }
           await loadFromRanking();
@@ -251,8 +251,6 @@ export default function CandidateDetailView({
           setEvaluationError(
             getCandidateActionErrorMessage(err, "AI evaluation failed"),
           );
-          // Allow retry (manual button or next open) if it failed.
-          aiEvalAutoAttemptedRef.current = null;
         } finally {
           setAiEvalWorking(false);
         }
@@ -274,7 +272,6 @@ export default function CandidateDetailView({
     evaluationContext?.requiredExperienceYears,
     evaluationContext?.requiredSkillsCount,
     isEvaluateWorkspace,
-    aiEvalWorking,
     evaluationRefreshKey,
   ]);
 
@@ -489,7 +486,7 @@ export default function CandidateDetailView({
     candidate.resume_path?.split(/[/\\]/).pop() ?? "resume";
 
   const headerRow = (
-    <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
+    <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
       <div className="flex min-w-0 flex-1 items-center gap-3">
         {variant === "page" ? (
           <button
@@ -623,9 +620,7 @@ export default function CandidateDetailView({
                 No position is linked to this candidate record.
               </div>
             ) : evaluationLoading ? (
-              <div style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
-                Loading evaluation…
-              </div>
+              <Loader label="Loading evaluation…" />
             ) : evaluationError ? (
               <div style={{ fontSize: "13px", color: "#ef4444" }}>
                 {evaluationError}
@@ -864,15 +859,8 @@ export default function CandidateDetailView({
                 }}
               >
                 {loadingResume ? (
-                  <div
-                    style={{
-                      padding: "24px",
-                      textAlign: "center",
-                      color: "var(--text-tertiary)",
-                      fontSize: "13px",
-                    }}
-                  >
-                    Loading resume...
+                  <div className="px-4 py-6">
+                    <Loader label="Loading resume…" />
                   </div>
                 ) : resumeLoadError ? (
                   <div
@@ -891,10 +879,11 @@ export default function CandidateDetailView({
                       <iframe
                         src={resumeUrl}
                         title="Resume"
+                        className="w-full border-0 bg-white"
                         style={{
-                          width: "100%",
-                          height: "400px",
-                          border: "none",
+                          minHeight: "min(72vh, 900px)",
+                          height: "min(75vh, 920px)",
+                          maxHeight: "none",
                         }}
                       />
                     ) : (
@@ -1205,6 +1194,9 @@ export default function CandidateDetailView({
                 candidateId={candidate.candidate_id}
                 requisitionItemId={candidate.requisition_item_id}
                 nextRoundNumber={candidate.interviews.length + 1}
+                submitMode={
+                  userRoles.includes("Manager") ? "manager" : "default"
+                }
                 onCancel={() => setShowScheduler(false)}
                 onScheduled={(warnings) => {
                   setError(null);
@@ -1445,11 +1437,13 @@ export default function CandidateDetailView({
 
   if (variant === "page") {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
+      <div className="w-full min-w-0 bg-slate-50">
+        <header className="sticky top-0 z-20 w-full border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
           {headerRow}
         </header>
-        <main className="mx-auto max-w-5xl px-4 py-8 pb-16">{bodyContent}</main>
+        <main className="mx-auto w-full max-w-7xl px-4 py-6 pb-16 sm:px-6 lg:py-10">
+          {bodyContent}
+        </main>
       </div>
     );
   }

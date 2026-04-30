@@ -11,6 +11,7 @@ export async function findUserByUsername(
     .select({
       userId: users.userId,
       username: users.username,
+      email: users.email,
       passwordHash: users.passwordHash,
       isActive: users.isActive,
       createdAt: users.createdAt,
@@ -29,6 +30,7 @@ export async function findUserById(userId: number): Promise<UserRow | null> {
     .select({
       userId: users.userId,
       username: users.username,
+      email: users.email,
       passwordHash: users.passwordHash,
       isActive: users.isActive,
       createdAt: users.createdAt,
@@ -37,6 +39,25 @@ export async function findUserById(userId: number): Promise<UserRow | null> {
     })
     .from(users)
     .where(eq(users.userId, userId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function findUserByEmail(email: string): Promise<UserRow | null> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      userId: users.userId,
+      username: users.username,
+      email: users.email,
+      passwordHash: users.passwordHash,
+      isActive: users.isActive,
+      createdAt: users.createdAt,
+      lastLogin: users.lastLogin,
+      employeeId: users.employeeId,
+    })
+    .from(users)
+    .where(eq(users.email, email))
     .limit(1);
   return rows[0] ?? null;
 }

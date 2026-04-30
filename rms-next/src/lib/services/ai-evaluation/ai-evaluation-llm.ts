@@ -89,7 +89,7 @@ export function resolveAiEvalModel(): string {
 }
 
 export function resolveAiEvalPromptVersion(): string {
-  return process.env.AI_EVAL_PROMPT_VERSION?.trim() || "ai-eval-v1";
+  return process.env.AI_EVAL_PROMPT_VERSION?.trim() || "ai-eval-v2";
 }
 
 export function resolveAiEvalTimeoutMs(): number {
@@ -383,6 +383,8 @@ project_complexity (number 0-100)
 growth_trajectory (number 0-100)
 company_reputation (number 0-100)
 jd_alignment (number 0-100)
+education_match (number 0-100)
+internship_relevance (number 0-100)
 confidence (number 0-1)
 summary (string)
 risks (string array)
@@ -393,9 +395,10 @@ risks (string array)
 
 Determine job type using required experience:
 
-- If required_experience_years <= 1 → FRESHER ROLE
-- If required_experience_years between 2–5 → MID-LEVEL ROLE
-- If required_experience_years >= 6 → SENIOR ROLE
+- Use ONLY job.required_experience from input JSON.
+- If required_experience <= 1 → FRESHER ROLE
+- If required_experience between 2–5 → MID-LEVEL ROLE
+- If required_experience >= 6 → SENIOR ROLE
 
 You MUST adjust scoring strategy accordingly.
 
@@ -404,10 +407,10 @@ You MUST adjust scoring strategy accordingly.
 ## 🎯 CORE EVALUATION RULES
 
 You MUST create clear separation between strong and weak candidates.
+Use job-type-aware bands:
 
-- Strong → 75–95
-- Average → 50–70
-- Weak → 20–45
+- FRESHER: Strong 65–90, Average 45–70, Weak 20–45
+- MID/SENIOR: Strong 75–95, Average 50–70, Weak 20–45
 
 Avoid clustering.
 
@@ -418,18 +421,30 @@ Avoid clustering.
 ### 🔹 FRESHER ROLE (<=1 year)
 
 - PRIORITIZE:
-  - project_complexity (VERY HIGH weight)
-  - jd_alignment (skills)
+  - jd_alignment (VERY HIGH weight)
+  - project_complexity (HIGH weight)
+  - education_match
+  - internship_relevance
 
 - IGNORE:
   - growth_trajectory (low importance)
   - company reputation (low importance)
+
+- For fresher candidates with little/no work history:
+  - growth_trajectory should be NEUTRAL (45–65), not auto-low
+  - company_reputation should be NEUTRAL (45–60), not auto-low
 
 - Penalize:
   - No real projects
   - Only academic/basic work
 
 👉 Experience should NOT dominate scoring here.
+
+- FRESHER SCORING MATH (MANDATORY):
+  - Base score = 0.30*project_complexity + 0.70*jd_alignment
+  - If education_match >= 60 add +5
+  - If internship_relevance >= 60 add +5
+  - Keep final values in 0..100 range
 
 ---
 
@@ -493,7 +508,7 @@ MEDIUM (45–70):
 LOW (20–45):
 - Vague projects ("website", "app")
 - No tech stack mentioned
-- Academic-only work
+- Only trivial academic-only work with no implementation depth
 
 CRITICAL RULES:
 - Presence of named tools increases score ONLY if tied to real usage
@@ -535,6 +550,8 @@ Include only real issues:
 - Missing required skills
 - Low experience (only if relevant to job type)
 - Weak projects
+- Weak education match (only if truly relevant to JD)
+- No relevant internship evidence (only for fresher/mid roles)
 - Role mismatch
 
 -------------------------------------
@@ -543,7 +560,7 @@ Include only real issues:
 
 - Do NOT hallucinate
 - Do NOT inflate weak candidates
-- Prefer LOWER score when uncertain
+- If fresher evidence is strong (projects + skills), do NOT under-score due to short tenure
 - Do NOT treat all job types equally
 
 -------------------------------------

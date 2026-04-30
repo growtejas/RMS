@@ -83,6 +83,24 @@ export async function listScorecardsForInterview(
     .orderBy(asc(interviewScorecards.id));
 }
 
+export async function findScorecardForInterviewPanelist(
+  interviewId: number,
+  panelistId: number,
+): Promise<(typeof interviewScorecards.$inferSelect) | null> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(interviewScorecards)
+    .where(
+      and(
+        eq(interviewScorecards.interviewId, interviewId),
+        eq(interviewScorecards.panelistId, panelistId),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
 export async function insertScorecard(params: {
   interviewId: number;
   organizationId: string;

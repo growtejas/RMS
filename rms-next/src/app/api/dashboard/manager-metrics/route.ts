@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     );
     const days = Number.isFinite(slaDays) ? slaDays : 30;
 
-    const data = await buildManagerMetricsBundle(user.userId, days);
+    const data = await buildManagerMetricsBundle(user.organizationId, days);
     return NextResponse.json(data);
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/dashboard/manager-metrics]");

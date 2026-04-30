@@ -38,6 +38,7 @@ import {
   Eye,
 } from "lucide-react";
 import { useParams, usePathname, useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { apiClient } from "@/lib/api/client";
 import { getUsersListCached } from "@/lib/api/users-list-cache";
 import HRGatekeeperPanel from "./HRGatekeeperPanel";
@@ -55,6 +56,15 @@ import {
   type Candidate,
 } from "@/lib/api/candidateApi";
 import { PlainPriorityText } from "@/components/common/PlainPriorityText";
+const BulkResumeUploadPanel = dynamic(
+  () => import("@/components/candidates/BulkResumeUploadPanel"),
+  {
+    ssr: false,
+    loading: () => (
+      <p className="text-sm text-text-muted">Loading bulk upload…</p>
+    ),
+  },
+);
 
 interface TicketDetailsProps {
   ticketId?: string | null;
@@ -266,6 +276,9 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
   const [newCandidateEmail, setNewCandidateEmail] = useState("");
   const [newCandidatePhone, setNewCandidatePhone] = useState("");
   const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [candidateUploadMode, setCandidateUploadMode] = useState<"single" | "bulk">(
+    "single",
+  );
   const [addingCandidate, setAddingCandidate] = useState(false);
   const [candidateStageFilter, setCandidateStageFilter] =
     useState<string>("all");
@@ -684,6 +697,7 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
   const handleAddCandidate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ticket || !addCandidateItemId) return;
+    if (candidateUploadMode === "bulk") return;
     setAddingCandidate(true);
     setCandidateError(null);
     try {
@@ -2711,6 +2725,38 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
               >
                 Add New Candidate
               </div>
+              <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
+                <button
+                  type="button"
+                  className="action-button"
+                  style={{
+                    fontSize: "12px",
+                    padding: "6px 12px",
+                    border:
+                      candidateUploadMode === "single"
+                        ? "2px solid var(--primary-accent)"
+                        : "1px solid var(--border-subtle)",
+                  }}
+                  onClick={() => setCandidateUploadMode("single")}
+                >
+                  Upload Resume
+                </button>
+                <button
+                  type="button"
+                  className="action-button"
+                  style={{
+                    fontSize: "12px",
+                    padding: "6px 12px",
+                    border:
+                      candidateUploadMode === "bulk"
+                        ? "2px solid var(--primary-accent)"
+                        : "1px solid var(--border-subtle)",
+                  }}
+                  onClick={() => setCandidateUploadMode("bulk")}
+                >
+                  Bulk Upload
+                </button>
+              </div>
               <div
                 style={{
                   display: "flex",
@@ -2766,7 +2812,8 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                     type="text"
                     value={newCandidateName}
                     onChange={(e) => setNewCandidateName(e.target.value)}
-                    required
+                    required={candidateUploadMode === "single"}
+                    disabled={candidateUploadMode === "bulk"}
                     placeholder="e.g., Tejas Sharma"
                     style={{
                       width: "100%",
@@ -2792,7 +2839,8 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                     type="email"
                     value={newCandidateEmail}
                     onChange={(e) => setNewCandidateEmail(e.target.value)}
-                    required
+                    required={candidateUploadMode === "single"}
+                    disabled={candidateUploadMode === "bulk"}
                     placeholder="tejas@example.com"
                     style={{
                       width: "100%",
@@ -2804,6 +2852,17 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                   />
                 </div>
               </div>
+              {candidateUploadMode === "bulk" && (
+                <div style={{ marginBottom: "16px" }}>
+                  <BulkResumeUploadPanel
+                    requisitionItemId={addCandidateItemId}
+                    disabled={addingCandidate}
+                    onCompleted={() => {
+                      void loadCandidates();
+                    }}
+                  />
+                </div>
+              )}
               <div
                 style={{
                   display: "flex",
@@ -2879,9 +2938,11 @@ const TicketDetail: React.FC<TicketDetailsProps> = ({
                   className="action-button primary"
                   style={{ fontSize: "12px", padding: "8px 16px" }}
                   disabled={
-                    addingCandidate ||
-                    !newCandidateName.trim() ||
-                    !newCandidateEmail.trim()
+                    candidateUploadMode === "bulk"
+                      ? true
+                      : addingCandidate ||
+                        !newCandidateName.trim() ||
+                        !newCandidateEmail.trim()
                   }
                 >
                   {addingCandidate ? "Adding..." : "Add Candidate"}

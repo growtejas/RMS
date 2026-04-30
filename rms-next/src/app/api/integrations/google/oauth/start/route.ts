@@ -30,7 +30,7 @@ export async function GET(req: Request) {
 
   const scope =
     process.env.GOOGLE_OAUTH_SCOPES?.trim() ||
-    "openid email profile";
+    "openid email profile https://www.googleapis.com/auth/calendar.events";
 
   const auth = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   auth.searchParams.set("client_id", clientId);

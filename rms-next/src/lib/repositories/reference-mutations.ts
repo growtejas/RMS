@@ -344,23 +344,32 @@ export async function findCompanyRoleById(roleId: number) {
 }
 
 export async function createCompanyRole(
+  userId: number,
   roleName: string,
   roleDescription: string | null,
 ) {
   const db = getDb();
-  const inserted = await db
-    .insert(companyRoles)
-    .values({
-      roleName,
-      roleDescription,
-      isActive: true,
-    })
-    .returning();
-  const row = inserted[0];
-  if (!row) {
-    throw new Error("Company role insert failed");
-  }
-  return row;
+  return db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(companyRoles)
+      .values({
+        roleName,
+        roleDescription,
+        isActive: true,
+      })
+      .returning();
+    const row = inserted[0];
+    if (!row) {
+      throw new Error("Company role insert failed");
+    }
+    await tx.insert(auditLog).values({
+      entityName: "company_role",
+      entityId: String(row.roleId),
+      action: "CREATE",
+      performedBy: userId,
+    });
+    return row;
+  });
 }
 
 export async function updateCompanyRole(

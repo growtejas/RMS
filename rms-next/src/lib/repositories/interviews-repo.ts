@@ -15,6 +15,7 @@ import { getDb } from "@/lib/db";
 import {
   applications,
   candidates,
+  employees,
   interviewPanelists,
   interviewReschedules,
   interviews,
@@ -86,6 +87,43 @@ export async function resolveUserDisplayNames(
     .from(users)
     .where(inArray(users.userId, userIds));
   return new Map(rows.map((r) => [r.userId, r.username]));
+}
+
+export async function resolveInterviewerNotificationTargets(
+  userIds: number[],
+): Promise<Array<{ userId: number; username: string; email: string }>> {
+  if (userIds.length === 0) {
+    return [];
+  }
+  const db = getDb();
+  const rows = await db
+    .select({
+      userId: users.userId,
+      username: users.username,
+      userEmail: users.email,
+      email: employees.rbmEmail,
+    })
+    .from(users)
+    .leftJoin(employees, eq(users.employeeId, employees.empId))
+    .where(inArray(users.userId, userIds));
+  return rows
+    .filter(
+      (
+        r,
+      ): r is {
+        userId: number;
+        username: string;
+        email: string | null;
+        userEmail: string | null;
+      } =>
+        (typeof r.email === "string" && r.email.trim().length > 0) ||
+        (typeof r.userEmail === "string" && r.userEmail.trim().length > 0),
+    )
+    .map((r) => ({
+      userId: r.userId,
+      username: r.username,
+      email: (r.email ?? r.userEmail ?? "").trim(),
+    }));
 }
 
 export async function maxRoundNumberForCandidateItem(params: {
@@ -320,6 +358,94 @@ export async function listManagerInterviews(params: {
   return Array.from(byId.values()).sort(
     (a, b) => b.interview.scheduledAt.getTime() - a.interview.scheduledAt.getTime(),
   );
+}
+
+/** Panelist scope only (no hiring-manager ownership union). */
+export async function listPanelistOnlyInterviews(params: {
+  organizationId: string;
+  userId: number;
+}): Promise<InterviewWithCandidateAndRoleRow[]> {
+  const db = getDb();
+  const panelistRows = await db
+    .select({
+      interview: interviews,
+      candidateFullName: candidates.fullName,
+      candidateEmail: candidates.email,
+      requisitionId: candidates.requisitionId,
+      rolePosition: requisitionItems.rolePosition,
+    })
+    .from(interviews)
+    .innerJoin(candidates, eq(interviews.candidateId, candidates.candidateId))
+    .innerJoin(
+      requisitionItems,
+      eq(candidates.requisitionItemId, requisitionItems.itemId),
+    )
+    .innerJoin(
+      interviewPanelists,
+      eq(interviewPanelists.interviewId, interviews.id),
+    )
+    .where(
+      and(
+        eq(candidates.organizationId, params.organizationId),
+        eq(interviewPanelists.userId, params.userId),
+        isNotNull(interviewPanelists.userId),
+      ),
+    );
+
+  const byId = new Map<number, InterviewWithCandidateAndRoleRow>();
+  for (const r of panelistRows) {
+    if (!byId.has(r.interview.id)) {
+      byId.set(r.interview.id, r);
+    }
+  }
+
+  return Array.from(byId.values()).sort(
+    (a, b) => b.interview.scheduledAt.getTime() - a.interview.scheduledAt.getTime(),
+  );
+}
+
+export async function userIsPanelistForInterview(params: {
+  organizationId: string;
+  userId: number;
+  interviewId: number;
+}): Promise<boolean> {
+  const db = getDb();
+  const rows = await db
+    .select({ id: interviews.id })
+    .from(interviews)
+    .innerJoin(candidates, eq(interviews.candidateId, candidates.candidateId))
+    .innerJoin(
+      interviewPanelists,
+      eq(interviewPanelists.interviewId, interviews.id),
+    )
+    .where(
+      and(
+        eq(candidates.organizationId, params.organizationId),
+        eq(interviews.id, params.interviewId),
+        eq(interviewPanelists.userId, params.userId),
+        isNotNull(interviewPanelists.userId),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+export async function findPanelistRowForUserOnInterview(params: {
+  interviewId: number;
+  userId: number;
+}): Promise<(typeof interviewPanelists.$inferSelect) | null> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(interviewPanelists)
+    .where(
+      and(
+        eq(interviewPanelists.interviewId, params.interviewId),
+        eq(interviewPanelists.userId, params.userId),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 export async function managerHasAccessToInterview(params: {

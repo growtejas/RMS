@@ -44,6 +44,7 @@ export const organizations = pgTable("organizations", {
 export const users = pgTable("users", {
   userId: serial("user_id").primaryKey(),
   username: varchar("username", { length: 50 }).notNull().unique(),
+  email: varchar("email", { length: 255 }),
   passwordHash: varchar("password_hash").notNull(),
   isActive: boolean("is_active"),
   createdAt: timestamp("created_at", { mode: "date" }),
@@ -445,6 +446,8 @@ export const applications = pgTable(
       .references(() => organizations.id, { onDelete: "restrict" }),
     /** ATS quality bucket from last ranking run (BEST | VERY_GOOD | GOOD | AVERAGE | NOT_SUITABLE). */
     atsBucket: varchar("ats_bucket", { length: 30 }),
+    /** Optional offer letter / response tracking (sent, accepted_at, etc.) — keep schema light. */
+    offerMeta: jsonb("offer_meta").$type<Record<string, unknown> | null>(),
   },
   (t) => [
     uniqueIndex("uq_applications_candidate").on(t.candidateId),
@@ -745,6 +748,8 @@ export const interviews = pgTable(
     endTime: timestamp("end_time", { mode: "date" }).notNull(),
     timezone: varchar("timezone", { length: 50 }).notNull().default("UTC"),
     meetingLink: text("meeting_link"),
+    /** Populated when Google Calendar sync is enabled (see integrations). */
+    googleCalendarEventId: varchar("google_calendar_event_id", { length: 120 }),
     location: text("location"),
     notes: text("notes"),
     status: varchar("status", { length: 20 }).notNull().default("SCHEDULED"),
@@ -866,7 +871,12 @@ export const interviewScorecards = pgTable(
     }),
     submittedAt: timestamp("submitted_at", { mode: "date" }).notNull().defaultNow(),
   },
-  (t) => [index("idx_interview_scorecards_interview").on(t.interviewId)],
+  (t) => [
+    index("idx_interview_scorecards_interview").on(t.interviewId),
+    uniqueIndex("uq_interview_scorecards_interview_panelist")
+      .on(t.interviewId, t.panelistId)
+      .where(sql`${t.panelistId} IS NOT NULL`),
+  ],
 );
 
 export const bulkImportJobs = pgTable(
@@ -903,6 +913,8 @@ export const notificationEvents = pgTable(
     payload: jsonb("payload").notNull(),
     channel: varchar("channel", { length: 20 }).notNull().default("email"),
     status: varchar("status", { length: 20 }).notNull().default("pending"),
+    errorMessage: text("error_message"),
+    sentAt: timestamp("sent_at", { mode: "date" }),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => [

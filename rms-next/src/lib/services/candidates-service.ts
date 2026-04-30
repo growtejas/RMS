@@ -678,7 +678,7 @@ export async function patchCandidateStageJson(
   await assertTaOwnershipForCandidate(candidateId, user);
 
   const db = getDb();
-  return db.transaction(async (tx) => {
+  const txResult = await db.transaction(async (tx) => {
     const [cand] = await tx
       .select()
       .from(candidates)
@@ -846,6 +846,49 @@ export async function patchCandidateStageJson(
     if (!updated) {
       throw new HttpError(500, "Candidate not found after update");
     }
-    return candidateToJson(updated, ivAfter);
+    return {
+      body: candidateToJson(updated, ivAfter),
+      oldStage,
+    };
   });
+
+  if (newStage === "Shortlisted" && txResult.oldStage === "Sourced") {
+    void (async () => {
+      const { selectApplicationByCandidateId } = await import(
+        "@/lib/repositories/applications-repo"
+      );
+      const { enqueueShortlistedNotification } = await import(
+        "@/lib/services/lifecycle-notifications"
+      );
+      const { enqueueNotificationDeliveryJob } = await import(
+        "@/lib/queue/notification-delivery-queue"
+      );
+      const app = await selectApplicationByCandidateId(
+        candidateId,
+        user.organizationId,
+      );
+      const candRow = await repo.selectCandidateById(
+        candidateId,
+        user.organizationId,
+      );
+      if (!app || !candRow) {
+        return;
+      }
+      await enqueueShortlistedNotification({
+        organizationId: user.organizationId,
+        applicationId: app.applicationId,
+        candidateId,
+        requisitionId: app.requisitionId,
+        requisitionItemId: app.requisitionItemId,
+        candidateName: candRow.fullName,
+        candidateEmail: candRow.email,
+        previousStage: txResult.oldStage,
+      });
+      await enqueueNotificationDeliveryJob();
+    })().catch(() => {
+      /* optional: notification + redis */
+    });
+  }
+
+  return txResult.body;
 }

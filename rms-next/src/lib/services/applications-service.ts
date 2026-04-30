@@ -1,5 +1,7 @@
 import type { ApiUser } from "@/lib/auth/api-guard";
+import { and, eq } from "drizzle-orm";
 import { getDb } from "@/lib/db";
+import { applications } from "@/lib/db/schema";
 import { HttpError } from "@/lib/http/http-error";
 import * as applicationsRepo from "@/lib/repositories/applications-repo";
 import * as candidatesRepo from "@/lib/repositories/candidates-repo";
@@ -12,6 +14,10 @@ import {
   resolveAtsBucketMode,
 } from "@/lib/services/ats-buckets";
 import { patchCandidateStageJson } from "@/lib/services/candidates-service";
+import {
+  enqueueShortlistedEmailManual,
+  maybeEnqueueOfferStatusNotification,
+} from "@/lib/services/lifecycle-notifications";
 
 const APPLICATION_STAGE_ORDER = [
   "Sourced",
@@ -45,6 +51,7 @@ function applicationToJson(row: applicationsRepo.ApplicationWithCandidateRow) {
     requisition_id: row.application.requisitionId,
     current_stage: row.application.currentStage,
     ats_bucket: row.application.atsBucket ?? null,
+    offer_meta: row.application.offerMeta ?? null,
     source: row.application.source,
     created_by: row.application.createdBy ?? null,
     created_at: row.application.createdAt?.toISOString() ?? null,
@@ -304,6 +311,90 @@ export async function shortlistApplicationJson(
     user,
     roles,
   );
+}
+
+export async function sendShortlistEmailForApplicationJson(
+  applicationId: number,
+  organizationId: string,
+) {
+  const app = await applicationsRepo.selectApplicationById(
+    applicationId,
+    organizationId,
+  );
+  if (!app) {
+    return { ok: false as const, error: "not_found" as const };
+  }
+  if (app.application.currentStage !== "Shortlisted") {
+    return { ok: false as const, error: "not_shortlisted" as const };
+  }
+  const r = await enqueueShortlistedEmailManual({
+    organizationId,
+    applicationId: app.application.applicationId,
+    candidateId: app.candidate.candidateId,
+    requisitionId: app.application.requisitionId,
+    requisitionItemId: app.application.requisitionItemId,
+    candidateName: app.candidate.fullName,
+    candidateEmail: app.candidate.email,
+    previousStage: "Shortlisted",
+  });
+  if (!r.skipped && r.id != null) {
+    const n = await import("@/lib/repositories/notification-events-repo").then(
+      (m) => m.selectNotificationEventById(r.id!),
+    );
+    if (n?.status === "failed" && n.errorMessage) {
+      return {
+        ok: false as const,
+        error: "delivery_failed" as const,
+        message: n.errorMessage,
+      };
+    }
+  }
+  return {
+    ok: true as const,
+    skipped: r.skipped,
+    notification_event_id: r.id,
+  };
+}
+
+export async function patchApplicationOfferMetaJson(
+  applicationId: number,
+  organizationId: string,
+  offerMeta: Record<string, unknown> | null,
+) {
+  const app = await applicationsRepo.selectApplicationById(
+    applicationId,
+    organizationId,
+  );
+  if (!app) {
+    return null;
+  }
+  const db = getDb();
+  const [n] = await db
+    .update(applications)
+    .set({
+      offerMeta,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(applications.applicationId, applicationId),
+        eq(applications.organizationId, organizationId),
+      ),
+    )
+    .returning({ applicationId: applications.applicationId });
+  if (!n) {
+    return null;
+  }
+  const json = await getApplicationJson(applicationId, organizationId);
+  void maybeEnqueueOfferStatusNotification({
+    organizationId,
+    applicationId,
+    candidateId: app.candidate.candidateId,
+    candidateName: app.candidate.fullName,
+    candidateEmail: app.candidate.email,
+    offerMeta,
+  });
+  return json;
 }
 
 export async function getApplicationJson(

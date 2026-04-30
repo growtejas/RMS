@@ -17,6 +17,7 @@ export default function RejectConfirmModal({
   onCancel,
 }: RejectConfirmModalProps) {
   const [reason, setReason] = useState("");
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const trimmed = reason.trim();
   const canConfirm = trimmed.length >= 3;
 
@@ -28,6 +29,7 @@ export default function RejectConfirmModal({
   useEffect(() => {
     if (!open) return;
     setReason("");
+    setSubmitAttempted(false);
   }, [open]);
 
   useEffect(() => {
@@ -138,6 +140,11 @@ export default function RejectConfirmModal({
             Please enter at least 3 characters.
           </div>
         ) : null}
+        {submitAttempted && !canConfirm ? (
+          <div style={{ marginTop: 4, fontSize: 11, color: "var(--error, #b91c1c)" }}>
+            Rejection reason is required before continuing.
+          </div>
+        ) : null}
 
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 14 }}>
           <button
@@ -151,8 +158,12 @@ export default function RejectConfirmModal({
           <button
             type="button"
             className="action-button"
+            disabled={!canConfirm}
             onClick={() => {
-              if (!canConfirm) return;
+              if (!canConfirm) {
+                setSubmitAttempted(true);
+                return;
+              }
               onConfirm(trimmed);
             }}
             style={{
@@ -162,6 +173,8 @@ export default function RejectConfirmModal({
               borderColor: "rgba(239, 68, 68, 0.35)",
               color: "white",
               fontWeight: 800,
+              opacity: canConfirm ? 1 : 0.6,
+              cursor: canConfirm ? "pointer" : "not-allowed",
             }}
           >
             Reject candidate

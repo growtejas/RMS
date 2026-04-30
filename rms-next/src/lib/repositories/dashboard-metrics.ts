@@ -230,8 +230,9 @@ export async function getRecentHrActivity(limit: number) {
   }));
 }
 
-export async function getManagerStatusCounts(
-  managerUserId: number,
+/** All requisitions in the org (every manager sees the same rollup on the dashboard). */
+export async function getOrganizationRequisitionStatusCounts(
+  organizationId: string,
 ): Promise<Record<string, number>> {
   const db = getDb();
   const rows = await db
@@ -240,7 +241,7 @@ export async function getManagerStatusCounts(
       c: count(),
     })
     .from(requisitions)
-    .where(eq(requisitions.raisedBy, managerUserId))
+    .where(eq(requisitions.organizationId, organizationId))
     .groupBy(requisitions.overallStatus);
   const out: Record<string, number> = {};
   for (const r of rows) {
@@ -251,8 +252,8 @@ export async function getManagerStatusCounts(
   return out;
 }
 
-export async function getManagerPendingPositionsCount(
-  managerUserId: number,
+export async function getOrganizationPendingPositionsCount(
+  organizationId: string,
 ): Promise<number> {
   const db = getDb();
   const [row] = await db
@@ -261,15 +262,15 @@ export async function getManagerPendingPositionsCount(
     .innerJoin(requisitions, eq(requisitionItems.reqId, requisitions.reqId))
     .where(
       and(
-        eq(requisitions.raisedBy, managerUserId),
+        eq(requisitions.organizationId, organizationId),
         notInArray(requisitionItems.itemStatus, ["Fulfilled", "Cancelled"]),
       ),
     );
   return Number(row?.c ?? 0);
 }
 
-export async function getManagerPendingPositionsAlerts(
-  managerUserId: number,
+export async function getOrganizationPendingPositionsAlerts(
+  organizationId: string,
   limit: number,
 ) {
   const db = getDb();
@@ -282,7 +283,7 @@ export async function getManagerPendingPositionsAlerts(
     .innerJoin(requisitions, eq(requisitionItems.reqId, requisitions.reqId))
     .where(
       and(
-        eq(requisitions.raisedBy, managerUserId),
+        eq(requisitions.organizationId, organizationId),
         notInArray(requisitionItems.itemStatus, ["Fulfilled", "Cancelled"]),
       ),
     )
@@ -296,8 +297,8 @@ export async function getManagerPendingPositionsAlerts(
   }));
 }
 
-export async function getManagerSlaRisks(
-  managerUserId: number,
+export async function getOrganizationSlaRisks(
+  organizationId: string,
   slaDays: number,
   limit: number,
 ) {
@@ -310,7 +311,7 @@ export async function getManagerSlaRisks(
     .from(requisitions)
     .where(
       and(
-        eq(requisitions.raisedBy, managerUserId),
+        eq(requisitions.organizationId, organizationId),
         notInArray(requisitions.overallStatus, [
           "Closed",
           "Rejected",
@@ -336,8 +337,8 @@ export async function getManagerSlaRisks(
   return risks.slice(0, limit);
 }
 
-export async function getManagerAvgFulfillmentDays(
-  managerUserId: number,
+export async function getOrganizationAvgFulfillmentDays(
+  organizationId: string,
 ): Promise<number> {
   const db = getDb();
   const rows = await db.execute(sql`
@@ -350,7 +351,7 @@ export async function getManagerAvgFulfillmentDays(
     SELECT r.created_at, c.closed_at
     FROM requisitions r
     INNER JOIN closed c ON c.req_id = r.req_id
-    WHERE r.raised_by = ${managerUserId}
+    WHERE r.organization_id = ${organizationId}
   `);
 
   const durations: number[] = [];
@@ -418,11 +419,12 @@ export async function buildHrMetricsBundle() {
   return out;
 }
 
+/** Organization-wide rollup for all managers with access to `/manager` dashboard. */
 export async function buildManagerMetricsBundle(
-  managerUserId: number,
+  organizationId: string,
   slaDays: number,
 ) {
-  const statusCounts = await getManagerStatusCounts(managerUserId);
+  const statusCounts = await getOrganizationRequisitionStatusCounts(organizationId);
   const totalRequisitions = Object.values(statusCounts).reduce((a, b) => a + b, 0);
   const open = OPEN_STATUSES.reduce(
     (s, st) => s + (statusCounts[st] ?? 0),
@@ -437,11 +439,12 @@ export async function buildManagerMetricsBundle(
     0,
   );
 
-  const pendingPositions = await getManagerPendingPositionsCount(managerUserId);
-  const avgFulfillment = await getManagerAvgFulfillmentDays(managerUserId);
-  const slaRisks = await getManagerSlaRisks(managerUserId, slaDays, 10);
-  const pendingAlerts = await getManagerPendingPositionsAlerts(
-    managerUserId,
+  const pendingPositions =
+    await getOrganizationPendingPositionsCount(organizationId);
+  const avgFulfillment = await getOrganizationAvgFulfillmentDays(organizationId);
+  const slaRisks = await getOrganizationSlaRisks(organizationId, slaDays, 10);
+  const pendingAlerts = await getOrganizationPendingPositionsAlerts(
+    organizationId,
     10,
   );
 

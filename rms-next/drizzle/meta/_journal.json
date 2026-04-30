@@ -155,6 +155,27 @@
       "when": 1777700000000,
       "tag": "0021_oauth_access_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1777800000000,
+      "tag": "0022_lifecycle_upgrade",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1777900000000,
+      "tag": "0023_users_email_oauth_username",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1778000000000,
+      "tag": "0024_interviewer_scorecard_unique",
+      "breakpoints": true
     }
   ]
 }

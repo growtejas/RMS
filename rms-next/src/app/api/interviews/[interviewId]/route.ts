@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
+import { rolesMatchAny } from "@/lib/auth/normalize-roles";
 import { envelopeCatch, envelopeFail, envelopeOk } from "@/lib/http/api-envelope";
 import { parseFastapiJsonBody } from "@/lib/http/parse-fastapi-body";
 import { interviewPatchBody } from "@/lib/validators/interviews";
 import {
   deleteInterviewJson,
+  getInterviewerInterviewDetail,
   getInterviewJson,
   patchInterviewAsManagerJson,
   patchInterviewJson,
@@ -31,18 +33,30 @@ export async function GET(req: Request, { params }: Ctx) {
     if (user instanceof NextResponse) {
       return user;
     }
-    const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager");
-    if (denied) {
-      return denied;
-    }
 
     const interviewId = parseId(params.interviewId);
     if (interviewId instanceof NextResponse) {
       return interviewId;
     }
 
-    const interview = await getInterviewJson(interviewId, user.organizationId);
-    return envelopeOk({ interview });
+    const staffRoles = ["TA", "HR", "Admin", "Manager", "Owner"] as const;
+    if (rolesMatchAny(user.roles, staffRoles)) {
+      const interview = await getInterviewJson(interviewId, user.organizationId);
+      return envelopeOk({ interview });
+    }
+
+    if (rolesMatchAny(user.roles, ["Interviewer"])) {
+      const detail = await getInterviewerInterviewDetail(interviewId, user);
+      if (!detail) {
+        return envelopeFail("Interview not found", 404);
+      }
+      return envelopeOk(detail);
+    }
+
+    return NextResponse.json(
+      { detail: "Access denied. Required staff role or Interviewer (as assigned panelist)." },
+      { status: 403 },
+    );
   } catch (e) {
     return envelopeCatch(e, "[GET /api/interviews/[interviewId]]");
   }

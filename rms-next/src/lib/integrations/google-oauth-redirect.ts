@@ -31,7 +31,20 @@ export function resolveRequestPublicOrigin(req: Request): string {
 export function getGoogleOAuthRedirectUri(req: Request): string {
   const fromEnv = process.env.GOOGLE_OAUTH_REDIRECT_URL?.trim();
   if (fromEnv) {
-    return fromEnv;
+    // In local/dev, a host mismatch (e.g. IP vs nip.io) causes OAuth temp cookies
+    // to be set on one host and callback to land on another, failing state checks.
+    try {
+      const envUrl = new URL(fromEnv);
+      const reqUrl = new URL(req.url);
+      const hostMismatch = envUrl.host !== reqUrl.host;
+      if (process.env.NODE_ENV !== "production" && hostMismatch) {
+        return `${resolveRequestPublicOrigin(req)}${CALLBACK_PATH}`;
+      }
+      return envUrl.toString();
+    } catch {
+      // If env value is malformed, safely fall back to request-derived origin.
+      return `${resolveRequestPublicOrigin(req)}${CALLBACK_PATH}`;
+    }
   }
   return `${resolveRequestPublicOrigin(req)}${CALLBACK_PATH}`;
 }

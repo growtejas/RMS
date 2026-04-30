@@ -11,6 +11,7 @@ const DEFAULT_ASSIGNABLE_ROLES = [
   "Manager",
   "TA",
   "Employee",
+  "Interviewer",
 ] as const;
 
 export type UserListRow = {

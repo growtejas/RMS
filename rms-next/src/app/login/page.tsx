@@ -120,6 +120,7 @@ function DividerOr() {
 
 function LoginFormPanel({
   isLoading,
+  isGoogleLoading,
   error,
   username,
   setUsername,
@@ -129,6 +130,7 @@ function LoginFormPanel({
   onGoogle,
 }: {
   isLoading: boolean;
+  isGoogleLoading: boolean;
   error: string;
   username: string;
   setUsername: (v: string) => void;
@@ -175,11 +177,11 @@ function LoginFormPanel({
         <button
           type="button"
           onClick={onGoogle}
-          disabled={isLoading}
+          disabled={isLoading || isGoogleLoading}
           className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-slate-50 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-slate-300 hover:bg-slate-100 hover:shadow disabled:cursor-not-allowed disabled:opacity-60 sm:h-[50px] sm:text-[0.95rem]"
         >
           <GoogleMark />
-          <span>Continue with Google</span>
+          <span>{isGoogleLoading ? "Redirecting to Google…" : "Continue with Google"}</span>
         </button>
 
         <DividerOr />
@@ -252,6 +254,7 @@ export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [error, setError] = useState("");
   const [forceShowForm, setForceShowForm] = useState(false);
   const { login, isAuthenticated, user, isHydrating } = useAuth();
@@ -267,6 +270,7 @@ export default function LoginPage() {
   const isHr = user?.roles?.some((r) => r === "hr");
   const isTa = user?.roles?.some((r) => r === "ta");
   const isManager = user?.roles?.some((r) => r === "manager");
+  const isInterviewer = user?.roles?.some((r) => r === "interviewer");
 
   useEffect(() => {
     if (isHydrating || !isAuthenticated || !user) {
@@ -286,13 +290,16 @@ export default function LoginPage() {
             ? "/ta"
             : isManager
               ? "/manager"
-              : "/dashboard";
+              : isInterviewer
+                ? "/interviewer/dashboard"
+                : "/dashboard";
     router.replace(target);
   }, [
     isAdmin,
     isAuthenticated,
     isHr,
     isHydrating,
+    isInterviewer,
     isManager,
     isOwner,
     isTa,
@@ -301,6 +308,8 @@ export default function LoginPage() {
   ]);
 
   const handleGoogleLogin = () => {
+    if (isGoogleLoading) return;
+    setIsGoogleLoading(true);
     const from = readFromQuery();
     const next = from && from !== "/login" ? decodeURIComponent(from) : "/";
     const url = `/api/integrations/google/oauth/start?next=${encodeURIComponent(next)}`;
@@ -369,6 +378,7 @@ export default function LoginPage() {
         </div>
         <LoginFormPanel
           isLoading={isLoading}
+          isGoogleLoading={isGoogleLoading}
           error={error}
           username={username}
           setUsername={setUsername}

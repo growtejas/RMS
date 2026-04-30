@@ -14,6 +14,13 @@ import { fetchEmployees, EmployeeOption } from "@/lib/api/employees";
 import { useAuth } from "@/contexts/useAuth";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { Checkbox } from "@/components/ui/Checkbox";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Input } from "@/components/ui/Input";
+import { Modal } from "@/components/ui/Modal";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Select } from "@/components/ui/Select";
 import { Table, TBody, THead, TD, TH, TR } from "@/components/ui/Table";
 
 /** Shown if catalog API fails; backend should seed these on successful catalog load. */
@@ -34,6 +41,7 @@ const UserManager: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
@@ -47,6 +55,9 @@ const UserManager: React.FC = () => {
   const [isCreating, setIsCreating] = useState(false);
   const [roleOptions, setRoleOptions] = useState<string[]>([]);
   const [catalogHint, setCatalogHint] = useState<string | null>(null);
+  const [createSubmitAttempted, setCreateSubmitAttempted] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
 
   const loadRoleCatalog = useCallback(async () => {
     setCatalogHint(null);
@@ -133,6 +144,15 @@ const UserManager: React.FC = () => {
 
     return () => window.clearTimeout(timer);
   }, [searchTerm]);
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, users.length]);
+
+  const totalPages = Math.max(1, Math.ceil(users.length / pageSize));
+  const pagedUsers = useMemo(
+    () => users.slice((page - 1) * pageSize, page * pageSize),
+    [page, users],
+  );
 
   const handleEdit = (user: AdminUser) => {
     void loadRoleCatalog();
@@ -162,6 +182,7 @@ const UserManager: React.FC = () => {
     setNewPassword("");
     setNewRole("Employee");
     setCreateError(null);
+    setCreateSubmitAttempted(false);
   };
 
   const handleOpenCreate = () => {
@@ -169,22 +190,25 @@ const UserManager: React.FC = () => {
     setShowCreateModal(true);
   };
 
+  const canCreateUser = useMemo(
+    () =>
+      Boolean(
+        newUsername.trim() &&
+          newPassword.trim() &&
+          newRole.trim(),
+      ),
+    [newUsername, newPassword, newRole],
+  );
+
   const handleCreateUser = async () => {
-    if (!newUsername.trim()) {
-      setCreateError("Username is required.");
-      return;
-    }
-    if (!newPassword.trim()) {
-      setCreateError("Password is required.");
-      return;
-    }
-    if (!newRole) {
-      setCreateError("Role is required.");
+    if (!canCreateUser) {
+      setCreateSubmitAttempted(true);
       return;
     }
 
     setIsCreating(true);
     setCreateError(null);
+    setSuccess(null);
     try {
       await createUser({
         username: newUsername.trim(),
@@ -194,6 +218,7 @@ const UserManager: React.FC = () => {
       await loadUsers();
       setShowCreateModal(false);
       resetCreateForm();
+      setSuccess("User created successfully.");
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to create user";
@@ -215,6 +240,7 @@ const UserManager: React.FC = () => {
 
     setIsLoading(true);
     setError(null);
+    setSuccess(null);
     try {
       await updateUser(editingUser.user_id, {
         roles: selectedRoles,
@@ -227,6 +253,7 @@ const UserManager: React.FC = () => {
       await loadUsers();
       setShowEditModal(false);
       setEditingUser(null);
+      setSuccess("User updated successfully.");
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to update user";
@@ -239,11 +266,13 @@ const UserManager: React.FC = () => {
   const handleToggleStatus = async (user: AdminUser) => {
     setIsLoading(true);
     setError(null);
+    setSuccess(null);
     try {
       await updateUser(user.user_id, {
         is_active: !user.is_active,
       });
       await loadUsers();
+      setSuccess("User status updated successfully.");
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to update status";
@@ -255,43 +284,35 @@ const UserManager: React.FC = () => {
 
   return (
     <div className="user-management-container">
-      <div className="viewer-header" style={{ gap: "16px", flexWrap: "wrap" }}>
+      <div className="viewer-header">
         <div>
-          <h2>User Management</h2>
+          <PageHeader title="User Management" />
           {error && <p style={{ color: "#ef4444" }}>{error}</p>}
+          {success ? (
+            <p style={{ color: "#047857", marginTop: "8px" }}>{success}</p>
+          ) : null}
           {catalogHint && (
             <p style={{ color: "#b45309", fontSize: "14px", marginTop: "8px" }}>
               {catalogHint}
             </p>
           )}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <div className="flex flex-wrap items-center gap-3">
           <div className="search-box" style={{ minWidth: "240px" }}>
             <Search size={16} />
-            <input
+            <Input
               type="text"
               placeholder="Search users..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          <button
+          <Button
             type="button"
             onClick={handleOpenCreate}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              background: "#4f46e5",
-              color: "white",
-              border: "none",
-              padding: "8px 16px",
-              borderRadius: "6px",
-              cursor: "pointer",
-            }}
           >
             <Plus size={18} /> Create User
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -318,7 +339,7 @@ const UserManager: React.FC = () => {
                 </td>
               </TR>
             ) : (
-              users.map((user) => (
+              pagedUsers.map((user) => (
                 <TR key={user.user_id} hover>
                   <TD className="font-mono text-xs text-[--color-text-subtle]">
                     {user.user_id}
@@ -355,22 +376,24 @@ const UserManager: React.FC = () => {
                   </TD>
                   <TD>
                     <div className="action-buttons">
-                      <button
-                        className="action-button edit"
+                      <Button
+                        variant="secondary"
+                        size="sm"
                         title="Edit User"
                         onClick={() => handleEdit(user)}
                       >
                         <Edit size={16} />
-                      </button>
-                      <button
-                        className="action-button"
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
                         title={
                           user.is_active ? "Deactivate User" : "Activate User"
                         }
                         onClick={() => handleToggleStatus(user)}
                       >
                         <Power size={16} />
-                      </button>
+                      </Button>
                     </div>
                   </TD>
                 </TR>
@@ -379,33 +402,64 @@ const UserManager: React.FC = () => {
           </TBody>
         </Table>
         {!isLoading && users.length === 0 && (
-          <div className="empty-state">
-            <p>No users found.</p>
-          </div>
+          <EmptyState title="No users found" />
         )}
+        {users.length > pageSize ? (
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              disabled={page === 1}
+            >
+              Previous
+            </Button>
+            <span className="text-sm text-[--color-text-subtle]">
+              Page {page} of {totalPages}
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+              disabled={page === totalPages}
+            >
+              Next
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       {showEditModal && editingUser && (
-        <div className="modal-overlay">
-          <div className="modal-content edit-user-modal">
-            <div className="modal-header">
-              <div>
-                <h3>Edit User</h3>
-                <p className="modal-subtitle">
-                  Update identity, employee link, roles, and account status
-                </p>
-              </div>
-              <button
-                className="close-button"
+        <Modal
+          open={showEditModal && Boolean(editingUser)}
+          onClose={() => {
+            setShowEditModal(false);
+            setEditingUser(null);
+          }}
+          title="Edit User"
+          subtitle="Update identity, employee link, roles, and account status"
+          maxWidthClass="max-w-4xl"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="secondary"
                 onClick={() => {
                   setShowEditModal(false);
                   setEditingUser(null);
                 }}
               >
-                ×
-              </button>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSave}
+                disabled={!isDirty || isLoading}
+              >
+                Save Changes
+              </Button>
             </div>
-            <div className="modal-body edit-user-body">
+          }
+        >
+          <div className="modal-body edit-user-body">
               <div className="edit-user-section">
                 <div className="section-header">
                   <h4>Identity</h4>
@@ -413,7 +467,7 @@ const UserManager: React.FC = () => {
                 </div>
                 <div className="form-group">
                   <label>Username</label>
-                  <input type="text" value={editingUser.username} disabled />
+                  <Input type="text" value={editingUser.username} disabled />
                 </div>
               </div>
 
@@ -424,7 +478,7 @@ const UserManager: React.FC = () => {
                 </div>
                 <div className="form-group">
                   <label>Search Employee</label>
-                  <input
+                  <Input
                     type="text"
                     placeholder="Search by name or ID"
                     value={employeeSearch}
@@ -433,7 +487,7 @@ const UserManager: React.FC = () => {
                 </div>
                 <div className="form-group">
                   <label>Select Employee</label>
-                  <select
+                  <Select
                     value={selectedEmployeeId}
                     onChange={(e) => setSelectedEmployeeId(e.target.value)}
                   >
@@ -452,7 +506,7 @@ const UserManager: React.FC = () => {
                           : ""}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -464,8 +518,7 @@ const UserManager: React.FC = () => {
                                <div className="role-grid">
                   {roleOptionsMerged.map((role) => (
                     <label key={role} className="role-option">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={selectedRoles.includes(role)}
                         onChange={(e) => {
                           if (e.target.checked) {
@@ -490,60 +543,50 @@ const UserManager: React.FC = () => {
                 </div>
                 <div className="form-group">
                   <label>Status</label>
-                  <select
+                  <Select
                     value={isActive ? "active" : "inactive"}
                     onChange={(e) => setIsActive(e.target.value === "active")}
                   >
                     <option value="active">Active</option>
                     <option value="inactive">Inactive</option>
-                  </select>
+                  </Select>
                 </div>
               </div>
-            </div>
-            <div className="modal-footer">
-              <button
-                className="cancel-button"
-                onClick={() => {
-                  setShowEditModal(false);
-                  setEditingUser(null);
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className="save-button"
-                onClick={handleSave}
-                disabled={!isDirty || isLoading}
-              >
-                Save Changes
-              </button>
-            </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {showCreateModal && (
-        <div className="modal-overlay">
-          <div className="modal-content edit-user-modal">
-            <div className="modal-header">
-              <div>
-                <h3>Create User</h3>
-                <p className="modal-subtitle">
-                  Create a new login with an initial role
-                </p>
-              </div>
-              <button
-                className="close-button"
+        <Modal
+          open={showCreateModal}
+          onClose={() => {
+            setShowCreateModal(false);
+            resetCreateForm();
+          }}
+          title="Create User"
+          subtitle="Create a new login with an initial role"
+          maxWidthClass="max-w-3xl"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="secondary"
                 onClick={() => {
                   setShowCreateModal(false);
                   resetCreateForm();
                 }}
               >
-                ×
-              </button>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreateUser}
+                disabled={!canCreateUser || isCreating}
+              >
+                {isCreating ? "Creating..." : "Create User"}
+              </Button>
             </div>
-
-            <div className="modal-body edit-user-body">
+          }
+        >
+          <div className="modal-body edit-user-body">
               <div className="edit-user-section">
                 <div className="section-header">
                   <h4>Account Details</h4>
@@ -551,27 +594,36 @@ const UserManager: React.FC = () => {
                 </div>
                 <div className="form-group">
                   <label>Username</label>
-                  <input
+                  <Input
                     type="text"
                     value={newUsername}
                     onChange={(e) => setNewUsername(e.target.value)}
                     placeholder="Enter username"
+                    aria-invalid={createSubmitAttempted && !newUsername.trim()}
                   />
+                  {createSubmitAttempted && !newUsername.trim() ? (
+                    <p className="mt-1 text-sm text-red-600">Username is required.</p>
+                  ) : null}
                 </div>
                 <div className="form-group">
                   <label>Password</label>
-                  <input
+                  <Input
                     type="password"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="Enter temporary password"
+                    aria-invalid={createSubmitAttempted && !newPassword.trim()}
                   />
+                  {createSubmitAttempted && !newPassword.trim() ? (
+                    <p className="mt-1 text-sm text-red-600">Password is required.</p>
+                  ) : null}
                 </div>
                 <div className="form-group">
                   <label>Role</label>
-                  <select
+                  <Select
                     value={newRole}
                     onChange={(e) => setNewRole(e.target.value)}
+                    aria-invalid={createSubmitAttempted && !newRole.trim()}
                   >
                     <option value="">Select role</option>
                     {roleOptionsMerged.map((role) => (
@@ -579,7 +631,10 @@ const UserManager: React.FC = () => {
                         {role}
                       </option>
                     ))}
-                  </select>
+                  </Select>
+                  {createSubmitAttempted && !newRole.trim() ? (
+                    <p className="mt-1 text-sm text-red-600">Role is required.</p>
+                  ) : null}
                 </div>
                 {createError && (
                   <p style={{ color: "#ef4444", marginTop: "8px" }}>
@@ -588,27 +643,7 @@ const UserManager: React.FC = () => {
                 )}
               </div>
             </div>
-
-            <div className="modal-footer">
-              <button
-                className="cancel-button"
-                onClick={() => {
-                  setShowCreateModal(false);
-                  resetCreateForm();
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className="save-button"
-                onClick={handleCreateUser}
-                disabled={isCreating}
-              >
-                {isCreating ? "Creating..." : "Create User"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

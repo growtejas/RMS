@@ -11,6 +11,8 @@ import {
 import { fetchEvaluationContextForItem } from "@/lib/candidate-profile/evaluation-context-from-requisition";
 import type { EvaluationCardContext } from "@/components/evaluation/mapRankedCandidateToEvaluationCard";
 
+import { Loader } from "@/components/ui/Loader";
+
 import CandidateDetailView from "./CandidateDetailView";
 
 function parsePositiveInt(raw: string | null): number | undefined {
@@ -108,8 +110,8 @@ export default function CandidateProfileRouteClient({
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-600">
-        Loading candidate…
+      <div className="flex w-full min-w-0 flex-col items-center justify-center bg-slate-50 px-4 py-16 sm:min-h-[min(560px,65dvh)]">
+        <Loader label="Loading candidate…" />
       </div>
     );
   }
