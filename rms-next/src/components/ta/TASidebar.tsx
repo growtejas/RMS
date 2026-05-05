@@ -13,6 +13,7 @@ import {
   Menu,
   X,
   Calendar,
+  Brain,
 } from "lucide-react";
 
 interface TASidebarProps {
@@ -52,6 +53,11 @@ const TASidebar: React.FC<TASidebarProps> = ({
       href: "/ta/interviews",
       label: "Interviews",
       icon: <Calendar size={20} />,
+    },
+    {
+      href: "/ta/cie",
+      label: "CIE",
+      icon: <Brain size={20} />,
     },
     {
       href: "/ta/candidates",

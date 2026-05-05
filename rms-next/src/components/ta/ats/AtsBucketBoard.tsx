@@ -358,6 +358,32 @@ export default function AtsBucketBoard({
                             {snippet}
                           </div>
                         ) : null}
+                        {app.suitable_roles?.length ? (
+                          <div
+                            style={{
+                              fontSize: "10px",
+                              color: "#475569",
+                              marginTop: "4px",
+                              lineHeight: 1.35,
+                            }}
+                          >
+                            CIE: {app.suitable_roles.slice(0, 3).join(", ")}
+                            {app.suitable_roles.length > 3 ? "…" : ""}
+                            {app.experience_level
+                              ? ` · ${app.experience_level}`
+                              : ""}
+                          </div>
+                        ) : app.experience_level ? (
+                          <div
+                            style={{
+                              fontSize: "10px",
+                              color: "#475569",
+                              marginTop: "4px",
+                            }}
+                          >
+                            CIE: {app.experience_level}
+                          </div>
+                        ) : null}
                         {expFlag ? (
                           <div
                             style={{

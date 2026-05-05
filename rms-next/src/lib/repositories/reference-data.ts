@@ -100,7 +100,7 @@ export async function listSkillsWithMeta(): Promise<SkillApiRow[]> {
     }
   }
   const mergedIds = Array.from(
-    new Set([...auditIds, ...columnIds]),
+    new Set([...auditIds, ...Array.from(columnIds)]),
   );
   const usersById = await findUsernamesByIds(mergedIds);
 

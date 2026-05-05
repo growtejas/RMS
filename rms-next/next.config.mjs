@@ -10,6 +10,10 @@ const nextConfig = {
    *
    * Solution: keep dev output isolated from prod build output.
    */
+  // Dev: `.next-dev` | Prod (`next build` / `next start`): `.next`. If you see 404s on
+  // `/_next/static/*` while using `next start`, run `npm run build` first. If 404s in
+  // `next dev`, try `npm run dev:clean` and hard-refresh. Behind a reverse proxy, forward
+  // `/_next/*` to the same Node process as HTML.
   distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
   // Native/CommonJS parsers must not be bundled for API routes / server actions.
   serverExternalPackages: ["pdf-parse", "word-extractor"],

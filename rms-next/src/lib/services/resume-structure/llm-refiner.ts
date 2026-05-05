@@ -9,6 +9,11 @@ import {
   parsedCandidateProfileZ,
   type ParsedCandidateProfile,
 } from "@/lib/services/resume-structure/resume-structure.schema";
+import { strictLlmParseToParsedCandidateProfile } from "@/lib/services/resume-structure/strict-llm-resume-parse-mapper";
+import {
+  resolveResumeStructureLlmMode,
+  runStrictResumeParseFromText,
+} from "@/lib/services/resume-structure/strict-llm-resume-parse";
 
 function resolveLlmEnabled(): boolean {
   const v = process.env.RESUME_STRUCTURE_LLM_ENABLED?.trim().toLowerCase();
@@ -59,6 +64,31 @@ export async function tryRefineStructuredProfileWithLlm(input: {
     process.env.RESUME_STRUCTURE_OPENAI_MODEL?.trim() || "gpt-4o-mini";
   const maxChars = Number(process.env.RESUME_STRUCTURE_LLM_MAX_INPUT_CHARS ?? "14000") || 14_000;
   const excerpt = input.resumeText.slice(0, Math.min(maxChars, 100_000));
+
+  if (resolveResumeStructureLlmMode() === "strict_v1") {
+    const strict = await runStrictResumeParseFromText({
+      resumeText: input.resumeText,
+      draftProfile: input.draftProfile,
+      draftWarnings: input.draftWarnings,
+      logContext: input.logContext,
+    });
+    if (!strict.ok) {
+      return null;
+    }
+    const merged = strictLlmParseToParsedCandidateProfile(strict.data, input.draftProfile);
+    const validated = parsedCandidateProfileZ.safeParse(merged);
+    if (!validated.success) {
+      log("warn", "resume_structure_llm_strict_profile_reject", {
+        ...(input.logContext ?? {}),
+        issues: validated.error.issues.slice(0, 8),
+      });
+      return null;
+    }
+    return {
+      profile: validated.data,
+      warnings: [...input.draftWarnings, "LLM_REFINED_STRICT"],
+    };
+  }
 
   const system = `You are a strict, production-grade resume parsing engine for an Applicant Tracking System (ATS).
 Your goal is accurate, structured, SCORABLE data. Return ONLY valid JSON. No explanations, markdown, or comments.

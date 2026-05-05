@@ -1,9 +1,9 @@
 {
   "pages": {
-    "/ta/requisitions/page": [
+    "/ta/cie/candidates/[candidateId]/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/ta/requisitions/page.js"
+      "static/chunks/app/ta/cie/candidates/[candidateId]/page.js"
     ],
     "/ta/layout": [
       "static/chunks/webpack.js",
@@ -16,116 +16,6 @@
       "static/chunks/main-app.js",
       "static/css/app/layout.css",
       "static/chunks/app/layout.js"
-    ],
-    "/ta/my-requisitions/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/ta/my-requisitions/page.js"
-    ],
-    "/ta/requisitions/[id]/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/ta/requisitions/[id]/page.js"
-    ],
-    "/ta/interviews/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/ta/interviews/page.js"
-    ],
-    "/login/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/css/app/login/page.css",
-      "static/chunks/app/login/page.js"
-    ],
-    "/admin/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/admin/page.js"
-    ],
-    "/admin/layout": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/css/app/admin/layout.css",
-      "static/chunks/app/admin/layout.js"
-    ],
-    "/admin/users/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/admin/users/page.js"
-    ],
-    "/dashboard/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/dashboard/page.js"
-    ],
-    "/interviewer/dashboard/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/interviewer/dashboard/page.js"
-    ],
-    "/interviewer/layout": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/css/app/interviewer/layout.css",
-      "static/chunks/app/interviewer/layout.js"
-    ],
-    "/interviewer/interviews/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/interviewer/interviews/page.js"
-    ],
-    "/ta/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/ta/page.js"
-    ],
-    "/ta/candidates/[candidateId]/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/ta/candidates/[candidateId]/page.js"
-    ],
-    "/ta/candidates/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/ta/candidates/page.js"
-    ],
-    "/hr/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/hr/page.js"
-    ],
-    "/hr/layout": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/css/app/hr/layout.css",
-      "static/chunks/app/hr/layout.js"
-    ],
-    "/hr/create-employee/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/css/app/hr/create-employee/page.css",
-      "static/chunks/app/hr/create-employee/page.js"
-    ],
-    "/hr/requisitions/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/hr/requisitions/page.js"
-    ],
-    "/hr/requisitions/[id]/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/hr/requisitions/[id]/page.js"
-    ],
-    "/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/page.js"
-    ],
-    "/interviewer/interviews/[id]/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/interviewer/interviews/[id]/page.js"
     ]
   }
 }

@@ -8,6 +8,7 @@
  */
 
 import { TA_OWNERSHIP_DENIED_MESSAGE } from "@/lib/auth/ownership-messages";
+import type { ParsedCandidate } from "@/lib/services/cie/cie.schema";
 
 import { apiClient } from "./client";
 
@@ -110,6 +111,30 @@ export interface ResumeStructuredSummary {
   issue_tags: string[];
 }
 
+/** CIE report payload on GET /api/candidates/:id (`cie_intel.latest_report`). */
+export interface CandidateCieReport {
+  summary: string;
+  strengths: string[];
+  weaknesses: string[];
+  primarySkills: string[];
+  secondarySkills: string[];
+  experienceLevel: string;
+  suitableRoles: string[];
+  educationInsights: { relevance: string; notes: string };
+  riskFlags: string[];
+  confidenceScore: number;
+}
+
+export interface CandidateCieIntel {
+  latest_report: CandidateCieReport | null;
+  last_evaluated_at: string | null;
+  confidence_score: number | null;
+  model_version: string | null;
+  parsed_data_version: number | null;
+  /** Present on list responses with `cie_summary=1` when the latest run stored an error. */
+  last_error?: string | null;
+}
+
 export interface Candidate {
   candidate_id: number;
   person_id?: number;
@@ -142,6 +167,8 @@ export interface Candidate {
   updated_at: string | null;
   stage_history?: ApplicationStageHistory[];
   interviews: Interview[];
+  /** Candidate Intelligence Engine — present on single-candidate GET. */
+  cie_intel?: CandidateCieIntel | null;
 }
 
 export interface ApplicationStageHistory {
@@ -183,6 +210,9 @@ export interface ApplicationRecord {
     final_score: number | null;
     breakdown: Record<string, unknown>;
   } | null;
+  /** From latest CIE report (`suitableRoles` / `experienceLevel`). */
+  suitable_roles?: string[] | null;
+  experience_level?: string | null;
 }
 
 export interface ApplicationsAtsBucketsResponse {
@@ -413,9 +443,362 @@ export async function fetchCandidatesByItem(
   return data;
 }
 
+/** Organization-wide candidate rows with lightweight `cie_intel` summary (no full report). */
+export async function fetchOrgCandidatesWithCieSummary(): Promise<Candidate[]> {
+  const { data } = await apiClient.get<Candidate[]>("/candidates/", {
+    params: { cie_summary: "1" },
+  });
+  return data;
+}
+
 export async function getCandidate(candidateId: number): Promise<Candidate> {
   const { data } = await apiClient.get<Candidate>(`/candidates/${candidateId}`);
   return data;
+}
+
+/** Per-field provenance for adaptive v2 (read-only, UI/debug only). */
+export interface ParsedResumeV2Prov {
+  source:
+    | "rules"
+    | "llm"
+    | "hybrid"
+    | "header"
+    | "skills_section"
+    | "experience_section"
+    | "projects_section"
+    | "education_section"
+    | "achievements_section"
+    | "certifications_section"
+    | "publications_section"
+    | "patents_section"
+    | "profiles_section"
+    | "leadership_section"
+    | "languages_section"
+    | "awards_section"
+    | "unknown";
+  confidence: number;
+}
+
+export interface ParsedResumeV2ValString {
+  value: string | null;
+  prov: ParsedResumeV2Prov;
+}
+
+export type ParsedResumeV2ProfileType =
+  | "fresher"
+  | "mid"
+  | "senior"
+  | "academic"
+  | "managerial"
+  | "unknown";
+
+export interface ParsedResumeV2Core {
+  basicInfo: {
+    name: ParsedResumeV2ValString;
+    email: ParsedResumeV2ValString;
+    phone: ParsedResumeV2ValString;
+    location?: ParsedResumeV2ValString;
+    headline?: ParsedResumeV2ValString;
+  };
+  skills: Array<{ name: string; prov: ParsedResumeV2Prov }>;
+  experience: Array<{
+    company: string;
+    role: string;
+    location: string | null;
+    startDate: string | null;
+    endDate: string | null;
+    durationMonths: number | null;
+    bullets: string[];
+    techStack: string[];
+    prov: ParsedResumeV2Prov;
+  }>;
+  projects: Array<{
+    title: string;
+    description: string;
+    techStack: string[];
+    startDate: string | null;
+    endDate: string | null;
+    link: string | null;
+    prov: ParsedResumeV2Prov;
+  }>;
+  education: Array<{
+    degree: string;
+    specialization: string | null;
+    university: string;
+    startDate: string | null;
+    endDate: string | null;
+    year: number | null;
+    score: string | null;
+    location: string | null;
+    prov: ParsedResumeV2Prov;
+  }>;
+}
+
+export interface ParsedResumeV2Rich {
+  achievements?: Array<{ title: string; description: string | null }>;
+  certifications?: Array<{
+    name: string;
+    issuer: string | null;
+    year: number | null;
+  }>;
+  publications?: Array<{
+    title: string;
+    venue: string | null;
+    year: number | null;
+    link: string | null;
+  }>;
+  patents?: Array<{ title: string; number: string | null; year: number | null }>;
+  profiles?: Array<{
+    kind: "github" | "linkedin" | "portfolio" | "leetcode" | "twitter" | "other";
+    url: string;
+  }>;
+  leadership?: Array<{
+    role: string;
+    org: string | null;
+    description: string | null;
+    startDate: string | null;
+    endDate: string | null;
+  }>;
+  languages?: string[];
+  awards?: string[];
+  summary?: string;
+}
+
+export interface ParsedResumeV2 {
+  schema: "strict_resume_v2";
+  profile_type: ParsedResumeV2ProfileType;
+  profile_type_confidence: number;
+  core: ParsedResumeV2Core;
+  rich?: ParsedResumeV2Rich;
+  warnings: string[];
+}
+
+export interface ParsedResumeV2Summary {
+  profile_type: ParsedResumeV2ProfileType;
+  profile_type_confidence: number;
+  counts: {
+    skills: number;
+    experience: number;
+    projects: number;
+    education: number;
+    achievements: number;
+    certifications: number;
+    publications: number;
+    patents: number;
+    profiles: number;
+    leadership: number;
+    languages: number;
+    awards: number;
+  };
+  total_experience_years: number | null;
+  warnings: string[];
+}
+
+export interface ParsedResumeV2ProcessorPayload {
+  schema: "candidate_processor_v1";
+  candidate_id: number;
+  requisition_id: number | null;
+  organization_id: number | null;
+  generated_at: string;
+  profile: {
+    type: ParsedResumeV2ProfileType;
+    type_confidence: number;
+    total_experience_years: number | null;
+  };
+  contact: {
+    name: string | null;
+    email: string | null;
+    phone: string | null;
+    location: string | null;
+  };
+  skills: string[];
+  experience: Array<{
+    company: string;
+    role: string;
+    start_date: string | null;
+    end_date: string | null;
+    duration_months: number | null;
+    highlights: string[];
+    tech_stack: string[];
+    confidence: number;
+  }>;
+  projects: Array<{
+    title: string;
+    description: string;
+    tech_stack: string[];
+    start_date: string | null;
+    end_date: string | null;
+    confidence: number;
+  }>;
+  education: Array<{
+    degree: string;
+    specialization: string | null;
+    university: string;
+    year: number | null;
+    score: string | null;
+    confidence: number;
+  }>;
+  extras: {
+    achievements: Array<{ title: string; description: string | null }>;
+    profiles: Array<{ kind: string; url: string }>;
+  };
+  quality: {
+    warnings: string[];
+    source: "parsed_candidate_v2";
+  };
+}
+
+/** GET /api/candidates/{id}/parsed-resume — legacy parser cache + CIE `ParsedCandidate` projection. */
+export interface CandidateParsedResumeResponse {
+  detail?: string;
+  resume_parse: ResumeParseRecord | null;
+  /** Legacy fallback-local v2 → CIE projection (same as before). */
+  parsed_candidate?: ParsedCandidate | null;
+  parsed_candidate_error?: string | null;
+  /** Rules / `resume_structured_profile` → CIE shape (employment, richer fields when pipeline ran). */
+  parsed_candidate_structured?: ParsedCandidate | null;
+  parsed_candidate_structured_error?: string | null;
+  legacy_parser_hints?: {
+    experience_years: number | null;
+    notice_period_days: number | null;
+  };
+  /** Mirrors server `CIE_PARSER_SOURCE` when this response was built. */
+  cie_parser_source?: "legacy" | "structured";
+  /** Which snapshot CIE would use first (with fallback), without persisting. */
+  cie_effective_parsed_candidate?: ParsedCandidate | null;
+  cie_effective_source?: "legacy" | "structured" | null;
+  cie_effective_legacy_hints?: {
+    experience_years: number | null;
+    notice_period_days: number | null;
+  } | null;
+  /**
+   * Adaptive v2 (UI/debug). Present only when `RESUME_STRUCTURE_V2_ENABLED=true`
+   * or the request was made with `?v2=1`. Not used by ranking or CIE.
+   */
+  parsed_candidate_v2?: ParsedResumeV2 | null;
+  parsed_candidate_v2_error?: string | null;
+  /** v2 projected onto the stable CIE `ParsedCandidate` shape (parity preview). */
+  parsed_candidate_v2_preview?: ParsedCandidate | null;
+  /** Lightweight v2 summary (counts + classifier) for UI headers. */
+  parsed_candidate_v2_summary?: ParsedResumeV2Summary | null;
+  /** Stable downstream contract derived from parsed_candidate_v2. */
+  parsed_candidate_v2_processor_payload?: ParsedResumeV2ProcessorPayload | null;
+  from_cache: boolean;
+}
+
+export interface FetchCandidateParsedResumeOptions {
+  /** Request lean v2-focused payload (`parsed_candidate_v2*`) from API. */
+  view?: "full" | "v2";
+  /** Include legacy/debug blocks even when `view=v2`. */
+  debug?: boolean;
+  /**
+   * Force v2 generation by query param (helpful when env gate is off).
+   * API still decides final behavior.
+   */
+  v2?: boolean;
+}
+
+export async function fetchCandidateParsedResume(
+  candidateId: number,
+  options?: FetchCandidateParsedResumeOptions,
+): Promise<CandidateParsedResumeResponse> {
+  const { data } = await apiClient.get<CandidateParsedResumeResponse>(
+    `/candidates/${candidateId}/parsed-resume`,
+    {
+      params: {
+        ...(options?.view ? { view: options.view } : {}),
+        ...(options?.debug ? { debug: "1" } : {}),
+        ...(options?.v2 ? { v2: "1" } : {}),
+      },
+    },
+  );
+  return data;
+}
+
+export async function requestCieRecompute(
+  candidateIds: number[],
+  force?: boolean,
+): Promise<{ bulk_job_id: string; queued: number; status: string }> {
+  const { data } = await apiClient.post<{
+    bulk_job_id: string;
+    queued: number;
+    status: string;
+  }>("/candidates/recompute", {
+    candidateIds,
+    force: force ?? false,
+  });
+  return data;
+}
+
+export async function fetchCieRecomputeJob(jobId: string): Promise<{
+  bulk_job_id: string;
+  status: string;
+  kind: string;
+  progress_pct: number;
+  counts: {
+    expected: number | null;
+    processed: number | null;
+    ok: number | null;
+    failed: number | null;
+    skipped: number | null;
+  };
+  redis: Record<string, string> | null;
+  result_summary: unknown;
+}> {
+  const { data } = await apiClient.get(`/candidates/recompute/${jobId}`);
+  return data as {
+    bulk_job_id: string;
+    status: string;
+    kind: string;
+    progress_pct: number;
+    counts: {
+      expected: number | null;
+      processed: number | null;
+      ok: number | null;
+      failed: number | null;
+      skipped: number | null;
+    };
+    redis: Record<string, string> | null;
+    result_summary: unknown;
+  };
+}
+
+export async function askCandidateCie(
+  candidateId: number,
+  question: string,
+  targetRole: string | null | undefined,
+): Promise<{ answer: string; confidence: number }> {
+  const { data } = await apiClient.post<{ answer: string; confidence: number }>(
+    `/candidates/${candidateId}/ask`,
+    { question, targetRole: targetRole ?? null },
+  );
+  return data;
+}
+
+export async function fetchCieConversations(
+  candidateId: number,
+  limit?: number,
+): Promise<{
+  conversations: Array<{
+    id: number;
+    question: string;
+    answer: string;
+    confidence: number | null;
+    created_at: string;
+  }>;
+}> {
+  const { data } = await apiClient.get(`/candidates/${candidateId}/conversations`, {
+    params: limit != null ? { limit } : undefined,
+  });
+  return data as {
+    conversations: Array<{
+      id: number;
+      question: string;
+      answer: string;
+      confidence: number | null;
+      created_at: string;
+    }>;
+  };
 }
 
 export async function createCandidate(

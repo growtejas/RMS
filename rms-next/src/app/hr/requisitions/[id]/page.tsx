@@ -1,13 +1,13 @@
 import dynamic from "next/dynamic";
 
 import HrPageLayout from "@/components/hr/HrPageLayout";
-import Loader from "@/components/ui/Loader";
+import { Loader } from "@/components/ui/Loader";
 
 const TicketDetails = dynamic(() => import("@/components/hr/TicketDetails"), {
   ssr: false,
   loading: () => (
     <div className="rounded-2xl border border-border bg-surface p-8">
-      <Loader label="Loading requisition details..." size={34} />
+      <Loader label="Loading requisition details..." />
     </div>
   ),
 });

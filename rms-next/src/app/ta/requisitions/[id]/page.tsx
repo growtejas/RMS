@@ -1,27 +1,9 @@
 "use client";
 
-import dynamic from "next/dynamic";
+import RequisitionDetail from "@/components/ta/RequisitionDetail";
 import { useRouter } from "next/navigation";
 
-const RequisitionDetail = dynamic(
-  () => import("@/components/ta/RequisitionDetail"),
-  {
-    ssr: false,
-    loading: () => (
-      <div
-        style={{
-          padding: "48px",
-          textAlign: "center",
-          color: "#64748b",
-          fontSize: "14px",
-        }}
-      >
-        Loading requisition…
-      </div>
-    ),
-  },
-);
-
+// Static import avoids dev lazy-chunk URLs like `/_next/undefined` (dynamic + ssr:false).
 export default function TaRequisitionDetailPage() {
   const router = useRouter();
   return <RequisitionDetail onBack={() => router.back()} />;

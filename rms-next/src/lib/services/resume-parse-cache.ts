@@ -47,6 +47,13 @@ export function resumeParseCacheToApiRecord(
   };
 }
 
+/** Plain text stored in `candidates.resume_parse_cache` (camelCase in DB JSON). */
+export function resumeParseCacheRawText(cache: unknown): string | null {
+  if (!cache || typeof cache !== "object") return null;
+  const t = (cache as Record<string, unknown>).rawText;
+  return typeof t === "string" && t.trim() ? t : null;
+}
+
 export type ResumeParseCacheRecord = {
   v: number;
   parserProvider: string;

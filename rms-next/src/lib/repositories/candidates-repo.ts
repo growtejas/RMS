@@ -32,6 +32,25 @@ export async function selectCandidateById(
   return row ?? null;
 }
 
+/** Returns candidate ids that exist in the org (subset of requested). */
+export async function filterCandidateIdsInOrganization(
+  candidateIds: number[],
+  organizationId: string,
+): Promise<number[]> {
+  if (candidateIds.length === 0) return [];
+  const db = getDb();
+  const rows = await db
+    .select({ candidateId: candidates.candidateId })
+    .from(candidates)
+    .where(
+      and(
+        eq(candidates.organizationId, organizationId),
+        inArray(candidates.candidateId, candidateIds),
+      ),
+    );
+  return rows.map((r) => r.candidateId);
+}
+
 /** Same org + job line: one candidate row per email (case-insensitive). */
 export async function selectCandidateIdByOrgItemEmailLower(params: {
   organizationId: string;

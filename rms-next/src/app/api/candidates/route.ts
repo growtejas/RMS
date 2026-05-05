@@ -65,11 +65,16 @@ export async function GET(req: Request) {
       );
     }
 
+    const includeCieSummary =
+      url.searchParams.get("cie_summary") === "1" ||
+      url.searchParams.get("cie_summary") === "true";
+
     const data = await listCandidatesJson({
       organizationId: user.organizationId,
       requisitionId,
       requisitionItemId,
       currentStage: currentStage?.trim() || null,
+      includeCieSummary,
     });
     const headers = new Headers();
     if (requisitionId != null) {

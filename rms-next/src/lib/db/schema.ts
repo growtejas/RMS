@@ -10,6 +10,7 @@ import {
   serial,
   date,
   numeric,
+  doublePrecision,
   index,
   uniqueIndex,
   uuid,
@@ -616,6 +617,89 @@ export const candidateAiEvaluations = pgTable(
     ),
     index("idx_candidate_ai_eval_org_item").on(t.organizationId, t.requisitionItemId),
     index("idx_candidate_ai_eval_candidate").on(t.candidateId),
+  ],
+);
+
+/** CIE: versioned structured profile snapshots (derived; ATS remains source of truth). */
+export const candidateParsedData = pgTable(
+  "candidate_parsed_data",
+  {
+    id: serial("id").primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    candidateId: integer("candidate_id")
+      .notNull()
+      .references(() => candidates.candidateId, { onDelete: "cascade" }),
+    parsedJson: jsonb("parsed_json").notNull(),
+    version: integer("version").notNull(),
+    sourceResumeContentHash: varchar("source_resume_content_hash", { length: 64 }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("uq_candidate_parsed_data_candidate_version").on(
+      t.candidateId,
+      t.version,
+    ),
+    index("idx_candidate_parsed_data_org_candidate").on(t.organizationId, t.candidateId),
+    index("idx_candidate_parsed_data_candidate_version").on(t.candidateId, t.version),
+  ],
+);
+
+/** CIE: candidate-global intelligence report (separate from job-scoped candidate_ai_evaluations). */
+export const candidateReports = pgTable(
+  "candidate_reports",
+  {
+    id: serial("id").primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    candidateId: integer("candidate_id")
+      .notNull()
+      .references(() => candidates.candidateId, { onDelete: "cascade" }),
+    reportJson: jsonb("report_json").notNull(),
+    confidenceScore: doublePrecision("confidence_score").notNull(),
+    modelVersion: varchar("model_version", { length: 80 }).notNull(),
+    aiEvaluatedAt: timestamp("ai_evaluated_at", { mode: "date" }).notNull().defaultNow(),
+    processingTimeMs: integer("processing_time_ms").notNull().default(0),
+    triggeredBy: integer("triggered_by").references(() => users.userId, {
+      onDelete: "set null",
+    }),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_candidate_reports_org_candidate").on(t.organizationId, t.candidateId),
+    index("idx_candidate_reports_candidate_evaluated").on(t.candidateId, t.aiEvaluatedAt),
+  ],
+);
+
+/** CIE: recruiter Q&A grounded on parsed profile + latest report. */
+export const candidateAiConversations = pgTable(
+  "candidate_ai_conversations",
+  {
+    id: serial("id").primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    candidateId: integer("candidate_id")
+      .notNull()
+      .references(() => candidates.candidateId, { onDelete: "cascade" }),
+    question: text("question").notNull(),
+    answer: text("answer").notNull(),
+    confidence: numeric("confidence", { precision: 5, scale: 4 }),
+    modelVersion: varchar("model_version", { length: 80 }),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_candidate_ai_conversations_org_candidate").on(
+      t.organizationId,
+      t.candidateId,
+    ),
+    index("idx_candidate_ai_conversations_candidate_created").on(
+      t.candidateId,
+      t.createdAt,
+    ),
   ],
 );
 

@@ -5,6 +5,7 @@ import { applications } from "@/lib/db/schema";
 import { HttpError } from "@/lib/http/http-error";
 import * as applicationsRepo from "@/lib/repositories/applications-repo";
 import * as candidatesRepo from "@/lib/repositories/candidates-repo";
+import * as cieRepo from "@/lib/repositories/cie-repo";
 import * as rankingMetadataRepo from "@/lib/repositories/ranking-metadata-repo";
 import { ensureApplicationForCandidateTx } from "@/lib/services/application-sync-service";
 import {
@@ -43,7 +44,10 @@ function applicationHistoryToJson(row: applicationsRepo.ApplicationStageHistoryR
   };
 }
 
-function applicationToJson(row: applicationsRepo.ApplicationWithCandidateRow) {
+function applicationToJson(
+  row: applicationsRepo.ApplicationWithCandidateRow,
+  cie?: { suitable_roles: string[]; experience_level: string | null } | null,
+) {
   return {
     application_id: row.application.applicationId,
     candidate_id: row.application.candidateId,
@@ -56,6 +60,8 @@ function applicationToJson(row: applicationsRepo.ApplicationWithCandidateRow) {
     created_by: row.application.createdBy ?? null,
     created_at: row.application.createdAt?.toISOString() ?? null,
     updated_at: row.application.updatedAt?.toISOString() ?? null,
+    suitable_roles: cie?.suitable_roles?.length ? cie.suitable_roles : null,
+    experience_level: cie?.experience_level ?? null,
     candidate: {
       candidate_id: row.candidate.candidateId,
       person_id: row.candidate.personId,
@@ -76,7 +82,14 @@ export async function listApplicationsJson(params: {
   limit?: number | null;
 }) {
   const rows = await applicationsRepo.selectApplicationsFiltered(params);
-  return rows.map(applicationToJson);
+  const ids = rows.map((r) => r.candidate.candidateId);
+  const cieMap = await cieRepo.selectLatestReportFieldsByCandidateIds(
+    params.organizationId,
+    ids,
+  );
+  return rows.map((r) =>
+    applicationToJson(r, cieMap.get(r.candidate.candidateId) ?? null),
+  );
 }
 
 type ApplicationJson = ReturnType<typeof applicationToJson>;
@@ -141,6 +154,12 @@ export async function listApplicationsGroupedByAtsBucketJson(params: {
     requisitionItemId: params.requisitionItemId,
   });
 
+  const candidateIds = rows.map((r) => r.candidate.candidateId);
+  const cieByCandidate = await cieRepo.selectLatestReportFieldsByCandidateIds(
+    params.organizationId,
+    candidateIds,
+  );
+
   const rankingVersionId =
     await rankingMetadataRepo.selectLatestRankingVersionIdForRequisitionItem(
       params.requisitionItemId,
@@ -188,7 +207,8 @@ export async function listApplicationsGroupedByAtsBucketJson(params: {
   const truncated: Record<string, boolean> = {};
 
   for (const row of rows) {
-    const base = applicationToJson(row);
+    const cie = cieByCandidate.get(row.candidate.candidateId) ?? null;
+    const base = applicationToJson(row, cie);
     const enriched = enrichApplicationWithStoredRanking(
       base,
       rankingVersionId,
@@ -409,8 +429,12 @@ export async function getApplicationJson(
     throw new HttpError(404, "Application not found");
   }
   const history = await applicationsRepo.selectApplicationHistory(applicationId);
+  const cieMap = await cieRepo.selectLatestReportFieldsByCandidateIds(organizationId, [
+    row.candidate.candidateId,
+  ]);
+  const cie = cieMap.get(row.candidate.candidateId) ?? null;
   return {
-    ...applicationToJson(row),
+    ...applicationToJson(row, cie),
     stage_history: history.map(applicationHistoryToJson),
   };
 }
@@ -458,6 +482,12 @@ export async function getApplicationsPipelineJson(params: {
     requisitionId: params.requisitionId ?? null,
   });
 
+  const candIds = rows.map((r) => r.candidate.candidateId);
+  const cieMap = await cieRepo.selectLatestReportFieldsByCandidateIds(
+    params.organizationId,
+    candIds,
+  );
+
   const seeded = new Map<string, ReturnType<typeof applicationToJson>[]>();
   for (const stage of APPLICATION_STAGE_ORDER) {
     seeded.set(stage, []);
@@ -466,7 +496,7 @@ export async function getApplicationsPipelineJson(params: {
   for (const row of rows) {
     const stage = row.application.currentStage || "Sourced";
     const arr = seeded.get(stage) ?? [];
-    arr.push(applicationToJson(row));
+    arr.push(applicationToJson(row, cieMap.get(row.candidate.candidateId) ?? null));
     seeded.set(stage, arr);
   }
 
@@ -485,7 +515,7 @@ export async function getApplicationsPipelineJson(params: {
 
   const unknown = rows
     .filter((r) => !APPLICATION_STAGE_SET.has(r.application.currentStage))
-    .map(applicationToJson);
+    .map((r) => applicationToJson(r, cieMap.get(r.candidate.candidateId) ?? null));
   if (unknown.length > 0) {
     if (params.compact) {
       stages.push({

@@ -6,10 +6,69 @@ import AtsBucketBoard from "@/components/ta/ats/AtsBucketBoard";
 import PipelineOverview from "@/components/ta/requisition-advanced/PipelineOverview";
 import RankingConfigPanel from "@/components/ta/requisition-advanced/RankingConfigPanel";
 import CandidateFiltersBar from "@/components/ta/requisition-advanced/CandidateFiltersBar";
+import {
+  requestCieRecompute,
+  fetchCieRecomputeJob,
+} from "@/lib/api/candidateApi";
 
 import type { RequisitionPipelineBindings } from "./pipelineTabBindings";
 
 export function AtsTabPanel({ bindings }: { bindings: RequisitionPipelineBindings }) {
+  const [cieSel, setCieSel] = React.useState<Set<number>>(new Set());
+  const [cieBulkBusy, setCieBulkBusy] = React.useState(false);
+  const [cieBulkMsg, setCieBulkMsg] = React.useState<string | null>(null);
+  const cieBulkPollGenRef = React.useRef(0);
+
+  React.useEffect(
+    () => () => {
+      cieBulkPollGenRef.current += 1;
+      setCieBulkBusy(false);
+    },
+    [],
+  );
+
+  const toggleCieSelect = (candidateId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCieSel((prev) => {
+      const n = new Set(prev);
+      if (n.has(candidateId)) n.delete(candidateId);
+      else n.add(candidateId);
+      return n;
+    });
+  };
+
+  const runCieBulkRecompute = async () => {
+    if (cieSel.size === 0) return;
+    const gen = ++cieBulkPollGenRef.current;
+    const count = cieSel.size;
+    setCieBulkBusy(true);
+    setCieBulkMsg(null);
+    try {
+      const { bulk_job_id } = await requestCieRecompute(Array.from(cieSel), false);
+      if (gen !== cieBulkPollGenRef.current) return;
+
+      for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        if (gen !== cieBulkPollGenRef.current) return;
+        const p = await fetchCieRecomputeJob(bulk_job_id);
+        if (gen !== cieBulkPollGenRef.current) return;
+        if (p.status === "completed" || (p.progress_pct ?? 0) >= 100) break;
+      }
+      if (gen !== cieBulkPollGenRef.current) return;
+      setCieBulkMsg(`Processed bulk job for ${count} candidate(s).`);
+      setCieSel(new Set());
+      void bindings.loadCandidates();
+    } catch (err) {
+      if (gen === cieBulkPollGenRef.current) {
+        setCieBulkMsg(err instanceof Error ? err.message : "CIE recompute failed.");
+      }
+    } finally {
+      if (gen === cieBulkPollGenRef.current) {
+        setCieBulkBusy(false);
+      }
+    }
+  };
+
   return (
     <>
 <div
@@ -216,6 +275,43 @@ export function AtsTabPanel({ bindings }: { bindings: RequisitionPipelineBinding
   <div
     style={{ display: "flex", flexDirection: "column", gap: "12px" }}
   >
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: "10px",
+        padding: "10px 12px",
+        borderRadius: "10px",
+        border: "1px solid var(--border-subtle)",
+        background: "var(--bg-secondary)",
+      }}
+    >
+      <button
+        type="button"
+        disabled={cieSel.size === 0 || cieBulkBusy}
+        onClick={() => void runCieBulkRecompute()}
+        style={{
+          padding: "8px 14px",
+          borderRadius: "8px",
+          border: "none",
+          background: cieSel.size === 0 ? "#94a3b8" : "var(--color-accent, #2563eb)",
+          color: "white",
+          fontSize: "12px",
+          fontWeight: 600,
+          cursor: cieSel.size === 0 || cieBulkBusy ? "not-allowed" : "pointer",
+        }}
+      >
+        {cieBulkBusy
+          ? "Recomputing…"
+          : `Recompute AI report${cieSel.size ? ` (${cieSel.size})` : ""}`}
+      </button>
+      {cieBulkMsg ? (
+        <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+          {cieBulkMsg}
+        </span>
+      ) : null}
+    </div>
     {bindings.candidates
       .filter((c) => {
         // Item filter
@@ -289,6 +385,14 @@ export function AtsTabPanel({ bindings }: { bindings: RequisitionPipelineBinding
                   gap: "12px",
                 }}
               >
+                <input
+                  type="checkbox"
+                  checked={cieSel.has(c.candidate_id)}
+                  onClick={(e) => toggleCieSelect(c.candidate_id, e)}
+                  onChange={() => {}}
+                  aria-label={`Select ${c.full_name} for CIE recompute`}
+                  style={{ width: 18, height: 18, cursor: "pointer", flexShrink: 0 }}
+                />
                 <div
                   style={{
                     width: "40px",

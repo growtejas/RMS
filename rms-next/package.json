@@ -7,6 +7,7 @@
     "clean": "rm -rf .next .next-dev node_modules/.cache",
     "dev:clean": "npm run clean && node scripts/prep-next-dev.cjs && next dev",
     "build": "next build",
+    "prestart": "node scripts/verify-next-build.cjs",
     "start": "next start",
     "lint": "next lint",
     "db:generate": "drizzle-kit generate",
@@ -20,6 +21,7 @@
     "worker:resume-structure": "tsx src/lib/queue/workers/process-resume-structure-worker.ts",
     "worker:notification-delivery": "tsx src/lib/queue/workers/process-notification-delivery-worker.ts",
     "worker:lifecycle-reminders": "tsx src/lib/queue/workers/process-lifecycle-reminders-worker.ts",
+    "worker:cie-intelligence": "tsx src/lib/queue/workers/process-cie-intelligence-worker.ts",
     "verify:phase4-contract": "tsx src/scripts/verify-phase4-contract.ts",
     "test:e2e": "playwright test",
     "test:unit": "node --test --import tsx tests/unit/*.test.ts"

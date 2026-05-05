@@ -17,6 +17,7 @@ const viewLabels: Record<string, string> = {
   "my-requisitions": "My Requisitions",
   "requisition-detail": "Requisition Detail",
   interviews: "Interviews",
+  cie: "Candidate Intelligence (CIE)",
   "resource-pool": "Resource Pool",
   reports: "Reports",
   "audit-logs": "Audit Logs",
@@ -54,6 +55,9 @@ export default function TaShell({ children }: { children: React.ReactNode }) {
     }
     if (pathname.startsWith("/ta/audit-logs")) {
       return viewLabels["audit-logs"]!;
+    }
+    if (pathname.startsWith("/ta/cie")) {
+      return viewLabels["cie"]!;
     }
     return viewLabels["dashboard"]!;
   }, [pathname]);

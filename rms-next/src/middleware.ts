@@ -116,7 +116,11 @@ export function middleware(req: NextRequest) {
   return res;
 }
 
+/**
+ * Skip all compiled Next assets and the favicon so dev/prod never run CSP / CSRF
+ * logic on `/_next/*` (avoids edge cases where a matcher typo breaks static 404s).
+ */
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/|favicon.ico).*)"],
 };
 

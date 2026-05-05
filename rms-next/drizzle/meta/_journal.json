@@ -176,6 +176,13 @@
       "when": 1778000000000,
       "tag": "0024_interviewer_scorecard_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1778100000000,
+      "tag": "0025_candidate_intelligence_engine",
+      "breakpoints": true
     }
   ]
 }

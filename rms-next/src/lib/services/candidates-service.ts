@@ -35,6 +35,7 @@ import {
   resolveResumeStructureEnabled,
   runResumeStructurePipeline,
 } from "@/lib/services/resume-structure/resume-structure-pipeline";
+import * as cieRepo from "@/lib/repositories/cie-repo";
 
 function candidateResumeHashRejectDuplicates(): boolean {
   const v = process.env.CANDIDATE_RESUME_HASH_REJECT_DUPLICATES?.trim().toLowerCase();
@@ -222,6 +223,7 @@ export async function listCandidatesJson(params: {
   requisitionId?: number | null;
   requisitionItemId?: number | null;
   currentStage?: string | null;
+  includeCieSummary?: boolean;
 }) {
   const rows = await repo.selectCandidatesFiltered(params);
   const ids = rows.map((r) => r.candidateId);
@@ -232,7 +234,41 @@ export async function listCandidatesJson(params: {
     arr.push(i);
     by.set(i.candidateId, arr);
   }
-  return rows.map((r) => candidateToJson(r, by.get(r.candidateId) ?? []));
+  const cieById =
+    params.includeCieSummary === true
+      ? await cieRepo.selectLatestCieSummaryForCandidateIds(
+          params.organizationId,
+          ids,
+        )
+      : null;
+
+  return rows.map((r) => {
+    const base = candidateToJson(r, by.get(r.candidateId) ?? []);
+    if (!cieById) {
+      return base;
+    }
+    const s = cieById.get(r.candidateId);
+    return {
+      ...base,
+      cie_intel: s
+        ? {
+            latest_report: null,
+            last_evaluated_at: s.lastEvaluatedAt.toISOString(),
+            confidence_score: s.confidenceScore,
+            model_version: s.modelVersion,
+            parsed_data_version: null,
+            last_error: s.errorMessage,
+          }
+        : {
+            latest_report: null,
+            last_evaluated_at: null,
+            confidence_score: null,
+            model_version: null,
+            parsed_data_version: null,
+            last_error: null,
+          },
+    };
+  });
 }
 
 export async function getCandidateJson(
@@ -264,10 +300,21 @@ export async function getCandidateJson(
       profile: doc.profile as unknown as Record<string, unknown>,
     };
   }
+
+  const latestReport = await cieRepo.selectLatestReportRow(candidateId, organizationId);
+  const latestParsed = await cieRepo.selectLatestParsedRow(candidateId, organizationId);
+
   return {
     ...candidateToJson(row, ivs),
     resume_parse: resumeParseCacheToApiRecord(row.resumeParseCache),
     resume_structured,
+    cie_intel: {
+      latest_report: latestReport?.report ?? null,
+      last_evaluated_at: latestReport?.aiEvaluatedAt.toISOString() ?? null,
+      confidence_score: latestReport?.confidenceScore ?? null,
+      model_version: latestReport?.modelVersion ?? null,
+      parsed_data_version: latestParsed?.version ?? null,
+    },
   };
 }
 

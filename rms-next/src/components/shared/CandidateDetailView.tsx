@@ -42,6 +42,7 @@ import {
   mapRankedCandidateToEvaluationCard,
   type EvaluationCardContext,
 } from "@/components/evaluation/mapRankedCandidateToEvaluationCard";
+import { CandidateIntelligencePanel } from "@/components/shared/CandidateIntelligencePanel";
 
 /** Re-export for callers that need the 403 message text. */
 export { TA_OWNERSHIP_DENIED_MESSAGE } from "@/lib/api/candidateApi";
@@ -121,6 +122,7 @@ export default function CandidateDetailView({
   const [evaluationRefreshKey, setEvaluationRefreshKey] = useState(0);
   const [aiEvalWorking, setAiEvalWorking] = useState(false);
   const [deletingCandidate, setDeletingCandidate] = useState(false);
+  const [detailTab, setDetailTab] = useState<"profile" | "intelligence">("profile");
 
   /** Bumped when opening / hydrating or when user mutates candidate so stale fetches cannot overwrite. */
   const candidateHydrateGenRef = useRef(0);
@@ -558,6 +560,33 @@ export default function CandidateDetailView({
             </div>
           )}
 
+          <div className="mb-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+            <button
+              type="button"
+              onClick={() => setDetailTab("profile")}
+              className={
+                detailTab === "profile"
+                  ? "rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
+                  : "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600"
+              }
+            >
+              Profile
+            </button>
+            <button
+              type="button"
+              onClick={() => setDetailTab("intelligence")}
+              className={
+                detailTab === "intelligence"
+                  ? "rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
+                  : "rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600"
+              }
+            >
+              Intelligence
+            </button>
+          </div>
+
+          {detailTab === "profile" ? (
+          <>
           {isEvaluateWorkspace && (
             <div
               style={{
@@ -1431,6 +1460,20 @@ export default function CandidateDetailView({
               </div>
             )}
           </div>
+          )}
+          </>
+          ) : (
+            <CandidateIntelligencePanel
+              candidate={candidate}
+              onRefresh={async () => {
+                const full = await getCandidateWithApplication(
+                  candidate.candidate_id,
+                  candidate.application_id ?? undefined,
+                );
+                setCandidate(full);
+                onUpdate(full);
+              }}
+            />
           )}
     </>
   );
