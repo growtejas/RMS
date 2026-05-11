@@ -7,7 +7,6 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import {
-  ANALYTICS_ARRAY_FILTER_KEYS,
   type AnalyticsArrayFilterKey,
 } from "@/lib/analytics/use-analytics-filters";
 
@@ -24,6 +23,10 @@ export interface AnalyticsFilterBarProps {
   onLimitChange: (value: number) => void;
   onArrayInput: (key: AnalyticsArrayFilterKey, csv: string) => void;
   onResetAll: () => void;
+  dropdownOptions?: Partial<
+    Record<AnalyticsArrayFilterKey, Array<{ value: string; label: string }>>
+  >;
+  requisitionOnly?: boolean;
 }
 
 /**
@@ -45,16 +48,78 @@ export function AnalyticsFilterBar(props: AnalyticsFilterBarProps) {
     onLimitChange,
     onArrayInput,
     onResetAll,
+    dropdownOptions,
+    requisitionOnly,
   } = props;
 
-  const arrayFields = useMemo(
-    () =>
-      ANALYTICS_ARRAY_FILTER_KEYS.map((key) => ({
-        key,
-        value: arrays[key].join(","),
-      })),
-    [arrays],
-  );
+  const arrayFields = useMemo(() => {
+    const labels: Record<AnalyticsArrayFilterKey, string> = {
+      requisitionIds: "Requisition",
+      requisitionItemIds: "Requisition Item",
+      department: "Department",
+      recruiterIds: "Recruiter",
+      hiringManagerIds: "Hiring Manager",
+      source: "Source",
+      pipelineStages: "Pipeline Stage",
+      interviewStage: "Interview Stage",
+      location: "Location",
+      employmentType: "Employment Type",
+    };
+    const preferredOrder: AnalyticsArrayFilterKey[] = requisitionOnly
+      ? ["requisitionIds"]
+      : [
+          "requisitionIds",
+          "department",
+          "source",
+          "pipelineStages",
+          "interviewStage",
+          "recruiterIds",
+          "location",
+          "employmentType",
+        ];
+    return preferredOrder.map((key) => ({
+      key,
+      label: labels[key],
+      value: arrays[key][0] ?? "",
+      options: dropdownOptions?.[key] ?? [],
+    }));
+  }, [arrays, dropdownOptions]);
+
+  if (requisitionOnly) {
+    const reqField = arrayFields.find((f) => f.key === "requisitionIds");
+    return (
+      <div className="flex flex-col gap-2 rounded-xl border border-border/70 bg-surface px-4 py-3 shadow-sm">
+        <div className="flex items-center justify-between">
+          <label htmlFor="hiring-intel-requisition-filter" className="text-sm font-semibold text-text">
+            Requisition
+          </label>
+          {activeBadges.length > 0 ? (
+            <button
+              type="button"
+              onClick={onResetAll}
+              className="text-xs font-medium text-text-muted hover:text-text"
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
+        <Select
+          id="hiring-intel-requisition-filter"
+          value={reqField?.value ?? ""}
+          onChange={(e) => onArrayInput("requisitionIds", e.target.value ? e.target.value : "")}
+          aria-label="Requisition"
+          className="max-w-xl"
+        >
+          <option value="">Select requisition</option>
+          {(reqField?.options ?? []).map((opt) => (
+            <option key={`requisitionIds-${opt.value}`} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </Select>
+      </div>
+    );
+  }
 
   return (
     <Card className="sticky top-[88px] z-10">
@@ -80,41 +145,51 @@ export function AnalyticsFilterBar(props: AnalyticsFilterBarProps) {
           ) : null}
         </div>
         <div className="grid flex-[3] gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <Input
-            value={searchInput}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search candidates..."
-            aria-label="Search"
-          />
-          <Input
-            type="date"
-            value={fromDate.slice(0, 10)}
-            onChange={(e) => onRangeStart(e.target.value)}
-            aria-label="From date"
-          />
-          <Input
-            type="date"
-            value={toDate.slice(0, 10)}
-            onChange={(e) => onRangeEnd(e.target.value)}
-            aria-label="To date"
-          />
-          <Select
-            value={String(pageLimit)}
-            onChange={(e) => onLimitChange(Number.parseInt(e.target.value, 10) || 25)}
-            aria-label="Page size"
-          >
-            <option value="25">25 rows</option>
-            <option value="50">50 rows</option>
-            <option value="100">100 rows</option>
-          </Select>
-          {arrayFields.map(({ key, value }) => (
-            <Input
+          {!requisitionOnly ? (
+            <>
+              <Input
+                value={searchInput}
+                onChange={(e) => onSearchChange(e.target.value)}
+                placeholder="Search candidates..."
+                aria-label="Search"
+              />
+              <Input
+                type="date"
+                value={fromDate.slice(0, 10)}
+                onChange={(e) => onRangeStart(e.target.value)}
+                aria-label="From date"
+              />
+              <Input
+                type="date"
+                value={toDate.slice(0, 10)}
+                onChange={(e) => onRangeEnd(e.target.value)}
+                aria-label="To date"
+              />
+              <Select
+                value={String(pageLimit)}
+                onChange={(e) => onLimitChange(Number.parseInt(e.target.value, 10) || 25)}
+                aria-label="Page size"
+              >
+                <option value="25">25 rows</option>
+                <option value="50">50 rows</option>
+                <option value="100">100 rows</option>
+              </Select>
+            </>
+          ) : null}
+          {arrayFields.map(({ key, label, value, options }) => (
+            <Select
               key={key}
               value={value}
-              onChange={(e) => onArrayInput(key, e.target.value)}
-              placeholder={`${key} (comma-separated)`}
+              onChange={(e) => onArrayInput(key, e.target.value ? e.target.value : "")}
               aria-label={key}
-            />
+            >
+              <option value="">All {label}</option>
+              {options.map((opt) => (
+                <option key={`${key}-${opt.value}`} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </Select>
           ))}
         </div>
         <Button variant="secondary" onClick={onResetAll}>

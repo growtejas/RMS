@@ -57,7 +57,9 @@ export function buildFunnelRows(
   options: FunnelTransformOptions = {},
 ): FunnelStageRow[] {
   const visibleStages = stages
-    .filter((s) => !s.isHidden && s.stageType === "active")
+    // Render forward lifecycle stages, including terminal "hired"-type endpoints.
+    // Exclude only rejection/withdrawal side branches from the main funnel.
+    .filter((s) => !s.isHidden && s.stageType !== "rejected" && s.stageType !== "withdrawn")
     .sort((a, b) => a.sortOrder - b.sortOrder);
   const rows: FunnelStageRow[] = [];
   for (let i = 0; i < visibleStages.length; i += 1) {

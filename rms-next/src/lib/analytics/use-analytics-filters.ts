@@ -119,9 +119,11 @@ export function useAnalyticsFilters(opts: UseAnalyticsFiltersOptions = {}) {
     for (const key of ANALYTICS_ARRAY_FILTER_KEYS) {
       const values = state.arrays[key];
       if (values.length > 0) {
+        const preview = values.slice(0, 2).join(", ");
+        const more = values.length > 2 ? ` +${values.length - 2}` : "";
         badges.push({
           key,
-          label: `${key}: ${values.length} selected`,
+          label: `${key}: ${preview}${more}`,
           clear: () => clearArrayKey(key),
         });
       }
