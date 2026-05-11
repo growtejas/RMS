@@ -1,9 +1,12 @@
 {
-  "/api/cie/candidates/route": "app/api/cie/candidates/route.js",
-  "/api/cie/role-catalog/route": "app/api/cie/role-catalog/route.js",
-  "/ta/reports/page": "app/ta/reports/page.js",
+  "/login/page": "app/login/page.js",
+  "/api/auth/logout/route": "app/api/auth/logout/route.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/api/auth/login/route": "app/api/auth/login/route.js",
+  "/api/interviews/my/route": "app/api/interviews/my/route.js",
+  "/interviewer/dashboard/page": "app/interviewer/dashboard/page.js",
+  "/interviewer/interviews/page": "app/interviewer/interviews/page.js",
   "/ta/reports/hiring-intelligence/page": "app/ta/reports/hiring-intelligence/page.js",
-  "/ta/cie/page": "app/ta/cie/page.js",
-  "/ta/page": "app/ta/page.js",
-  "/ta/interviews/page": "app/ta/interviews/page.js"
+  "/ta/reports/page": "app/ta/reports/page.js",
+  "/ta/resource-pool/page": "app/ta/resource-pool/page.js"
 }
