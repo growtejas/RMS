@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "start:local": "node scripts/start-local.cjs",
     "dev": "node scripts/prep-next-dev.cjs && next dev",
     "clean": "rm -rf .next .next-dev node_modules/.cache",
     "dev:clean": "npm run clean && node scripts/prep-next-dev.cjs && next dev",

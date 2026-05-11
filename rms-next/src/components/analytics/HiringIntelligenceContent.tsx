@@ -1,26 +1,17 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  Bar,
-  BarChart,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { AnalyticsFilterBar } from "@/components/analytics/AnalyticsFilterBar";
 import { CandidateFunnel } from "@/components/analytics/CandidateFunnel";
 import { StageDrilldownDrawer } from "@/components/analytics/StageDrilldownDrawer";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ListEmpty } from "@/components/ui/ListEmpty";
-import { ListError } from "@/components/ui/ListError";
 import { ListSkeleton } from "@/components/ui/ListSkeleton";
+import { ListFooter } from "@/components/ui/ListFooter";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/Table";
 import {
   ANALYTICS_ARRAY_FILTER_KEYS,
@@ -28,27 +19,37 @@ import {
   type AnalyticsArrayFilterKey,
 } from "@/lib/analytics/use-analytics-filters";
 import {
-  useReportInterviewerPerformance,
-  useReportInterviewFunnel,
   useReportPipelineFunnel,
   useReportPipelineStages,
   useReportRecruiterPerformance,
   useReportSourceEffectiveness,
-  useReportTimeToHire,
 } from "@/lib/query/hooks";
 import { apiClient } from "@/lib/api/client";
+import {
+  buildPaginationMeta,
+  DEFAULT_PAGE_SIZE,
+  isPageSize,
+  type PageSize,
+} from "@/lib/pagination/contract";
+
+/** Recruiter table pagination — keeps main `page`/`limit` for pipeline funnel + drilldown API. */
+const HI_REC_PAGE = "hireRp";
+const HI_REC_LIMIT = "hireRl";
+/** Legacy source list pagination (removed from UI); strip from URL on filter change */
+const LEGACY_HI_SRC_PAGE = "hireSp";
+const LEGACY_HI_SRC_LIMIT = "hireSl";
+
+function parsePositiveInt(raw: string | null, fallback: number): number {
+  const n = Number.parseInt(raw ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
 
 export type AnalyticsSection =
   | "header"
   | "filters"
   | "kpis"
   | "candidateFunnel"
-  | "aiInsights"
-  | "interviewFunnel"
-  | "timeToHire"
   | "sources"
-  | "recruiters"
-  | "interviewers"
   | "tables";
 
 export const ALL_ANALYTICS_SECTIONS: AnalyticsSection[] = [
@@ -56,12 +57,7 @@ export const ALL_ANALYTICS_SECTIONS: AnalyticsSection[] = [
   "filters",
   "kpis",
   "candidateFunnel",
-  "aiInsights",
-  "interviewFunnel",
-  "timeToHire",
   "sources",
-  "recruiters",
-  "interviewers",
   "tables",
 ];
 
@@ -124,6 +120,31 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
     [pathname, router, searchParams],
   );
 
+  const hireRecLimitRaw = parsePositiveInt(searchParams.get(HI_REC_LIMIT), DEFAULT_PAGE_SIZE);
+  const hireRecLimit: PageSize = isPageSize(hireRecLimitRaw) ? hireRecLimitRaw : DEFAULT_PAGE_SIZE;
+  const hireRecPageRequested = parsePositiveInt(searchParams.get(HI_REC_PAGE), 1);
+
+  useEffect(() => {
+    if (!searchParams.has(LEGACY_HI_SRC_PAGE) && !searchParams.has(LEGACY_HI_SRC_LIMIT)) return;
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete(LEGACY_HI_SRC_PAGE);
+    next.delete(LEGACY_HI_SRC_LIMIT);
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  }, [pathname, router, searchParams]);
+
+  const patchRecruiterTableParams = useCallback(
+    (patch: Partial<{ recPage: number; recLimit: PageSize }>) => {
+      const next = new URLSearchParams(searchParams.toString());
+      if (patch.recPage != null) next.set(HI_REC_PAGE, String(patch.recPage));
+      if (patch.recLimit != null) {
+        next.set(HI_REC_LIMIT, String(patch.recLimit));
+        next.set(HI_REC_PAGE, "1");
+      }
+      router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
+
   const visibleSections = useMemo(() => new Set(props.sections ?? ALL_ANALYTICS_SECTIONS), [props.sections]);
   const has = (section: AnalyticsSection) => visibleSections.has(section);
 
@@ -133,16 +154,20 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
     [baseParams, props.scope],
   );
 
+  const hireListScopeFingerprint = useMemo(() => {
+    const p = { ...scopedParams };
+    delete p.page;
+    delete p.limit;
+    return JSON.stringify(p);
+  }, [scopedParams]);
+
   const stagesQuery = useReportPipelineStages();
   const pipelineQuery = useReportPipelineFunnel({
     ...scopedParams,
     ...(selectedStageKey ? { stage: selectedStageKey } : {}),
   });
-  const interviewQuery = useReportInterviewFunnel(scopedParams);
-  const timeToHireQuery = useReportTimeToHire(scopedParams);
   const sourceQuery = useReportSourceEffectiveness(scopedParams);
   const recruiterQuery = useReportRecruiterPerformance(scopedParams);
-  const interviewerQuery = useReportInterviewerPerformance(scopedParams);
   const requisitionsQuery = useQuery({
     queryKey: ["analytics", "filter-options", "requisitions"],
     queryFn: async () => {
@@ -162,6 +187,21 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
 
   const stageRows = useMemo(() => pipelineQuery.data?.stages ?? [], [pipelineQuery.data?.stages]);
   const kpis = pipelineQuery.data?.kpis;
+  const recruiterRows = recruiterQuery.data?.rows ?? [];
+  const sourceRows = sourceQuery.data?.rows ?? [];
+
+  const recruiterPagination = buildPaginationMeta({
+    page: hireRecPageRequested,
+    limit: hireRecLimit,
+    total: recruiterRows.length,
+  });
+
+  const pagedRecruiterRows = useMemo(() => {
+    if (recruiterRows.length === 0) return [];
+    const start = (recruiterPagination.page - 1) * recruiterPagination.limit;
+    return recruiterRows.slice(start, start + recruiterPagination.limit);
+  }, [recruiterRows, recruiterPagination.page, recruiterPagination.limit]);
+
   const selectedStage = stageRows.find((s) => s.key === selectedStageKey) ?? null;
   const freshness = pipelineQuery.data?.freshness;
   const dropdownOptions = useMemo(() => {
@@ -171,10 +211,6 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
         ? `REQ-${r.reqId} (${r.projectName.trim()})`
         : `REQ-${r.reqId}`,
     }));
-    const departmentOpts = (timeToHireQuery.data?.byDepartment ?? [])
-      .map((d) => (d.department ?? "").trim())
-      .filter((v) => v.length > 0)
-      .map((v) => ({ value: v, label: v }));
     const sourceOpts = (sourceQuery.data?.rows ?? [])
       .map((row) => row.source?.trim())
       .filter((v): v is string => Boolean(v))
@@ -182,10 +218,6 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
     const pipelineStageOpts = (stagesQuery.data?.stages ?? []).map((s) => ({
       value: s.label,
       label: s.label,
-    }));
-    const interviewStageOpts = (interviewQuery.data?.stages ?? []).map((s) => ({
-      value: s.stage,
-      label: s.stage,
     }));
     const recruiterOpts = (recruiterQuery.data?.rows ?? [])
       .filter((row) => row.recruiterId != null)
@@ -200,22 +232,18 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
 
     return {
       requisitionIds: Array.from(new Map(requisitionOpts.map((o) => [o.value, o])).values()),
-      department: Array.from(new Map(departmentOpts.map((o) => [o.value, o])).values()),
       source: Array.from(new Map(sourceOpts.map((o) => [o.value, o])).values()),
       pipelineStages: Array.from(new Map(pipelineStageOpts.map((o) => [o.value, o])).values()),
-      interviewStage: Array.from(new Map(interviewStageOpts.map((o) => [o.value, o])).values()),
       recruiterIds: Array.from(new Map(recruiterOpts.map((o) => [o.value, o])).values()),
       location: Array.from(new Map(locationOpts.map((o) => [o.value, o])).values()),
       employmentType: employmentOpts,
     };
   }, [
     filters.state.arrays.location,
-    interviewQuery.data?.stages,
     requisitionsQuery.data,
     recruiterQuery.data?.rows,
     sourceQuery.data?.rows,
     stagesQuery.data?.stages,
-    timeToHireQuery.data?.byDepartment,
   ]);
 
   const handleArrayInput = (key: AnalyticsArrayFilterKey, csv: string) => {
@@ -238,7 +266,8 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
     filters.setArrayFilter(key, values);
   };
 
-  const handlePageChange = (page: number) => filters.setPage(page);
+  const handlePipelinePageChange = (page: number) => filters.setPage(page);
+
   const handleResetRequisitionOnly = () => {
     for (const key of ANALYTICS_ARRAY_FILTER_KEYS) {
       filters.setArrayFilter(key, []);
@@ -250,44 +279,28 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
     filters.setLimit(25);
   };
 
-  const insights = useMemo(() => {
-    const list: Array<{ label: string; severity: string; recommendation: string }> = [];
-    if (stageRows.length > 1) {
-      const sorted = [...stageRows].sort((a, b) => b.dropOffPct - a.dropOffPct);
-      const worst = sorted[0];
-      if (worst && worst.dropOffPct > 0) {
-        list.push({
-          label: `${worst.stage} has the highest drop-off (${worst.dropOffPct}%).`,
-          severity: "high",
-          recommendation: "Add structured rejection reasons and audit interviewer calibration.",
-        });
-      }
+  /** Sync URL when recruiter table page exceeds range after row count changes */
+  useEffect(() => {
+    if (recruiterPagination.page === hireRecPageRequested) return;
+    const next = new URLSearchParams(searchParams.toString());
+    next.set(HI_REC_PAGE, String(recruiterPagination.page));
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  }, [hireRecPageRequested, pathname, recruiterPagination.page, router, searchParams]);
+
+  const prevHireScopeRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevHireScopeRef.current === null) {
+      prevHireScopeRef.current = hireListScopeFingerprint;
+      return;
     }
-    const topSource = sourceQuery.data?.rows?.[0];
-    if (topSource) {
-      list.push({
-        label: `${topSource.source} delivers the strongest hire rate (${topSource.conversionPct}%).`,
-        severity: "medium",
-        recommendation: "Re-allocate sourcing budget toward this channel.",
-      });
-    }
-    const slowestDept = timeToHireQuery.data?.byDepartment?.[0];
-    if (slowestDept) {
-      list.push({
-        label: `${slowestDept.department} has the slowest fill cycle (${slowestDept.avgDays}d avg).`,
-        severity: "medium",
-        recommendation: "Run an intake calibration with hiring managers in this department.",
-      });
-    }
-    if (list.length === 0) {
-      list.push({
-        label: "Insights will activate once enough hires and rejections accumulate.",
-        severity: "low",
-        recommendation: "Encourage recruiters to log structured stage transitions.",
-      });
-    }
-    return list;
-  }, [stageRows, sourceQuery.data, timeToHireQuery.data]);
+    if (prevHireScopeRef.current === hireListScopeFingerprint) return;
+    prevHireScopeRef.current = hireListScopeFingerprint;
+    const next = new URLSearchParams(searchParams.toString());
+    next.set(HI_REC_PAGE, "1");
+    next.delete(LEGACY_HI_SRC_PAGE);
+    next.delete(LEGACY_HI_SRC_LIMIT);
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  }, [hireListScopeFingerprint, pathname, router, searchParams]);
 
   return (
     <div className="space-y-6 pb-12">
@@ -338,9 +351,6 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
             ["Total Interviews", kpis.totalInterviews, kpis.sparkline?.applications],
             ["Hires", kpis.hires, kpis.sparkline?.hires],
             ["Offer Acceptance %", `${kpis.offerAcceptanceRate}%`, kpis.sparkline?.hires],
-            ["Avg Time To Hire", `${kpis.avgTimeToHireDays}d`, kpis.sparkline?.hires],
-            ["Pipeline Conversion %", `${kpis.pipelineConversionPct}%`, kpis.sparkline?.hires],
-            ["Interview No-Show %", `${kpis.interviewNoShowPct}%`, kpis.sparkline?.applications],
             ["Active Jobs", kpis.activeJobs, kpis.sparkline?.applications],
           ].map(([label, value, series]) => (
             <Card key={String(label)}>
@@ -365,7 +375,7 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
       </section>
       ) : null}
 
-      {has("candidateFunnel") || has("aiInsights") ? (
+      {has("candidateFunnel") || has("sources") ? (
       <section className="grid gap-5 lg:grid-cols-2">
         {has("candidateFunnel") ? (
           <CandidateFunnel
@@ -377,100 +387,6 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
             selectedStageKey={selectedStageKey}
           />
         ) : null}
-        {has("aiInsights") ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>AI Hiring Insights</CardTitle>
-            </CardHeader>
-            <CardBody className="space-y-3">
-              {insights.map((insight) => (
-                <div
-                  key={insight.label}
-                  className="rounded-xl border border-border bg-surface-2 p-4"
-                >
-                  <div className="mb-1 flex items-center justify-between">
-                    <p className="text-sm font-semibold text-text">{insight.label}</p>
-                    <span className="rounded-full bg-slate-900/5 px-2 py-1 text-xs font-medium uppercase text-text-muted">
-                      {insight.severity}
-                    </span>
-                  </div>
-                  <p className="text-xs text-text-muted">{insight.recommendation}</p>
-                </div>
-              ))}
-            </CardBody>
-          </Card>
-        ) : null}
-      </section>
-      ) : null}
-
-      {has("interviewFunnel") || has("timeToHire") ? (
-      <section className="grid gap-5 lg:grid-cols-2">
-        {has("interviewFunnel") ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Interview Lifecycle Funnel</CardTitle>
-          </CardHeader>
-          <CardBody>
-            {interviewQuery.isError ? (
-              <ListError onRetry={() => interviewQuery.refetch()} />
-            ) : interviewQuery.isLoading ? (
-              <ListSkeleton rows={5} rowHeight={42} />
-            ) : (
-              <div className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={interviewQuery.data?.stages ?? []}>
-                    <XAxis dataKey="stage" tick={{ fontSize: 11 }} />
-                    <YAxis />
-                    <Tooltip />
-                    <Bar dataKey="count" fill="#0891b2" radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-            <div className="mt-3 space-y-2">
-              {(interviewQuery.data?.bottlenecks ?? []).map((item) => (
-                <div
-                  key={item.stage}
-                  className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900"
-                >
-                  {item.stage}: {item.warning} ({item.delayedCount} delayed)
-                </div>
-              ))}
-            </div>
-          </CardBody>
-        </Card>
-        ) : null}
-
-        {has("timeToHire") ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Time To Hire Trend</CardTitle>
-          </CardHeader>
-          <CardBody>
-            {timeToHireQuery.isError ? (
-              <ListError onRetry={() => timeToHireQuery.refetch()} />
-            ) : timeToHireQuery.isLoading ? (
-              <ListSkeleton rows={5} rowHeight={42} />
-            ) : (
-              <div className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={timeToHireQuery.data?.trend ?? []}>
-                    <XAxis dataKey="date" hide />
-                    <YAxis />
-                    <Tooltip />
-                    <Line dataKey="avgDays" stroke="#7c3aed" strokeWidth={2.5} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </CardBody>
-        </Card>
-        ) : null}
-      </section>
-      ) : null}
-
-      {has("sources") || has("recruiters") || has("interviewers") ? (
-      <section className="grid gap-5 xl:grid-cols-3">
         {has("sources") ? (
         <Card>
           <CardHeader>
@@ -479,67 +395,15 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
           <CardBody className="space-y-2">
             {sourceQuery.isLoading ? (
               <ListSkeleton rows={4} rowHeight={48} />
-            ) : (sourceQuery.data?.rows ?? []).length === 0 ? (
+            ) : sourceRows.length === 0 ? (
               <ListEmpty description="No source data for current filters." />
             ) : (
-              (sourceQuery.data?.rows ?? []).map((row) => (
+              sourceRows.map((row) => (
                 <div key={row.source} className="rounded-lg border border-border p-2 text-xs">
                   <p className="font-semibold">{row.source}</p>
                   <p className="text-text-muted">
                     Apps {row.applications} · Interviews {row.interviews} · Hires {row.hires} · Conv{" "}
                     {row.conversionPct}% · Quality {row.qualityScore}
-                  </p>
-                </div>
-              ))
-            )}
-          </CardBody>
-        </Card>
-        ) : null}
-        {has("recruiters") ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Recruiter Performance</CardTitle>
-          </CardHeader>
-          <CardBody>
-            {recruiterQuery.isLoading ? (
-              <ListSkeleton rows={4} rowHeight={48} />
-            ) : (recruiterQuery.data?.rows ?? []).length === 0 ? (
-              <ListEmpty description="No recruiter data for current filters." />
-            ) : (
-              <div className="h-[260px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={recruiterQuery.data?.rows ?? []}>
-                    <XAxis dataKey="recruiter" hide />
-                    <YAxis />
-                    <Tooltip />
-                    <Bar dataKey="conversionPct" fill="#2563eb" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </CardBody>
-        </Card>
-        ) : null}
-        {has("interviewers") ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Interviewer Effectiveness</CardTitle>
-          </CardHeader>
-          <CardBody className="space-y-2">
-            {interviewerQuery.isLoading ? (
-              <ListSkeleton rows={4} rowHeight={48} />
-            ) : (interviewerQuery.data?.rows ?? []).slice(0, 8).length === 0 ? (
-              <ListEmpty description="No interviewer data for current filters." />
-            ) : (
-              (interviewerQuery.data?.rows ?? []).slice(0, 8).map((row) => (
-                <div
-                  key={`${row.interviewer}-${row.interviewerId ?? "deleted"}`}
-                  className="rounded-lg border border-border p-2 text-xs"
-                >
-                  <p className="font-semibold">{row.interviewer}</p>
-                  <p className="text-text-muted">
-                    Interviews {row.interviewsConducted} · Pass {row.passRatioPct}% · Feedback{" "}
-                    {row.avgFeedbackSubmissionHours}h · Overdue {row.overdueFeedbackCount}
                   </p>
                 </div>
               ))
@@ -557,7 +421,7 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
         rows={pipelineQuery.data?.drillDownRows ?? []}
         pagination={pipelineQuery.data?.pagination ?? null}
         onClose={() => setSelectedStageKey(null)}
-        onPageChange={handlePageChange}
+        onPageChange={handlePipelinePageChange}
       />
 
       {has("tables") ? (
@@ -567,30 +431,43 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
             <CardTitle>Detailed Performance Tables</CardTitle>
           </CardHeader>
           <CardBody>
-            <Table>
-              <THead>
-                <TR>
-                  <TH>Recruiter</TH>
-                  <TH>Candidates Processed</TH>
-                  <TH>Hires</TH>
-                  <TH>Conversion %</TH>
-                  <TH>Avg Response Hours</TH>
-                  <TH>Active Reqs</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {(recruiterQuery.data?.rows ?? []).map((row) => (
-                  <TR key={`${row.recruiter}-${row.recruiterId ?? "deleted"}`} hover>
-                    <TD>{row.recruiter}</TD>
-                    <TD>{row.candidatesProcessed}</TD>
-                    <TD>{row.hiresMade}</TD>
-                    <TD>{row.conversionPct}%</TD>
-                    <TD>{row.avgResponseHours}h</TD>
-                    <TD>{row.activeRequisitions}</TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
+            {recruiterQuery.isLoading ? (
+              <ListSkeleton rows={6} rowHeight={40} />
+            ) : recruiterRows.length === 0 ? (
+              <ListEmpty description="No recruiter data for current filters." />
+            ) : (
+              <>
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>Recruiter</TH>
+                      <TH>Candidates Processed</TH>
+                      <TH>Hires</TH>
+                      <TH>Conversion %</TH>
+                      <TH>Avg Response Hours</TH>
+                      <TH>Active Reqs</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {pagedRecruiterRows.map((row) => (
+                      <TR key={`${row.recruiter}-${row.recruiterId ?? "deleted"}`} hover>
+                        <TD>{row.recruiter}</TD>
+                        <TD>{row.candidatesProcessed}</TD>
+                        <TD>{row.hiresMade}</TD>
+                        <TD>{row.conversionPct}%</TD>
+                        <TD>{row.avgResponseHours}h</TD>
+                        <TD>{row.activeRequisitions}</TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+                <ListFooter
+                  pagination={recruiterPagination}
+                  onPageChange={(p) => patchRecruiterTableParams({ recPage: p })}
+                  onPageSizeChange={(lim) => patchRecruiterTableParams({ recLimit: lim })}
+                />
+              </>
+            )}
           </CardBody>
         </Card>
       </section>
