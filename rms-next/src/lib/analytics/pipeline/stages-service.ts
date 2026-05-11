@@ -18,13 +18,11 @@ import {
 import type { StageDefinition, StageType } from "@/lib/analytics/transformers/funnel";
 
 const FALLBACK_STAGES: StageDefinition[] = [
-  { key: "applied", label: "Applied", sortOrder: 1, isTerminal: false, isHidden: false, stageType: "active" },
-  { key: "screening", label: "Screening", sortOrder: 2, isTerminal: false, isHidden: false, stageType: "active" },
-  { key: "technical_round", label: "Technical Round", sortOrder: 3, isTerminal: false, isHidden: false, stageType: "active" },
-  { key: "manager_round", label: "Manager Round", sortOrder: 4, isTerminal: false, isHidden: false, stageType: "active" },
-  { key: "hr_round", label: "HR Round", sortOrder: 5, isTerminal: false, isHidden: false, stageType: "active" },
-  { key: "offer", label: "Offer", sortOrder: 6, isTerminal: false, isHidden: false, stageType: "active" },
-  { key: "hired", label: "Hired", sortOrder: 7, isTerminal: true, isHidden: false, stageType: "active" },
+  { key: "sourced", label: "Sourced", sortOrder: 1, isTerminal: false, isHidden: false, stageType: "active" },
+  { key: "shortlisted", label: "Shortlisted", sortOrder: 2, isTerminal: false, isHidden: false, stageType: "active" },
+  { key: "interviewing", label: "Interviewing", sortOrder: 3, isTerminal: false, isHidden: false, stageType: "active" },
+  { key: "offered", label: "Offered", sortOrder: 4, isTerminal: false, isHidden: false, stageType: "active" },
+  { key: "hired", label: "Hired", sortOrder: 5, isTerminal: true, isHidden: false, stageType: "active" },
   { key: "rejected", label: "Rejected", sortOrder: 99, isTerminal: true, isHidden: false, stageType: "rejected" },
   { key: "withdrawn", label: "Withdrawn", sortOrder: 100, isTerminal: true, isHidden: false, stageType: "withdrawn" },
 ];
@@ -77,7 +75,13 @@ export function buildStageContext(definitions: StageDefinition[]): PipelineStage
   );
   const hireKeys = new Set(
     sorted
-      .filter((s) => s.isTerminal && s.stageType === "active")
+      .filter(
+        (s) =>
+          s.isTerminal &&
+          s.stageType !== "rejected" &&
+          s.stageType !== "withdrawn" &&
+          (/hire|join|fulfill/i.test(s.key) || /hire|join|fulfill/i.test(s.label) || s.stageType === "active"),
+      )
       .map((s) => s.key),
   );
 
@@ -96,6 +100,32 @@ export function buildStageContext(definitions: StageDefinition[]): PipelineStage
     if (!normalized) return null;
     const direct = keyLookup.get(normalized) ?? labelLookup.get(normalized);
     if (direct) return direct;
+    const aliases: Record<string, string> = {
+      applied: "sourced",
+      screening: "shortlisted",
+      "technical round": "interviewing",
+      technical_round: "interviewing",
+      "manager round": "interviewing",
+      manager_round: "interviewing",
+      "hr round": "interviewing",
+      hr_round: "interviewing",
+      offer: "offered",
+      offered: "offered",
+      interview: "interviewing",
+      interviewing: "interviewing",
+      shortlist: "shortlisted",
+      shortlisted: "shortlisted",
+      source: "sourced",
+      sourced: "sourced",
+      hired: "hired",
+      fulfilled: "hired",
+      fulfill: "hired",
+      joined: "hired",
+      onboarded: "hired",
+      onboard: "hired",
+    };
+    const alias = aliases[normalized];
+    if (alias && keyLookup.has(alias)) return keyLookup.get(alias) ?? alias;
     for (const h of heuristics) {
       if (h.test.test(normalized)) return h.key;
     }
@@ -104,7 +134,12 @@ export function buildStageContext(definitions: StageDefinition[]): PipelineStage
       const withdrawn = sorted.find((s) => s.stageType === "withdrawn");
       return withdrawn?.key ?? null;
     }
-    if (normalized.includes("hire") || normalized.includes("joined")) {
+    if (
+      normalized.includes("hire") ||
+      normalized.includes("joined") ||
+      normalized.includes("fulfill") ||
+      normalized.includes("onboard")
+    ) {
       return Array.from(hireKeys)[0] ?? null;
     }
     return null;

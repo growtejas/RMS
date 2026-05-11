@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Bar,
   BarChart,
@@ -35,6 +36,7 @@ import {
   useReportSourceEffectiveness,
   useReportTimeToHire,
 } from "@/lib/query/hooks";
+import { apiClient } from "@/lib/api/client";
 
 export type AnalyticsSection =
   | "header"
@@ -141,13 +143,94 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
   const sourceQuery = useReportSourceEffectiveness(scopedParams);
   const recruiterQuery = useReportRecruiterPerformance(scopedParams);
   const interviewerQuery = useReportInterviewerPerformance(scopedParams);
+  const requisitionsQuery = useQuery({
+    queryKey: ["analytics", "filter-options", "requisitions"],
+    queryFn: async () => {
+      const r = await apiClient.get<{
+        data?: { items?: Array<{ req_id?: number; project_name?: string | null }> };
+      }>("/requisitions?page=1&limit=100");
+      const items = r.data?.data?.items ?? [];
+      return items
+        .filter((row) => Number.isFinite(row.req_id))
+        .map((row) => ({
+          reqId: Number(row.req_id),
+          projectName: row.project_name ?? null,
+        }));
+    },
+    staleTime: 60_000,
+  });
 
   const stageRows = useMemo(() => pipelineQuery.data?.stages ?? [], [pipelineQuery.data?.stages]);
   const kpis = pipelineQuery.data?.kpis;
   const selectedStage = stageRows.find((s) => s.key === selectedStageKey) ?? null;
   const freshness = pipelineQuery.data?.freshness;
+  const dropdownOptions = useMemo(() => {
+    const requisitionOpts = (requisitionsQuery.data ?? []).map((r) => ({
+      value: String(r.reqId),
+      label: r.projectName?.trim()
+        ? `REQ-${r.reqId} (${r.projectName.trim()})`
+        : `REQ-${r.reqId}`,
+    }));
+    const departmentOpts = (timeToHireQuery.data?.byDepartment ?? [])
+      .map((d) => (d.department ?? "").trim())
+      .filter((v) => v.length > 0)
+      .map((v) => ({ value: v, label: v }));
+    const sourceOpts = (sourceQuery.data?.rows ?? [])
+      .map((row) => row.source?.trim())
+      .filter((v): v is string => Boolean(v))
+      .map((v) => ({ value: v, label: v }));
+    const pipelineStageOpts = (stagesQuery.data?.stages ?? []).map((s) => ({
+      value: s.label,
+      label: s.label,
+    }));
+    const interviewStageOpts = (interviewQuery.data?.stages ?? []).map((s) => ({
+      value: s.stage,
+      label: s.stage,
+    }));
+    const recruiterOpts = (recruiterQuery.data?.rows ?? [])
+      .filter((row) => row.recruiterId != null)
+      .map((row) => ({ value: String(row.recruiterId), label: row.recruiter }));
+    const locationOpts = (filters.state.arrays.location ?? [])
+      .filter((v) => v.trim().length > 0)
+      .map((v) => ({ value: v, label: v }));
+    const employmentOpts = ["Remote", "Hybrid", "Onsite", "Contract", "Full-time", "Part-time"].map((v) => ({
+      value: v,
+      label: v,
+    }));
+
+    return {
+      requisitionIds: Array.from(new Map(requisitionOpts.map((o) => [o.value, o])).values()),
+      department: Array.from(new Map(departmentOpts.map((o) => [o.value, o])).values()),
+      source: Array.from(new Map(sourceOpts.map((o) => [o.value, o])).values()),
+      pipelineStages: Array.from(new Map(pipelineStageOpts.map((o) => [o.value, o])).values()),
+      interviewStage: Array.from(new Map(interviewStageOpts.map((o) => [o.value, o])).values()),
+      recruiterIds: Array.from(new Map(recruiterOpts.map((o) => [o.value, o])).values()),
+      location: Array.from(new Map(locationOpts.map((o) => [o.value, o])).values()),
+      employmentType: employmentOpts,
+    };
+  }, [
+    filters.state.arrays.location,
+    interviewQuery.data?.stages,
+    requisitionsQuery.data,
+    recruiterQuery.data?.rows,
+    sourceQuery.data?.rows,
+    stagesQuery.data?.stages,
+    timeToHireQuery.data?.byDepartment,
+  ]);
 
   const handleArrayInput = (key: AnalyticsArrayFilterKey, csv: string) => {
+    if (key === "requisitionIds") {
+      for (const otherKey of ANALYTICS_ARRAY_FILTER_KEYS) {
+        if (otherKey !== "requisitionIds" && filters.state.arrays[otherKey].length > 0) {
+          filters.setArrayFilter(otherKey, []);
+        }
+      }
+      filters.setSearch("");
+      filters.setRangeStart("");
+      filters.setRangeEnd("");
+      filters.setPage(1);
+      filters.setLimit(25);
+    }
     const values = csv
       .split(",")
       .map((v) => v.trim())
@@ -156,6 +239,16 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
   };
 
   const handlePageChange = (page: number) => filters.setPage(page);
+  const handleResetRequisitionOnly = () => {
+    for (const key of ANALYTICS_ARRAY_FILTER_KEYS) {
+      filters.setArrayFilter(key, []);
+    }
+    filters.setSearch("");
+    filters.setRangeStart("");
+    filters.setRangeEnd("");
+    filters.setPage(1);
+    filters.setLimit(25);
+  };
 
   const insights = useMemo(() => {
     const list: Array<{ label: string; severity: string; recommendation: string }> = [];
@@ -229,7 +322,9 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
           onRangeEnd={filters.setRangeEnd}
           onLimitChange={filters.setLimit}
           onArrayInput={handleArrayInput}
-          onResetAll={filters.resetAll}
+          onResetAll={handleResetRequisitionOnly}
+          dropdownOptions={dropdownOptions}
+          requisitionOnly
         />
       ) : null}
 
@@ -271,7 +366,7 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
       ) : null}
 
       {has("candidateFunnel") || has("aiInsights") ? (
-      <section className="grid gap-5 lg:grid-cols-12">
+      <section className="grid gap-5 lg:grid-cols-2">
         {has("candidateFunnel") ? (
           <CandidateFunnel
             rows={stageRows}
@@ -283,7 +378,7 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
           />
         ) : null}
         {has("aiInsights") ? (
-          <Card className="lg:col-span-4">
+          <Card>
             <CardHeader>
               <CardTitle>AI Hiring Insights</CardTitle>
             </CardHeader>

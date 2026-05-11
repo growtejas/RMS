@@ -7,8 +7,14 @@ import { log } from "@/lib/logging/logger";
 export async function requireReportsUser(req: Request): Promise<ApiUser | NextResponse> {
   const user = await requireBearerUser(req);
   if (user instanceof NextResponse) return user;
-  const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager");
+  const denied = requireAnyRole(user, "TA", "HR", "Manager", "Employee", "Interviewer", "Owner");
   if (denied) return denied;
+  if (user.roles.some((role) => role.toLowerCase() === "admin")) {
+    return NextResponse.json(
+      { detail: "Access denied. Hiring Intelligence is not available for Admin role." },
+      { status: 403 },
+    );
+  }
   return user;
 }
 
