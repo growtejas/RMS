@@ -1342,9 +1342,15 @@ export async function updateCandidateStageCompatible(
         requisition_item_id: app.requisition_item_id,
         requisition_id: app.requisition_id,
       };
-    } catch {
-      // Compatibility fallback if application endpoint is unavailable.
-      return updateCandidateStage(candidate.candidate_id, payload);
+    } catch (err: unknown) {
+      const status =
+        (err as { response?: { status?: number } })?.response?.status ?? null;
+      // Compatibility fallback only when application-stage endpoint is absent.
+      // For validation/transition errors, throw so UI can show the real failure.
+      if (status === 404 || status === 405 || status === 501) {
+        return updateCandidateStage(candidate.candidate_id, payload);
+      }
+      throw err;
     }
   }
   return updateCandidateStage(candidate.candidate_id, payload);
@@ -1807,6 +1813,17 @@ export async function uploadResume(
   const { data } = await apiClient.post<{ file_url: string; filename: string }>(
     "/uploads/resume",
     formData,
+  );
+  return data;
+}
+
+export async function patchApplicationOfferMeta(
+  applicationId: number,
+  offerMeta: Record<string, unknown> | null,
+): Promise<ApplicationRecord> {
+  const { data } = await apiClient.patch<ApplicationRecord>(
+    `/applications/${applicationId}/offer-meta`,
+    { offer_meta: offerMeta },
   );
   return data;
 }

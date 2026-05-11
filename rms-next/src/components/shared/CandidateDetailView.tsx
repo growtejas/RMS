@@ -26,6 +26,8 @@ import {
   getCandidateWithApplication,
   getCandidateActionErrorMessage,
   updateCandidateStageCompatible,
+  patchApplicationOfferMeta,
+  uploadResume,
   runAiEvaluationForRequisitionItem,
   fetchRequisitionItemRanking,
 } from "@/lib/api/candidateApi";
@@ -91,14 +93,6 @@ const STAGE_TW: Record<string, string> = {
   Rejected: "bg-red-50 text-red-800 ring-red-200",
 };
 
-/** Which forward transitions are available from each stage (UI side) */
-const FORWARD_TRANSITIONS: Record<string, string[]> = {
-  Sourced: ["Shortlisted", "Rejected"],
-  Shortlisted: ["Interviewing", "Rejected"],
-  Interviewing: ["Offered", "Rejected"],
-  Offered: ["Hired", "Rejected"],
-};
-
 export default function CandidateDetailView({
   candidate: initialCandidate,
   onDismiss,
@@ -144,6 +138,9 @@ export default function CandidateDetailView({
   const [deletingCandidate, setDeletingCandidate] = useState(false);
   const [detailTab, setDetailTab] = useState<"profile" | "intelligence">("profile");
   const [lifecycleOpen, setLifecycleOpen] = useState(false);
+  const [showOfferModal, setShowOfferModal] = useState(false);
+  const [offerLetterFile, setOfferLetterFile] = useState<File | null>(null);
+  const [offerUploading, setOfferUploading] = useState(false);
 
   /** Bumped when opening / hydrating or when user mutates candidate so stale fetches cannot overwrite. */
   const candidateHydrateGenRef = useRef(0);
@@ -156,6 +153,30 @@ export default function CandidateDetailView({
   );
   const stageTw =
     STAGE_TW[candidate.current_stage] ?? STAGE_TW["Sourced"]!;
+  const latestInterview = [...candidate.interviews].sort((a, b) => {
+    const roundCmp = (b.round_number ?? 0) - (a.round_number ?? 0);
+    if (roundCmp !== 0) return roundCmp;
+    return new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime();
+  })[0];
+  const latestStatus = latestInterview
+    ? normalizeInterviewStatus(latestInterview.status)
+    : null;
+  const latestResult =
+    latestInterview?.result != null
+      ? normalizeInterviewStatus(latestInterview.result)
+      : null;
+  const canShortlist = candidate.current_stage === "Sourced";
+  const canMoveToInterviewing = candidate.current_stage === "Shortlisted";
+  const canMarkHired = candidate.current_stage === "Offered";
+  const isInterviewingStage = candidate.current_stage === "Interviewing";
+  const canScheduleNextRound =
+    isInterviewingStage && latestStatus === "COMPLETED" && latestResult === "PASS";
+  const canOffer = canScheduleNextRound;
+  const canReschedule =
+    isInterviewingStage && (latestStatus === "CANCELLED" || latestStatus === "NO_SHOW");
+  const canReject =
+    isInterviewingStage &&
+    (canReschedule || (latestStatus === "COMPLETED" && latestResult === "FAIL"));
 
   useEffect(() => {
     setCandidate(initialCandidate);
@@ -404,6 +425,44 @@ export default function CandidateDetailView({
       );
     } finally {
       setTransitioning(false);
+    }
+  };
+
+  const handleOfferWithUpload = async () => {
+    if (!candidate.application_id) {
+      setError("Application is missing for this candidate.");
+      return;
+    }
+    if (!offerLetterFile) {
+      setError("Please upload an offer letter before moving to Offered.");
+      return;
+    }
+    setError(null);
+    setOfferUploading(true);
+    try {
+      const uploaded = await uploadResume(offerLetterFile);
+      await patchApplicationOfferMeta(candidate.application_id, {
+        offer_letter_filename: uploaded.filename,
+        offer_letter_url: uploaded.file_url,
+        uploaded_at: new Date().toISOString(),
+      });
+      candidateHydrateGenRef.current += 1;
+      const updated = await updateCandidateStageCompatible(candidate, {
+        new_stage: "Offered",
+      });
+      setCandidate(updated);
+      onUpdate(updated);
+      setShowOfferModal(false);
+      setOfferLetterFile(null);
+    } catch (err: unknown) {
+      setError(
+        getCandidateActionErrorMessage(
+          err,
+          "Failed to move candidate to Offered after uploading offer letter",
+        ),
+      );
+    } finally {
+      setOfferUploading(false);
     }
   };
 
@@ -777,46 +836,10 @@ export default function CandidateDetailView({
             ) : null}
           </div>
 
-          {/* ---- Stage Actions ---- */}
+          {/* ---- Candidate Actions ---- */}
           {canEdit &&
             !isEvaluateWorkspace &&
             !["Hired", "Rejected"].includes(candidate.current_stage) && (
-              <div style={{ marginBottom: "20px" }}>
-                <div
-                  style={{
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    color: "var(--text-tertiary)",
-                    marginBottom: "8px",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.5px",
-                  }}
-                >
-                  Move Candidate
-                </div>
-                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                  {(FORWARD_TRANSITIONS[candidate.current_stage] ?? []).map(
-                    (stage) => {
-                      const tw =
-                        STAGE_TW[stage] ?? STAGE_TW["Sourced"]!;
-                      return (
-                        <button
-                          key={stage}
-                          type="button"
-                          disabled={transitioning}
-                          className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold ring-1 transition-opacity hover:opacity-90 disabled:opacity-50 ${tw}`}
-                          onClick={() => handleStageChange(stage)}
-                        >
-                          → {stage}
-                        </button>
-                      );
-                    },
-                  )}
-                </div>
-              </div>
-            )}
-
-          {canEdit && (
             <div style={{ marginBottom: "20px" }}>
               <div
                 style={{
@@ -828,17 +851,135 @@ export default function CandidateDetailView({
                   letterSpacing: "0.5px",
                 }}
               >
-                Danger Zone
+                Candidate Actions
               </div>
-              <button
-                type="button"
-                disabled={deletingCandidate}
-                onClick={() => void handleDeleteCandidate()}
-                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <Trash2 size={14} />
-                {deletingCandidate ? "Deleting..." : "Delete Candidate"}
-              </button>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                {canShortlist && (
+                  <button
+                    type="button"
+                    className="action-button"
+                    disabled={transitioning}
+                    onClick={() => void handleStageChange("Shortlisted")}
+                  >
+                    Shortlist
+                  </button>
+                )}
+                {canMoveToInterviewing && (
+                  <button
+                    type="button"
+                    className="action-button"
+                    disabled={transitioning}
+                    onClick={() => void handleStageChange("Interviewing")}
+                  >
+                    Move to Interviewing
+                  </button>
+                )}
+                {canScheduleNextRound && (
+                  <button
+                    type="button"
+                    className="action-button"
+                    disabled={transitioning}
+                    onClick={() => {
+                      setScheduleWarnings([]);
+                      setShowScheduler(true);
+                    }}
+                  >
+                    Schedule Next Round
+                  </button>
+                )}
+                {canOffer && (
+                  <button
+                    type="button"
+                    className="action-button primary"
+                    disabled={transitioning}
+                    onClick={() => setShowOfferModal(true)}
+                  >
+                    Offer
+                  </button>
+                )}
+                {canReschedule && (
+                  <button
+                    type="button"
+                    className="action-button"
+                    disabled={transitioning}
+                    onClick={() => {
+                      setScheduleWarnings([]);
+                      setShowScheduler(true);
+                    }}
+                  >
+                    Reschedule
+                  </button>
+                )}
+                {canReject && (
+                  <button
+                    type="button"
+                    className="action-button text-red-700"
+                    disabled={transitioning}
+                    onClick={() => void handleStageChange("Rejected")}
+                  >
+                    Reject
+                  </button>
+                )}
+                {canMarkHired && (
+                  <button
+                    type="button"
+                    className="action-button"
+                    disabled={transitioning}
+                    onClick={() => void handleStageChange("Hired")}
+                  >
+                    Mark Hired
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {showOfferModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4">
+              <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
+                <h3 className="text-base font-semibold text-slate-900">
+                  Upload Offer Letter
+                </h3>
+                <p className="mt-1 text-xs text-slate-600">
+                  Uploading an offer letter is required before moving this candidate to Offered.
+                </p>
+                <div className="mt-4">
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null;
+                      setOfferLetterFile(file);
+                    }}
+                  />
+                  {offerLetterFile && (
+                    <div className="mt-2 text-xs text-slate-600">
+                      Selected: {offerLetterFile.name}
+                    </div>
+                  )}
+                </div>
+                <div className="mt-5 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="action-button"
+                    disabled={offerUploading}
+                    onClick={() => {
+                      setShowOfferModal(false);
+                      setOfferLetterFile(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="action-button primary"
+                    disabled={offerUploading || !offerLetterFile}
+                    onClick={() => void handleOfferWithUpload()}
+                  >
+                    {offerUploading ? "Uploading..." : "Upload & Move to Offered"}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1237,7 +1378,9 @@ export default function CandidateDetailView({
                 <Calendar size={16} /> Interview Rounds (
                 {candidate.interviews.length})
               </span>
-              {canEdit && !isEvaluateWorkspace && (
+              {canEdit &&
+                !isEvaluateWorkspace &&
+                candidate.current_stage === "Interviewing" && (
                 <button
                   type="button"
                   className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3.5 py-2 text-xs font-bold text-white shadow-sm transition-colors hover:bg-red-700"
@@ -1529,6 +1672,18 @@ export default function CandidateDetailView({
               }}
             />
           )}
+          {canEdit && !isEvaluateWorkspace && (
+            <button
+              type="button"
+              title="Delete candidate"
+              aria-label="Delete candidate"
+              disabled={deletingCandidate}
+              onClick={() => void handleDeleteCandidate()}
+              className="fixed bottom-5 right-5 inline-flex h-9 w-9 items-center justify-center rounded-full border border-red-200 bg-white text-red-600 shadow-md transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
     </>
   );
 
@@ -1559,3 +1714,4 @@ export default function CandidateDetailView({
     </div>
   );
 }
+
