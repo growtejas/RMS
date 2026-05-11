@@ -1,21 +1,17 @@
-import { Queue, type JobsOptions } from "bullmq";
+import type { JobsOptions, Queue } from "bullmq";
 
-import { getQueueConnectionOptions } from "@/lib/queue/redis";
+import { jobOptionsFor } from "@/lib/queue/queue-policies";
+import { getSharedQueue } from "@/lib/queue/queue-registry";
 
 export const NOTIFICATION_DELIVERY_QUEUE = "notification-delivery";
 export const PROCESS_PENDING_NOTIFICATIONS_JOB = "process-pending";
 
 export type NotificationDeliveryJobPayload = Record<string, never>;
 
-let queue: Queue<NotificationDeliveryJobPayload> | null = null;
-
 function getQueue(): Queue<NotificationDeliveryJobPayload> {
-  if (!queue) {
-    queue = new Queue<NotificationDeliveryJobPayload>(NOTIFICATION_DELIVERY_QUEUE, {
-      connection: getQueueConnectionOptions(),
-    });
-  }
-  return queue;
+  return getSharedQueue<NotificationDeliveryJobPayload>(
+    NOTIFICATION_DELIVERY_QUEUE,
+  );
 }
 
 /** Wake the worker; processing is idempotent and batches pending rows. */
@@ -23,9 +19,8 @@ export async function enqueueNotificationDeliveryJob(
   opts?: JobsOptions,
 ): Promise<void> {
   const q = getQueue();
-  await q.add(
-    PROCESS_PENDING_NOTIFICATIONS_JOB,
-    {},
-    { removeOnComplete: 100, removeOnFail: 40, ...opts },
-  );
+  await q.add(PROCESS_PENDING_NOTIFICATIONS_JOB, {}, {
+    ...jobOptionsFor("notification-delivery"),
+    ...opts,
+  });
 }

@@ -418,6 +418,12 @@ export const candidates = pgTable(
       t.resumeContentHash,
     ),
     index("idx_candidates_resume_structure_status").on(t.resumeStructureStatus),
+    /** Phase 8 — paginated CIE / global candidates roster (newest-first). */
+    index("idx_candidates_org_createdat").on(t.organizationId, t.createdAt),
+    /** Phase 8 — search-by-name on org-scoped candidates lists. */
+    index("idx_candidates_org_full_name").on(t.organizationId, t.fullName),
+    /** Phase 8 — search-by-email on org-scoped candidates lists. */
+    index("idx_candidates_org_email").on(t.organizationId, t.email),
   ],
 );
 
@@ -632,6 +638,8 @@ export const candidateParsedData = pgTable(
       .notNull()
       .references(() => candidates.candidateId, { onDelete: "cascade" }),
     parsedJson: jsonb("parsed_json").notNull(),
+    /** Optional rich `StrictResumeV2` document (bullets, dates, techStack, prov). Used by CIE LLM when available. */
+    parsedV2Json: jsonb("parsed_v2_json"),
     version: integer("version").notNull(),
     sourceResumeContentHash: varchar("source_resume_content_hash", { length: 64 }),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
@@ -822,6 +830,14 @@ export const interviews = pgTable(
       () => requisitionItems.itemId,
       { onDelete: "cascade" },
     ),
+    /**
+     * Lifecycle linkage to the application the interview belongs to.
+     * Nullable for legacy rows; backfilled in `drizzle/0026_interview_lifecycle.sql`.
+     */
+    applicationId: integer("application_id").references(
+      () => applications.applicationId,
+      { onDelete: "cascade" },
+    ),
     roundNumber: integer("round_number").notNull(),
     roundName: varchar("round_name", { length: 100 }),
     roundType: varchar("round_type", { length: 50 }),
@@ -855,6 +871,7 @@ export const interviews = pgTable(
     index("idx_interviews_candidate_round").on(t.candidateId, t.roundNumber),
     index("idx_interviews_sched_end").on(t.scheduledAt, t.endTime),
     index("idx_interviews_req_item_sched").on(t.requisitionItemId, t.scheduledAt),
+    index("idx_interviews_application_id").on(t.applicationId),
   ],
 );
 
@@ -891,6 +908,9 @@ export const pipelineStageDefinitions = pgTable(
     label: varchar("label", { length: 120 }).notNull(),
     sortOrder: integer("sort_order").notNull().default(0),
     isTerminal: boolean("is_terminal").notNull().default(false),
+    isHidden: boolean("is_hidden").notNull().default(false),
+    archivedAt: timestamp("archived_at", { mode: "date" }),
+    stageType: varchar("stage_type", { length: 20 }).notNull().default("active"),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => [
@@ -898,6 +918,7 @@ export const pipelineStageDefinitions = pgTable(
       t.organizationId,
       t.stageKey,
     ),
+    index("idx_pipeline_stage_definitions_org_sort").on(t.organizationId, t.sortOrder),
   ],
 );
 
@@ -983,6 +1004,11 @@ export const bulkImportJobs = pgTable(
   },
   (t) => [
     index("idx_bulk_import_jobs_org_status").on(t.organizationId, t.status, t.createdAt),
+    /** Phase 8 — paginated org-scoped bulk-job feed (newest-first). */
+    index("idx_bulk_import_jobs_org_createdat").on(
+      t.organizationId,
+      t.createdAt,
+    ),
   ],
 );
 
@@ -1005,6 +1031,11 @@ export const notificationEvents = pgTable(
     index("idx_notification_events_org_status").on(
       t.organizationId,
       t.status,
+      t.createdAt,
+    ),
+    /** Phase 8 — paginated org-scoped notification feed (newest-first). */
+    index("idx_notification_events_org_createdat").on(
+      t.organizationId,
       t.createdAt,
     ),
   ],

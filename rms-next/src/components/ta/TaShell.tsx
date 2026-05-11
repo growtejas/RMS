@@ -80,28 +80,12 @@ export default function TaShell({ children }: { children: React.ReactNode }) {
     }
   }, [hasTaAccess, isHydrating, router, user]);
 
-  if (isHydrating) {
-    return (
-      <div
-        style={{
-          padding: "48px 24px",
-          textAlign: "center",
-          color: "#6b7280",
-        }}
-      >
-        Restoring session…
-      </div>
-    );
-  }
-
-  if (!isAuthenticated || !user) {
-    return null;
-  }
-
-  if (!hasTaAccess) {
-    return null;
-  }
-
+  // Phase 2 - render the shell immediately. The previous `isHydrating`
+  // gate paint-blocked every TA route while the auth bootstrap fetched
+  // /api/auth/session. Auth-aware islands handle their own loading and
+  // the redirect effects above will navigate the user away if they
+  // ultimately resolve as unauthenticated. The 16 s hydration fuse is
+  // therefore irrelevant on a paint-blocking path.
   const isHome = pathname === "/ta" || pathname === "/ta/";
 
   return (
@@ -119,7 +103,7 @@ export default function TaShell({ children }: { children: React.ReactNode }) {
 
           <TAHeader
             title={activeLabel}
-            user={user}
+            user={user ?? null}
             onLogout={() => {
               logout();
               router.replace("/login");
@@ -127,7 +111,21 @@ export default function TaShell({ children }: { children: React.ReactNode }) {
           />
 
           <section className="admin-content-area">
-            {isHome ? <TADashboardHome /> : children}
+            {isHome ? (
+              <TADashboardHome />
+            ) : !isAuthenticated || !user ? (
+              <div
+                style={{
+                  padding: "48px 24px",
+                  textAlign: "center",
+                  color: "#6b7280",
+                }}
+              >
+                Restoring session…
+              </div>
+            ) : !hasTaAccess ? null : (
+              children
+            )}
           </section>
         </div>
       </div>

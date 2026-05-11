@@ -38,6 +38,9 @@ export default function AdminShell({
     if (pathname.startsWith("/admin/audit-logs")) {
       return "Audit Log Review";
     }
+    if (pathname.startsWith("/admin/bulk-operations")) {
+      return "Bulk Operation History";
+    }
     if (pathname.startsWith("/admin/users")) {
       return "User Management";
     }

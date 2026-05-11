@@ -36,6 +36,11 @@ import {
   runResumeStructurePipeline,
 } from "@/lib/services/resume-structure/resume-structure-pipeline";
 import * as cieRepo from "@/lib/repositories/cie-repo";
+import {
+  buildPaginationMeta,
+  computePagePosition,
+  type PageSize,
+} from "@/lib/pagination/contract";
 
 function candidateResumeHashRejectDuplicates(): boolean {
   const v = process.env.CANDIDATE_RESUME_HASH_REJECT_DUPLICATES?.trim().toLowerCase();
@@ -224,6 +229,8 @@ export async function listCandidatesJson(params: {
   requisitionItemId?: number | null;
   currentStage?: string | null;
   includeCieSummary?: boolean;
+  roleId?: string | null;
+  searchQuery?: string | null;
 }) {
   const rows = await repo.selectCandidatesFiltered(params);
   const ids = rows.map((r) => r.candidateId);
@@ -236,7 +243,7 @@ export async function listCandidatesJson(params: {
   }
   const cieById =
     params.includeCieSummary === true
-      ? await cieRepo.selectLatestCieSummaryForCandidateIds(
+      ? await cieRepo.selectLatestCieIntelForCandidateIds(
           params.organizationId,
           ids,
         )
@@ -252,7 +259,7 @@ export async function listCandidatesJson(params: {
       ...base,
       cie_intel: s
         ? {
-            latest_report: null,
+            latest_report: s.latestReport,
             last_evaluated_at: s.lastEvaluatedAt.toISOString(),
             confidence_score: s.confidenceScore,
             model_version: s.modelVersion,
@@ -269,6 +276,215 @@ export async function listCandidatesJson(params: {
           },
     };
   });
+}
+
+/**
+ * Paginated variant of `listCandidatesJson` for the canonical `/api/candidates`
+ * envelope. Same filter set, but returns `{ items, pagination }` and clamps
+ * page above the corrected totalPages.
+ */
+export async function listCandidatesPaged(params: {
+  organizationId: string;
+  page: number;
+  limit: PageSize;
+  sort: repo.CieCandidateSortKey;
+  requisitionId?: number | null;
+  requisitionItemId?: number | null;
+  currentStage?: string | null;
+  includeCieSummary?: boolean;
+  roleId?: string | null;
+  searchQuery?: string | null;
+}) {
+  const filters: repo.CieCandidateListFilters = {
+    organizationId: params.organizationId,
+    requisitionId: params.requisitionId ?? null,
+    requisitionItemId: params.requisitionItemId ?? null,
+    currentStage: params.currentStage ?? null,
+    roleId: params.roleId?.trim() || null,
+    searchQuery: params.searchQuery?.trim() || null,
+  };
+  const total = await repo.countCieCandidatesFiltered(filters);
+  const { page, offset, totalPages } = computePagePosition({
+    pageRequested: params.page,
+    total,
+    limit: params.limit,
+  });
+  const rows =
+    totalPages === 0
+      ? []
+      : await repo.selectCieCandidatesPaged({
+          filters,
+          limit: params.limit,
+          offset,
+          sort: params.sort,
+        });
+  const ids = rows.map((r) => r.candidateId);
+  const ivs = await repo.selectInterviewsForCandidates(ids);
+  const by = new Map<number, repo.InterviewRow[]>();
+  for (const i of ivs) {
+    const arr = by.get(i.candidateId) ?? [];
+    arr.push(i);
+    by.set(i.candidateId, arr);
+  }
+  const cieById =
+    params.includeCieSummary === true
+      ? await cieRepo.selectLatestCieIntelForCandidateIds(
+          params.organizationId,
+          ids,
+        )
+      : null;
+  const items = rows.map((r) => {
+    const base = candidateToJson(r, by.get(r.candidateId) ?? []);
+    if (!cieById) return base;
+    const s = cieById.get(r.candidateId);
+    return {
+      ...base,
+      cie_intel: s
+        ? {
+            latest_report: s.latestReport,
+            last_evaluated_at: s.lastEvaluatedAt.toISOString(),
+            confidence_score: s.confidenceScore,
+            model_version: s.modelVersion,
+            parsed_data_version: null,
+            last_error: s.errorMessage,
+          }
+        : {
+            latest_report: null,
+            last_evaluated_at: null,
+            confidence_score: null,
+            model_version: null,
+            parsed_data_version: null,
+            last_error: null,
+          },
+    };
+  });
+  return {
+    items,
+    pagination: buildPaginationMeta({ page, limit: params.limit, total }),
+  };
+}
+
+/** Canonical sort whitelist for CIE candidate listings. */
+export const CIE_CANDIDATE_SORT_KEYS = [
+  "created_desc",
+  "created_asc",
+  "name_asc",
+  "name_desc",
+  "last_evaluated_desc",
+] as const satisfies readonly repo.CieCandidateSortKey[];
+
+const CIE_CANDIDATE_SORT_KEY_SET = new Set<string>(CIE_CANDIDATE_SORT_KEYS);
+
+export function parseCieCandidateSort(raw: string | null): repo.CieCandidateSortKey {
+  const v = raw?.trim() ?? "";
+  if (CIE_CANDIDATE_SORT_KEY_SET.has(v)) {
+    return v as repo.CieCandidateSortKey;
+  }
+  return "created_desc";
+}
+
+/** Paginated CIE workspace list with full `cie_intel` per row. */
+export async function listCieCandidatesPaged(params: {
+  organizationId: string;
+  page: number;
+  limit: number;
+  roleId?: string | null;
+  searchQuery?: string | null;
+  sort: repo.CieCandidateSortKey;
+  requisitionId?: number | null;
+  requisitionItemId?: number | null;
+  currentStage?: string | null;
+}) {
+  const filters: repo.CieCandidateListFilters = {
+    organizationId: params.organizationId,
+    requisitionId: params.requisitionId ?? null,
+    requisitionItemId: params.requisitionItemId ?? null,
+    currentStage: params.currentStage ?? null,
+    roleId: params.roleId?.trim() || null,
+    searchQuery: params.searchQuery?.trim() || null,
+  };
+  const total = await repo.countCieCandidatesFiltered(filters);
+  const { page, offset, totalPages } = computePagePosition({
+    pageRequested: params.page,
+    total,
+    limit: params.limit,
+  });
+  const rowList =
+    totalPages === 0
+      ? []
+      : await repo.selectCieCandidatesPaged({
+          filters,
+          limit: params.limit,
+          offset,
+          sort: params.sort,
+        });
+  const ids = rowList.map((r) => r.candidateId);
+  const ivs = await repo.selectInterviewsForCandidates(ids);
+  const by = new Map<number, repo.InterviewRow[]>();
+  for (const i of ivs) {
+    const arr = by.get(i.candidateId) ?? [];
+    arr.push(i);
+    by.set(i.candidateId, arr);
+  }
+  const cieById = await cieRepo.selectLatestCieIntelForCandidateIds(
+    params.organizationId,
+    ids,
+  );
+  const items = rowList.map((r) => {
+    const base = candidateToJson(r, by.get(r.candidateId) ?? []);
+    const s = cieById.get(r.candidateId);
+    return {
+      ...base,
+      cie_intel: s
+        ? {
+            latest_report: s.latestReport,
+            last_evaluated_at: s.lastEvaluatedAt.toISOString(),
+            confidence_score: s.confidenceScore,
+            model_version: s.modelVersion,
+            parsed_data_version: null,
+            last_error: s.errorMessage,
+          }
+        : {
+            latest_report: null,
+            last_evaluated_at: null,
+            confidence_score: null,
+            model_version: null,
+            parsed_data_version: null,
+            last_error: null,
+          },
+    };
+  });
+  return {
+    items,
+    pagination: buildPaginationMeta({ page, limit: params.limit, total }),
+  };
+}
+
+export async function getCandidateIdsForCieExport(params: {
+  organizationId: string;
+  roleId?: string | null;
+  searchQuery?: string | null;
+  requisitionId?: number | null;
+  requisitionItemId?: number | null;
+  currentStage?: string | null;
+}): Promise<{ ids: number[]; total: number }> {
+  const filters: repo.CieCandidateListFilters = {
+    organizationId: params.organizationId,
+    requisitionId: params.requisitionId ?? null,
+    requisitionItemId: params.requisitionItemId ?? null,
+    currentStage: params.currentStage ?? null,
+    roleId: params.roleId?.trim() || null,
+    searchQuery: params.searchQuery?.trim() || null,
+  };
+  const total = await repo.countCieCandidatesFiltered(filters);
+  if (total > repo.CIE_CANDIDATE_IDS_EXPORT_MAX) {
+    throw new HttpError(
+      422,
+      `Too many candidates (${total}) for bulk id export. Maximum is ${repo.CIE_CANDIDATE_IDS_EXPORT_MAX}. Narrow filters.`,
+    );
+  }
+  const ids = await repo.selectCieCandidateIdsAll(filters);
+  return { ids, total };
 }
 
 export async function getCandidateJson(

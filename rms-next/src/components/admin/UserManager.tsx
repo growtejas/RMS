@@ -18,10 +18,16 @@ import { Button } from "@/components/ui/Button";
 import { Checkbox } from "@/components/ui/Checkbox";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Input";
+import { ListFooter } from "@/components/ui/ListFooter";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Select } from "@/components/ui/Select";
 import { Table, TBody, THead, TD, TH, TR } from "@/components/ui/Table";
+import {
+  DEFAULT_PAGE_SIZE,
+  buildPaginationMeta,
+  type PageSize,
+} from "@/lib/pagination/contract";
 
 /** Shown if catalog API fails; backend should seed these on successful catalog load. */
 const FALLBACK_ROLE_OPTIONS = [
@@ -57,7 +63,7 @@ const UserManager: React.FC = () => {
   const [catalogHint, setCatalogHint] = useState<string | null>(null);
   const [createSubmitAttempted, setCreateSubmitAttempted] = useState(false);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [limit, setLimit] = useState<PageSize>(DEFAULT_PAGE_SIZE);
 
   const loadRoleCatalog = useCallback(async () => {
     setCatalogHint(null);
@@ -148,10 +154,23 @@ const UserManager: React.FC = () => {
     setPage(1);
   }, [searchTerm, users.length]);
 
-  const totalPages = Math.max(1, Math.ceil(users.length / pageSize));
+  const pagination = useMemo(
+    () =>
+      buildPaginationMeta({
+        page,
+        limit,
+        total: users.length,
+      }),
+    [users.length, page, limit],
+  );
+
   const pagedUsers = useMemo(
-    () => users.slice((page - 1) * pageSize, page * pageSize),
-    [page, users],
+    () =>
+      users.slice(
+        (pagination.page - 1) * pagination.limit,
+        (pagination.page - 1) * pagination.limit + pagination.limit,
+      ),
+    [users, pagination.page, pagination.limit],
   );
 
   const handleEdit = (user: AdminUser) => {
@@ -404,27 +423,16 @@ const UserManager: React.FC = () => {
         {!isLoading && users.length === 0 && (
           <EmptyState title="No users found" />
         )}
-        {users.length > pageSize ? (
-          <div className="mt-4 flex items-center justify-end gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-              disabled={page === 1}
-            >
-              Previous
-            </Button>
-            <span className="text-sm text-[--color-text-subtle]">
-              Page {page} of {totalPages}
-            </span>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-              disabled={page === totalPages}
-            >
-              Next
-            </Button>
+        {users.length > 0 ? (
+          <div className="mt-4">
+            <ListFooter
+              pagination={pagination}
+              onPageChange={(next) => setPage(next)}
+              onPageSizeChange={(next) => {
+                setLimit(next);
+                setPage(1);
+              }}
+            />
           </div>
         ) : null}
       </div>

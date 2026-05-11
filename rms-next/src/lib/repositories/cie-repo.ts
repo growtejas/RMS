@@ -6,7 +6,13 @@ import {
   candidateParsedData,
   candidateReports,
 } from "@/lib/db/schema";
-import type { CandidateReport, ParsedCandidate } from "@/lib/services/cie/cie.schema";
+import {
+  CIE_REPORT_PARSE_FALLBACK,
+  parseStoredCandidateReport,
+  type CandidateReport,
+  type ParsedCandidate,
+} from "@/lib/services/cie/cie.schema";
+import type { StrictResumeV2 } from "@/lib/services/resume-structure/strict-resume-v2.schema";
 
 export async function selectMaxParsedVersion(candidateId: number): Promise<number> {
   const db = getDb();
@@ -21,6 +27,8 @@ export async function insertParsedDataRow(params: {
   organizationId: string;
   candidateId: number;
   parsed: ParsedCandidate;
+  /** Optional rich v2 resume document; preferred input for the CIE report LLM when present. */
+  parsedV2?: StrictResumeV2 | null;
   sourceResumeContentHash: string | null;
 }): Promise<number> {
   const db = getDb();
@@ -31,6 +39,7 @@ export async function insertParsedDataRow(params: {
       organizationId: params.organizationId,
       candidateId: params.candidateId,
       parsedJson: params.parsed,
+      parsedV2Json: params.parsedV2 ?? null,
       version: nextVersion,
       sourceResumeContentHash: params.sourceResumeContentHash,
       createdAt: new Date(),
@@ -46,6 +55,7 @@ export async function selectLatestParsedRow(
   id: number;
   version: number;
   parsed: ParsedCandidate;
+  parsedV2: StrictResumeV2 | null;
   sourceResumeContentHash: string | null;
 } | null> {
   const db = getDb();
@@ -65,6 +75,7 @@ export async function selectLatestParsedRow(
     id: row.id,
     version: row.version,
     parsed: row.parsedJson as ParsedCandidate,
+    parsedV2: (row.parsedV2Json as StrictResumeV2 | null) ?? null,
     sourceResumeContentHash: row.sourceResumeContentHash,
   };
 }
@@ -93,9 +104,20 @@ export async function selectLatestReportRow(
     .orderBy(desc(candidateReports.aiEvaluatedAt))
     .limit(1);
   if (!row) return null;
+  const parsed = parseStoredCandidateReport(row.reportJson);
+  if (!parsed.ok) {
+    return {
+      id: row.id,
+      report: CIE_REPORT_PARSE_FALLBACK,
+      confidenceScore: row.confidenceScore,
+      modelVersion: row.modelVersion,
+      aiEvaluatedAt: row.aiEvaluatedAt,
+      errorMessage: row.errorMessage,
+    };
+  }
   return {
     id: row.id,
-    report: row.reportJson as CandidateReport,
+    report: parsed.data,
     confidenceScore: row.confidenceScore,
     modelVersion: row.modelVersion,
     aiEvaluatedAt: row.aiEvaluatedAt,
@@ -199,13 +221,18 @@ export async function selectLatestReportFieldsByCandidateIds(
     number,
     {
       suitable_roles: string[];
+      suitable_role_ids: string[];
       experience_level: string | null;
     }
   >
 > {
   const out = new Map<
     number,
-    { suitable_roles: string[]; experience_level: string | null }
+    {
+      suitable_roles: string[];
+      suitable_role_ids: string[];
+      experience_level: string | null;
+    }
   >();
   if (candidateIds.length === 0) return out;
 
@@ -229,17 +256,20 @@ export async function selectLatestReportFieldsByCandidateIds(
 
   for (const r of rows) {
     if (out.has(r.candidateId)) continue;
-    const rep = r.reportJson as CandidateReport;
+    const parsed = parseStoredCandidateReport(r.reportJson);
+    if (!parsed.ok) continue;
+    const roles = parsed.data.suitableRoles;
     out.set(r.candidateId, {
-      suitable_roles: rep.suitableRoles ?? [],
-      experience_level: rep.experienceLevel ?? null,
+      suitable_roles: roles.map((x) => x.displayName),
+      suitable_role_ids: roles.map((x) => x.roleId),
+      experience_level: parsed.data.experienceLevel ?? null,
     });
   }
   return out;
 }
 
-/** Latest CIE run metadata per candidate (for org-wide CIE roster). */
-export async function selectLatestCieSummaryForCandidateIds(
+/** Latest CIE row per candidate including parsed report when present (org CIE list + detail). */
+export async function selectLatestCieIntelForCandidateIds(
   organizationId: string,
   candidateIds: number[],
 ): Promise<
@@ -250,6 +280,7 @@ export async function selectLatestCieSummaryForCandidateIds(
       confidenceScore: number;
       modelVersion: string;
       errorMessage: string | null;
+      latestReport: CandidateReport | null;
     }
   >
 > {
@@ -260,6 +291,7 @@ export async function selectLatestCieSummaryForCandidateIds(
       confidenceScore: number;
       modelVersion: string;
       errorMessage: string | null;
+      latestReport: CandidateReport | null;
     }
   >();
   if (candidateIds.length === 0) return out;
@@ -273,6 +305,7 @@ export async function selectLatestCieSummaryForCandidateIds(
       confidenceScore: candidateReports.confidenceScore,
       modelVersion: candidateReports.modelVersion,
       errorMessage: candidateReports.errorMessage,
+      reportJson: candidateReports.reportJson,
     })
     .from(candidateReports)
     .where(
@@ -285,11 +318,17 @@ export async function selectLatestCieSummaryForCandidateIds(
 
   for (const r of rows) {
     if (out.has(r.candidateId)) continue;
+    let latestReport: CandidateReport | null = null;
+    if (r.errorMessage == null) {
+      const parsed = parseStoredCandidateReport(r.reportJson);
+      latestReport = parsed.ok ? parsed.data : null;
+    }
     out.set(r.candidateId, {
       lastEvaluatedAt: r.aiEvaluatedAt,
       confidenceScore: r.confidenceScore,
       modelVersion: r.modelVersion,
       errorMessage: r.errorMessage,
+      latestReport,
     });
   }
   return out;

@@ -4,17 +4,21 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Users } from "lucide-react";
 
 import { HrEmptyState } from "@/components/hr/HrEmptyState";
-import { HrPaginationBar } from "@/components/hr/HrPaginationBar";
 import { HrToolbarCard } from "@/components/hr/HrToolbarCard";
+import { ListFooter } from "@/components/ui/ListFooter";
 import { useHrEmployeesAggregateQuery } from "@/hooks/hr/use-hr-queries";
-
-const PAGE_SIZE = 15;
+import {
+  DEFAULT_PAGE_SIZE,
+  buildPaginationMeta,
+  type PageSize,
+} from "@/lib/pagination/contract";
 
 const EmployeeList: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("");
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState<PageSize>(DEFAULT_PAGE_SIZE);
 
   const employeesQuery = useHrEmployeesAggregateQuery(true);
   const employeeRows = employeesQuery.data;
@@ -60,10 +64,20 @@ const EmployeeList: React.FC = () => {
     setPage(1);
   }, [searchTerm, statusFilter, departmentFilter]);
 
+  const pagination = useMemo(
+    () =>
+      buildPaginationMeta({
+        page,
+        limit,
+        total: filteredEmployees.length,
+      }),
+    [filteredEmployees.length, page, limit],
+  );
+
   const pagedEmployees = useMemo(() => {
-    const start = (page - 1) * PAGE_SIZE;
-    return filteredEmployees.slice(start, start + PAGE_SIZE);
-  }, [filteredEmployees, page]);
+    const start = (pagination.page - 1) * pagination.limit;
+    return filteredEmployees.slice(start, start + pagination.limit);
+  }, [filteredEmployees, pagination.page, pagination.limit]);
 
   return (
     <>
@@ -197,11 +211,13 @@ const EmployeeList: React.FC = () => {
 
         {!isLoading && !error && filteredEmployees.length > 0 && (
           <div className="mt-4 px-1">
-            <HrPaginationBar
-              page={page}
-              pageSize={PAGE_SIZE}
-              total={filteredEmployees.length}
-              onPageChange={setPage}
+            <ListFooter
+              pagination={pagination}
+              onPageChange={(next) => setPage(next)}
+              onPageSizeChange={(next) => {
+                setLimit(next);
+                setPage(1);
+              }}
             />
           </div>
         )}

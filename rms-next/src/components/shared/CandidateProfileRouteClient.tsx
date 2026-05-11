@@ -148,6 +148,7 @@ export default function CandidateProfileRouteClient({
       }
       pipelineWorkspace={pipelineWorkspace}
       variant="page"
+      disableAutoHydrate
     />
   );
 }

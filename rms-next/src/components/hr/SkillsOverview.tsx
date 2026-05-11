@@ -4,15 +4,19 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Layers } from "lucide-react";
 
 import { HrEmptyState } from "@/components/hr/HrEmptyState";
-import { HrPaginationBar } from "@/components/hr/HrPaginationBar";
 import { HrToolbarCard } from "@/components/hr/HrToolbarCard";
+import { ListFooter } from "@/components/ui/ListFooter";
 import { useHrSkillsSummaryQuery } from "@/hooks/hr/use-hr-queries";
-
-const PAGE_SIZE = 15;
+import {
+  DEFAULT_PAGE_SIZE,
+  buildPaginationMeta,
+  type PageSize,
+} from "@/lib/pagination/contract";
 
 const SkillsOverview: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState<PageSize>(DEFAULT_PAGE_SIZE);
 
   const skillsQuery = useHrSkillsSummaryQuery(true);
   const skillsRows = skillsQuery.data;
@@ -37,10 +41,20 @@ const SkillsOverview: React.FC = () => {
     setPage(1);
   }, [searchQuery]);
 
+  const pagination = useMemo(
+    () =>
+      buildPaginationMeta({
+        page,
+        limit,
+        total: filteredSkills.length,
+      }),
+    [filteredSkills.length, page, limit],
+  );
+
   const pagedSkills = useMemo(() => {
-    const start = (page - 1) * PAGE_SIZE;
-    return filteredSkills.slice(start, start + PAGE_SIZE);
-  }, [filteredSkills, page]);
+    const start = (pagination.page - 1) * pagination.limit;
+    return filteredSkills.slice(start, start + pagination.limit);
+  }, [filteredSkills, pagination.page, pagination.limit]);
 
   return (
     <>
@@ -127,11 +141,13 @@ const SkillsOverview: React.FC = () => {
 
         {!isLoading && !error && filteredSkills.length > 0 && (
           <div className="mt-4 px-1">
-            <HrPaginationBar
-              page={page}
-              pageSize={PAGE_SIZE}
-              total={filteredSkills.length}
-              onPageChange={setPage}
+            <ListFooter
+              pagination={pagination}
+              onPageChange={(next) => setPage(next)}
+              onPageSizeChange={(next) => {
+                setLimit(next);
+                setPage(1);
+              }}
             />
           </div>
         )}

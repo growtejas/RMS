@@ -1,6 +1,7 @@
 import {
   and,
   asc,
+  count,
   desc,
   eq,
   inArray,
@@ -9,7 +10,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 
-import { getDb } from "@/lib/db";
+import { getDb, getReadDb } from "@/lib/db";
 import {
   requisitionItems,
   requisitions,
@@ -53,7 +54,7 @@ export async function selectItemsForReqId(
     .orderBy(asc(requisitionItems.itemId));
 }
 
-export async function listRequisitionsFiltered(input: {
+function buildRequisitionListConds(input: {
   organizationId: string;
   isTaUser: boolean;
   currentUserId: number;
@@ -62,19 +63,12 @@ export async function listRequisitionsFiltered(input: {
   assignedTaFilter: number | null;
   status: string | null;
   raisedBy: number | null;
-  limit?: number;
-  offset?: number;
-}): Promise<RequisitionHeaderRow[]> {
-  const db = getDb();
-  const myAssignments =
-    input.myAssignments || input.assignedToMeAlias;
-
+}): SQL[] {
+  const myAssignments = input.myAssignments || input.assignedToMeAlias;
   const conds: SQL[] = [eq(requisitions.organizationId, input.organizationId)];
 
   if (input.isTaUser) {
-    conds.push(
-      inArray(requisitions.overallStatus, [...TA_LIST_STATUSES]),
-    );
+    conds.push(inArray(requisitions.overallStatus, [...TA_LIST_STATUSES]));
     if (myAssignments) {
       conds.push(
         inArray(requisitions.overallStatus, [...TA_MY_ASSIGNMENT_STATUSES]),
@@ -102,6 +96,23 @@ export async function listRequisitionsFiltered(input: {
     conds.push(eq(requisitions.raisedBy, input.raisedBy));
   }
 
+  return conds;
+}
+
+export async function listRequisitionsFiltered(input: {
+  organizationId: string;
+  isTaUser: boolean;
+  currentUserId: number;
+  myAssignments: boolean;
+  assignedToMeAlias: boolean;
+  assignedTaFilter: number | null;
+  status: string | null;
+  raisedBy: number | null;
+  limit?: number;
+  offset?: number;
+}): Promise<RequisitionHeaderRow[]> {
+  const db = getDb();
+  const conds = buildRequisitionListConds(input);
   const where = conds.length > 0 ? and(...conds) : undefined;
 
   return db
@@ -111,6 +122,26 @@ export async function listRequisitionsFiltered(input: {
     .orderBy(desc(requisitions.reqId))
     .limit(input.limit ?? 200)
     .offset(input.offset ?? 0);
+}
+
+export async function countRequisitionsFiltered(input: {
+  organizationId: string;
+  isTaUser: boolean;
+  currentUserId: number;
+  myAssignments: boolean;
+  assignedToMeAlias: boolean;
+  assignedTaFilter: number | null;
+  status: string | null;
+  raisedBy: number | null;
+}): Promise<number> {
+  const db = getDb();
+  const conds = buildRequisitionListConds(input);
+  const where = conds.length > 0 ? and(...conds) : undefined;
+  const [row] = await db
+    .select({ n: count() })
+    .from(requisitions)
+    .where(where);
+  return Number(row?.n ?? 0);
 }
 
 export async function listRequisitionsForRaisedBy(
@@ -131,6 +162,23 @@ export async function listRequisitionsForRaisedBy(
     .orderBy(desc(requisitions.reqId))
     .limit(params?.limit ?? 200)
     .offset(params?.offset ?? 0);
+}
+
+export async function countRequisitionsForRaisedBy(
+  organizationId: string,
+  userId: number,
+): Promise<number> {
+  const db = getDb();
+  const [row] = await db
+    .select({ n: count() })
+    .from(requisitions)
+    .where(
+      and(
+        eq(requisitions.organizationId, organizationId),
+        eq(requisitions.raisedBy, userId),
+      ),
+    );
+  return Number(row?.n ?? 0);
 }
 
 export async function selectItemsForReqIds(
@@ -160,7 +208,7 @@ export async function listRequisitionStatusHistoryForApi(
   reqId: number,
   params?: { limit?: number; offset?: number },
 ) {
-  const db = getDb();
+  const db = getReadDb();
   const rows = await db
     .select()
     .from(requisitionStatusHistory)
@@ -180,4 +228,13 @@ export async function listRequisitionStatusHistoryForApi(
         ? r.changedAt.toISOString()
         : new Date(0).toISOString(),
   }));
+}
+
+export async function countRequisitionStatusHistory(reqId: number): Promise<number> {
+  const db = getReadDb();
+  const [row] = await db
+    .select({ c: count() })
+    .from(requisitionStatusHistory)
+    .where(eq(requisitionStatusHistory.reqId, reqId));
+  return Number(row?.c ?? 0);
 }

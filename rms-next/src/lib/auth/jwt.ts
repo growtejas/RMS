@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 import { SignJWT, jwtVerify } from "jose";
 
 function getSecretKey(): Uint8Array {
@@ -11,14 +13,29 @@ function getSecretKey(): Uint8Array {
   return new TextEncoder().encode(raw);
 }
 
+/**
+ * Default access TTL is 5 minutes (Phase 1: short access TTL is the primary
+ * revocation mechanism, denylist is the secondary). Operators can still
+ * override via `ACCESS_TOKEN_EXPIRE_MINUTES` to ease rollout in environments
+ * with stricter session policies.
+ */
 function expireMinutes(): number {
-  const m = Number.parseInt(process.env.ACCESS_TOKEN_EXPIRE_MINUTES ?? "60", 10);
-  return Number.isFinite(m) && m > 0 ? m : 60;
+  const raw = process.env.ACCESS_TOKEN_EXPIRE_MINUTES;
+  if (raw == null || raw === "") {
+    return 5;
+  }
+  const m = Number.parseInt(raw, 10);
+  return Number.isFinite(m) && m > 0 ? m : 5;
 }
 
 function refreshExpireDays(): number {
   const d = Number.parseInt(process.env.REFRESH_TOKEN_EXPIRE_DAYS ?? "14", 10);
   return Number.isFinite(d) && d > 0 ? d : 14;
+}
+
+/** Stable per-token id for denylist + observability. URL-safe, ~22 chars. */
+function newJti(): string {
+  return randomBytes(16).toString("base64url");
 }
 
 export interface AccessTokenPayload {
@@ -42,6 +59,7 @@ export async function createAccessToken(payload: AccessTokenPayload): Promise<st
   })
     .setProtectedHeader({ alg })
     .setSubject(payload.sub)
+    .setJti(newJti())
     .setIssuedAt()
     .setExpirationTime(`${minutes}m`)
     .sign(secret);
@@ -70,6 +88,7 @@ export async function createRefreshToken(payload: AccessTokenPayload): Promise<s
   })
     .setProtectedHeader({ alg })
     .setSubject(payload.sub)
+    .setJti(newJti())
     .setIssuedAt()
     .setExpirationTime(`${days}d`)
     .sign(secret);

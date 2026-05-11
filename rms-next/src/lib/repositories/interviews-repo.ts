@@ -654,3 +654,87 @@ export function intervalsOverlap(
 ): boolean {
   return aStart.getTime() < bEnd.getTime() && aEnd.getTime() > bStart.getTime();
 }
+
+// --------------------------------------------------------------------
+// Interview Lifecycle helpers (drizzle/0026_interview_lifecycle.sql)
+// --------------------------------------------------------------------
+
+/**
+ * Interview rows belonging to a single application, ordered by round.
+ * Includes cancelled rows so callers can decide whether to surface them
+ * (the lifecycle UI filters cancelled out per spec edge-case rules).
+ */
+export async function selectInterviewsByApplication(
+  applicationId: number,
+): Promise<InterviewRow[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(interviews)
+    .where(eq(interviews.applicationId, applicationId))
+    .orderBy(asc(interviews.roundNumber), asc(interviews.scheduledAt));
+}
+
+/** Batch load interviews for many applications (same ordering as per-app select). */
+export async function selectInterviewsByApplicationIds(
+  applicationIds: number[],
+): Promise<InterviewRow[]> {
+  if (applicationIds.length === 0) {
+    return [];
+  }
+  const db = getDb();
+  return db
+    .select()
+    .from(interviews)
+    .where(inArray(interviews.applicationId, applicationIds))
+    .orderBy(
+      asc(interviews.applicationId),
+      asc(interviews.roundNumber),
+      asc(interviews.scheduledAt),
+    );
+}
+
+export async function getMaxRoundNumberByApplication(
+  applicationId: number,
+): Promise<number> {
+  const db = getDb();
+  const [row] = await db
+    .select({ m: sql<number>`coalesce(max(${interviews.roundNumber}), 0)`.mapWith(Number) })
+    .from(interviews)
+    .where(eq(interviews.applicationId, applicationId));
+  return row?.m ?? 0;
+}
+
+/**
+ * Lightweight result-only update used by `submitInterviewResult`.
+ * Returns the updated row or `null` if no row matched.
+ */
+export async function updateInterviewResult(params: {
+  interviewId: number;
+  result: string;
+  updatedBy: number | null;
+}): Promise<InterviewRow | null> {
+  const db = getDb();
+  const [row] = await db
+    .update(interviews)
+    .set({
+      result: params.result,
+      updatedBy: params.updatedBy,
+      updatedAt: new Date(),
+    })
+    .where(eq(interviews.id, params.interviewId))
+    .returning();
+  return row ?? null;
+}
+
+export async function selectInterviewById(
+  interviewId: number,
+): Promise<InterviewRow | null> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(interviews)
+    .where(eq(interviews.id, interviewId))
+    .limit(1);
+  return row ?? null;
+}

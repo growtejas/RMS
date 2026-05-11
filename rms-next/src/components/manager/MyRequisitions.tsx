@@ -7,8 +7,14 @@ import { AlertTriangle, Eye, RefreshCw, Search } from "lucide-react";
 import {
   useManagerRequisitionList,
 } from "@/hooks/manager/useManagerRequisitionList";
+import { ListFooter } from "@/components/ui/ListFooter";
+import {
+  DEFAULT_PAGE_SIZE,
+  PAGE_SIZE_OPTIONS,
+  isPageSize,
+  type PageSize,
+} from "@/lib/pagination/contract";
 
-const PAGE_SIZE = 12;
 type SortValue =
   | "created_desc"
   | "created_asc"
@@ -88,9 +94,32 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { requisitions, isLoading, error, reload } = useManagerRequisitionList(
-    variant === "org" ? "org" : "mine",
-  );
+
+  const initialPage = (() => {
+    const value = Number.parseInt(searchParams.get("page") ?? "1", 10);
+    return Number.isFinite(value) && value > 0 ? value : 1;
+  })();
+  const initialLimit: PageSize = (() => {
+    const value = Number.parseInt(
+      searchParams.get("limit") ?? String(DEFAULT_PAGE_SIZE),
+      10,
+    );
+    return isPageSize(value) ? value : DEFAULT_PAGE_SIZE;
+  })();
+
+  const [page, setPage] = useState<number>(initialPage);
+  const [limit, setLimit] = useState<PageSize>(initialLimit);
+
+  const {
+    requisitions,
+    pagination,
+    isLoading,
+    error,
+    reload,
+  } = useManagerRequisitionList(variant === "org" ? "org" : "mine", {
+    page,
+    limit,
+  });
   const colSpan = variant === "org" ? 10 : 9;
 
   const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
@@ -122,10 +151,6 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
     }
     return "created_desc";
   });
-  const [page, setPage] = useState(() => {
-    const value = Number.parseInt(searchParams.get("page") ?? "1", 10);
-    return Number.isFinite(value) && value > 0 ? value : 1;
-  });
 
   const setQueryParams = (next: {
     q?: string;
@@ -133,6 +158,7 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
     priority?: PriorityValue;
     sort?: SortValue;
     page?: number;
+    limit?: PageSize;
   }) => {
     const params = new URLSearchParams(searchParams.toString());
     if (next.q !== undefined) {
@@ -168,6 +194,13 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
         params.delete("page");
       } else {
         params.set("page", String(next.page));
+      }
+    }
+    if (next.limit !== undefined) {
+      if (next.limit === DEFAULT_PAGE_SIZE) {
+        params.delete("limit");
+      } else {
+        params.set("limit", String(next.limit));
       }
     }
     const queryString = params.toString();
@@ -287,17 +320,21 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
     return sorted;
   }, [priorityFilter, query, requisitions, sortBy, statusFilter, variant]);
 
-  const pageCount = Math.max(1, Math.ceil(filteredAndSorted.length / PAGE_SIZE));
-  const currentPage = Math.min(page, pageCount);
-  const pageStart = (currentPage - 1) * PAGE_SIZE;
-  const pageRows = filteredAndSorted.slice(pageStart, pageStart + PAGE_SIZE);
+  // Server-side pagination: rows for the current page come from the server.
+  // The local filters (search/status/priority/sort) refine within the page
+  // returned by the server.
+  const pageRows = filteredAndSorted;
 
   useEffect(() => {
-    if (page > pageCount) {
-      setPage(pageCount);
-      setQueryParams({ page: pageCount });
+    if (
+      pagination.totalPages > 0 &&
+      pagination.page !== page &&
+      pagination.page !== undefined
+    ) {
+      setPage(pagination.page);
     }
-  }, [page, pageCount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagination.page, pagination.totalPages]);
 
   return (
     <div className="space-y-4">
@@ -440,7 +477,7 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
         </div>
 
         <div className="mt-3 text-xs text-slate-500">
-          Showing {filteredAndSorted.length} of {requisitions.length} requisitions
+          Showing {filteredAndSorted.length} of {pagination.total} requisitions
         </div>
       </div>
 
@@ -549,38 +586,20 @@ const MyRequisitions: React.FC<MyRequisitionsProps> = ({
         </table>
       </div>
 
-        {!isLoading && !error && filteredAndSorted.length > 0 && (
-          <div className="mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-            <div className="text-xs text-slate-500">
-              Page {currentPage} of {pageCount}
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="action-button text-sm"
-                disabled={currentPage <= 1}
-                onClick={() => {
-                  const next = currentPage - 1;
-                  setPage(next);
-                  setQueryParams({ page: next });
-                }}
-              >
-                Previous
-              </button>
-              <button
-                type="button"
-                className="action-button text-sm"
-                disabled={currentPage >= pageCount}
-                onClick={() => {
-                  const next = currentPage + 1;
-                  setPage(next);
-                  setQueryParams({ page: next });
-                }}
-              >
-                Next
-              </button>
-            </div>
-          </div>
+        {!isLoading && !error && (
+          <ListFooter
+            pagination={pagination}
+            pageSizeOptions={PAGE_SIZE_OPTIONS}
+            onPageChange={(next) => {
+              setPage(next);
+              setQueryParams({ page: next });
+            }}
+            onPageSizeChange={(next) => {
+              setLimit(next);
+              setPage(1);
+              setQueryParams({ limit: next, page: 1 });
+            }}
+          />
         )}
 
         {kpis.atRisk > 0 && !isLoading && (

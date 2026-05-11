@@ -37,8 +37,13 @@ import {
 } from "@/types/workflow";
 import { PlainPriorityText } from "@/components/common/PlainPriorityText";
 import { HrToolbarCard } from "@/components/hr/HrToolbarCard";
-import { HrPaginationBar } from "@/components/hr/HrPaginationBar";
 import { HrEmptyState } from "@/components/hr/HrEmptyState";
+import { ListFooter } from "@/components/ui/ListFooter";
+import {
+  DEFAULT_PAGE_SIZE,
+  buildPaginationMeta,
+  type PageSize,
+} from "@/lib/pagination/contract";
 import { useHrRequisitionsListQuery } from "@/hooks/hr/use-hr-queries";
 import type { BackendRequisition } from "@/types/hr-requisition-backend";
 import { toast } from "sonner";
@@ -55,7 +60,7 @@ const MatchmakingPanel = dynamic(
   },
 );
 
-const REQUISITION_LIST_PAGE_SIZE = 20;
+const DEFAULT_REQUISITION_LIST_LIMIT: PageSize = DEFAULT_PAGE_SIZE;
 /* ======================================================
    Types
    ====================================================== */
@@ -404,6 +409,9 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
     Record<number, boolean>
   >({});
   const [listPage, setListPage] = useState(1);
+  const [listLimit, setListLimit] = useState<PageSize>(
+    DEFAULT_REQUISITION_LIST_LIMIT,
+  );
 
   const requisitionsQuery = useHrRequisitionsListQuery(true);
   const requisitionsBackendError =
@@ -674,13 +682,20 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
         req.client.toLowerCase().includes(searchQuery.toLowerCase()),
     );
 
+  const listPagination = useMemo(
+    () =>
+      buildPaginationMeta({
+        page: listPage,
+        limit: listLimit,
+        total: filteredRequisitions.length,
+      }),
+    [filteredRequisitions.length, listPage, listLimit],
+  );
+
   const pagedListRequisitions = useMemo(() => {
-    const start = (listPage - 1) * REQUISITION_LIST_PAGE_SIZE;
-    return filteredRequisitions.slice(
-      start,
-      start + REQUISITION_LIST_PAGE_SIZE,
-    );
-  }, [filteredRequisitions, listPage]);
+    const start = (listPagination.page - 1) * listPagination.limit;
+    return filteredRequisitions.slice(start, start + listPagination.limit);
+  }, [filteredRequisitions, listPagination.page, listPagination.limit]);
 
   const handleAssignEmployee = (itemId: string, empId: string) => {
     const employee = employees.find((emp) => emp.id === empId);
@@ -1687,11 +1702,13 @@ const HrRequisitions: React.FC<HrRequisitionsProps> = ({
 
             {!isLoading && !error && filteredRequisitions.length > 0 && (
               <div className="mt-4">
-                <HrPaginationBar
-                  page={listPage}
-                  pageSize={REQUISITION_LIST_PAGE_SIZE}
-                  total={filteredRequisitions.length}
-                  onPageChange={setListPage}
+                <ListFooter
+                  pagination={listPagination}
+                  onPageChange={(next) => setListPage(next)}
+                  onPageSizeChange={(next) => {
+                    setListLimit(next);
+                    setListPage(1);
+                  }}
                 />
               </div>
             )}

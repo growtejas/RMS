@@ -1,6 +1,6 @@
 import { eq, inArray, sql } from "drizzle-orm";
 
-import { getDb } from "@/lib/db";
+import { getDb, getReadDb } from "@/lib/db";
 import {
   employees,
   roles,
@@ -76,7 +76,7 @@ async function loadRolesByUserIds(
   if (userIds.length === 0) {
     return new Map();
   }
-  const db = getDb();
+  const db = getReadDb();
   const rows = await db
     .select({ userId: userRoles.userId, roleName: roles.roleName })
     .from(userRoles)
@@ -98,7 +98,7 @@ async function resolveFullNames(
   if (userIds.length === 0) {
     return out;
   }
-  const db = getDb();
+  const db = getReadDb();
   const urows = await db
     .select({
       userId: users.userId,
@@ -147,8 +147,26 @@ async function resolveFullNames(
   return out;
 }
 
+export async function countAuditLogs(filters: AuditListFilters): Promise<number> {
+  const db = getReadDb();
+  const whereSql = buildAuditFilterFragments(filters);
+  const rows = await db.execute(sql`
+    SELECT count(*)::int AS total
+    FROM audit_log a
+    LEFT JOIN users au ON au.user_id = a.performed_by
+    LEFT JOIN users tu ON tu.user_id = a.target_user_id
+    LEFT JOIN user_employee_map aum ON aum.user_id = au.user_id
+    LEFT JOIN user_employee_map tum ON tum.user_id = tu.user_id
+    LEFT JOIN employees ae ON ae.emp_id = COALESCE(au.employee_id, aum.emp_id)
+    LEFT JOIN employees te ON te.emp_id = COALESCE(tu.employee_id, tum.emp_id)
+    WHERE ${whereSql}
+  `);
+  const row = Array.from(rows as Iterable<Record<string, unknown>>)[0];
+  return Number(row?.total ?? 0);
+}
+
 export async function listAuditLogsForApi(filters: AuditListFilters) {
-  const db = getDb();
+  const db = getReadDb();
   const whereSql = buildAuditFilterFragments(filters);
   const pageRaw = filters.page != null ? Number.parseInt(String(filters.page), 10) : 1;
   const pageSizeRaw =
@@ -234,7 +252,7 @@ export async function listAuditLogsForExport(params: {
   dateTo: string;
   limit: number;
 }) {
-  const db = getDb();
+  const db = getReadDb();
   const whereSql = buildAuditFilterFragments({
     entityName: null,
     entityId: null,
@@ -319,7 +337,7 @@ export async function listAuditLogsForExport(params: {
 }
 
 export async function summarizeAuditLogs(filters: AuditListFilters) {
-  const db = getDb();
+  const db = getReadDb();
   const whereSql = buildAuditFilterFragments(filters);
 
   const rows = await db.execute(sql`

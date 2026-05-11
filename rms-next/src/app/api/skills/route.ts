@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
 import { parseFastapiJsonBody } from "@/lib/http/parse-fastapi-body";
+import {
+  isCanonicalListRequest,
+  paginateInMemory,
+} from "@/lib/pagination/in-memory";
 import { getSkillsCatalog } from "@/lib/services/reference-read-service";
 import { createSkill } from "@/lib/services/reference-write-service";
 import { skillCreateBody } from "@/lib/validators/reference-master";
@@ -31,7 +35,13 @@ export async function GET(request: Request) {
     }
 
     const data = await getSkillsCatalog();
-    return NextResponse.json(data);
+    const url = new URL(request.url);
+    if (isCanonicalListRequest(url)) {
+      return paginateInMemory(url, data);
+    }
+    const res = NextResponse.json(data);
+    res.headers.set("Deprecation", "list-skills-bare-shape");
+    return res;
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/skills]");
   }

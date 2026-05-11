@@ -1,6 +1,7 @@
-import { Queue, type JobsOptions } from "bullmq";
+import type { JobsOptions, Queue } from "bullmq";
 
-import { getQueueConnectionOptions } from "@/lib/queue/redis";
+import { jobOptionsFor } from "@/lib/queue/queue-policies";
+import { getSharedQueue } from "@/lib/queue/queue-registry";
 
 export const INBOUND_EVENTS_QUEUE_NAME = "inbound-events";
 export const PROCESS_EVENT_JOB_NAME = "process-event";
@@ -78,65 +79,55 @@ export type InboundEventsJobData =
   | DeduplicateInboundEventJobData
   | PersistInboundEventJobData;
 
+const inboundBase = jobOptionsFor("inbound-events");
+
 const processEventJobOptions: JobsOptions = {
+  ...inboundBase,
   attempts: 5,
   backoff: {
     type: "exponential",
     delay: 2000,
   },
-  removeOnComplete: 200,
-  removeOnFail: 500,
 };
 
 const normalizeDataJobOptions: JobsOptions = {
+  ...inboundBase,
   attempts: 3,
   backoff: {
     type: "exponential",
     delay: 1000,
   },
-  removeOnComplete: 200,
-  removeOnFail: 500,
 };
 
 const deduplicateJobOptions: JobsOptions = {
+  ...inboundBase,
   attempts: 3,
   backoff: {
     type: "exponential",
     delay: 1000,
   },
-  removeOnComplete: 200,
-  removeOnFail: 500,
 };
 
 const parseResumeJobOptions: JobsOptions = {
+  ...inboundBase,
   attempts: 3,
   backoff: {
     type: "exponential",
     delay: 1200,
   },
-  removeOnComplete: 200,
-  removeOnFail: 500,
 };
 
 const persistCandidateJobOptions: JobsOptions = {
+  ...inboundBase,
   attempts: 3,
   backoff: {
     type: "exponential",
     delay: 1000,
   },
-  removeOnComplete: 200,
-  removeOnFail: 500,
 };
 
-let inboundEventsQueue: Queue<InboundEventsJobData> | null = null;
-
 export function getInboundEventsQueue(): Queue<InboundEventsJobData> {
-  if (!inboundEventsQueue) {
-    inboundEventsQueue = new Queue<InboundEventsJobData>(INBOUND_EVENTS_QUEUE_NAME, {
-      connection: getQueueConnectionOptions(),
-    });
-  }
-  return inboundEventsQueue;
+  return getSharedQueue<InboundEventsJobData>(INBOUND_EVENTS_QUEUE_NAME);
 }
 
 export async function enqueueProcessInboundEventJob(inboundEventId: number): Promise<void> {

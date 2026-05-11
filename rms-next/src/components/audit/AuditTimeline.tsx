@@ -46,7 +46,16 @@ import {
   getActionClass,
   getStatusBadgeClass,
 } from "@/lib/api/auditApi";
+import { VirtualList } from "@/components/ui/VirtualList";
 import "./AuditTimeline.css";
+
+/**
+ * Phase 6 - virtualize the timeline once it grows past this threshold.
+ * Below it the connecting "track" lines render correctly with the flat
+ * structure; above it the React commit cost of rendering every row was
+ * the dominant tab-switch hitch.
+ */
+const VIRTUALIZE_THRESHOLD = 80;
 
 // ============================================================================
 // TYPES
@@ -278,8 +287,12 @@ export const AuditTimeline: React.FC<AuditTimelineProps> = ({
   relativeTime = false,
   entityLabel,
 }) => {
-  // Memoize timeline items to prevent unnecessary re-renders
+  const shouldVirtualize = records.length >= VIRTUALIZE_THRESHOLD;
+
+  // Memoize timeline items to prevent unnecessary re-renders. Only used
+  // for the small-list path; the virtualized path renders rows lazily.
   const timelineItems = useMemo(() => {
+    if (shouldVirtualize) return null;
     return records.map((record, index) => (
       <TimelineItem
         key={record.id}
@@ -288,7 +301,7 @@ export const AuditTimeline: React.FC<AuditTimelineProps> = ({
         relativeTime={relativeTime}
       />
     ));
-  }, [records, relativeTime]);
+  }, [records, relativeTime, shouldVirtualize]);
 
   const containerStyle: React.CSSProperties =
     compact && maxHeight
@@ -328,8 +341,27 @@ export const AuditTimeline: React.FC<AuditTimelineProps> = ({
           <EmptyState entityLabel={entityLabel} />
         )}
 
-        {!isLoading && !error && records.length > 0 && (
+        {!isLoading && !error && records.length > 0 && !shouldVirtualize && (
           <div className="audit-timeline">{timelineItems}</div>
+        )}
+
+        {!isLoading && !error && shouldVirtualize && (
+          <div className="audit-timeline">
+            <VirtualList
+              items={records}
+              estimateSize={140}
+              height={typeof maxHeight === "number" ? maxHeight : 720}
+              overscan={6}
+              getItemKey={(record) => record.id}
+              renderItem={(record, index) => (
+                <TimelineItem
+                  record={record}
+                  isLast={index === records.length - 1}
+                  relativeTime={relativeTime}
+                />
+              )}
+            />
+          </div>
         )}
       </div>
     </div>

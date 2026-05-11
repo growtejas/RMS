@@ -1,6 +1,7 @@
-import { Queue, type JobsOptions } from "bullmq";
+import type { JobsOptions, Queue } from "bullmq";
 
-import { getQueueConnectionOptions } from "@/lib/queue/redis";
+import { jobOptionsFor } from "@/lib/queue/queue-policies";
+import { getSharedQueue } from "@/lib/queue/queue-registry";
 
 export const RESUME_STRUCTURE_QUEUE_NAME = "resume-structure";
 export const REFINE_RESUME_STRUCTURE_JOB = "refine-resume-structure";
@@ -9,15 +10,10 @@ export type RefineResumeStructurePayload = {
   candidateId: number;
 };
 
-let queue: Queue<RefineResumeStructurePayload> | null = null;
-
 function getQueue(): Queue<RefineResumeStructurePayload> {
-  if (!queue) {
-    queue = new Queue<RefineResumeStructurePayload>(RESUME_STRUCTURE_QUEUE_NAME, {
-      connection: getQueueConnectionOptions(),
-    });
-  }
-  return queue;
+  return getSharedQueue<RefineResumeStructurePayload>(
+    RESUME_STRUCTURE_QUEUE_NAME,
+  );
 }
 
 export async function enqueueResumeStructureRefineJob(
@@ -28,6 +24,6 @@ export async function enqueueResumeStructureRefineJob(
   await q.add(
     REFINE_RESUME_STRUCTURE_JOB,
     { candidateId },
-    { removeOnComplete: 200, removeOnFail: 100, ...opts },
+    { ...jobOptionsFor("resume-structure"), ...opts },
   );
 }

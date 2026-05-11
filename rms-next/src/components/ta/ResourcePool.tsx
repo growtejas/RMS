@@ -1,5 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { cachedApiGet } from "@/lib/api/cached-api-get";
+import { ListFooter } from "@/components/ui/ListFooter";
+import {
+  DEFAULT_PAGE_SIZE,
+  buildPaginationMeta,
+  type PageSize,
+} from "@/lib/pagination/contract";
 
 /* ======================================================
    Types
@@ -25,10 +31,11 @@ const ResourcePool: React.FC = () => {
   const [resources, setResources] = useState<Resource[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [visibleCount, setVisibleCount] = useState(20);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState<PageSize>(DEFAULT_PAGE_SIZE);
 
   useEffect(() => {
-    setVisibleCount(20);
+    setPage(1);
   }, [skillFilter]);
 
   useEffect(() => {
@@ -109,7 +116,7 @@ const ResourcePool: React.FC = () => {
 
         if (!isMounted) return;
         setResources(resourceList);
-        setVisibleCount(20);
+        setPage(1);
       } catch (err) {
         if (!isMounted) return;
         const message =
@@ -135,6 +142,21 @@ const ResourcePool: React.FC = () => {
       res.skills.some((s) => s.name.toLowerCase().includes(query)),
     );
   }, [resources, skillFilter]);
+
+  const pagination = useMemo(
+    () =>
+      buildPaginationMeta({
+        page,
+        limit,
+        total: filteredResources.length,
+      }),
+    [filteredResources.length, page, limit],
+  );
+
+  const pagedResources = useMemo(() => {
+    const start = (pagination.page - 1) * pagination.limit;
+    return filteredResources.slice(start, start + pagination.limit);
+  }, [filteredResources, pagination.page, pagination.limit]);
 
   return (
     <>
@@ -173,7 +195,7 @@ const ResourcePool: React.FC = () => {
           </thead>
 
           <tbody>
-            {filteredResources.slice(0, visibleCount).map((res) => (
+            {pagedResources.map((res) => (
               <tr key={res.empId}>
                 <td>
                   <strong>{res.name}</strong>
@@ -232,40 +254,16 @@ const ResourcePool: React.FC = () => {
           </tbody>
         </table>
 
-        {!isLoading && !error && filteredResources.length > visibleCount && (
-          <div
-            style={{
-              marginTop: "16px",
-              display: "flex",
-              justifyContent: "center",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            <button
-              type="button"
-              className="action-button"
-              onClick={() => setVisibleCount((prev) => prev + 20)}
-            >
-              Load more resources
-            </button>
-            <span style={{ fontSize: "12px", color: "var(--text-tertiary)" }}>
-              Showing {visibleCount} of {filteredResources.length} resources
-            </span>
-          </div>
-        )}
-
-        {!isLoading && !error && filteredResources.length > 0 && filteredResources.length <= visibleCount && (
-          <div
-            style={{
-              marginTop: "12px",
-              fontSize: "12px",
-              color: "var(--text-tertiary)",
-              textAlign: "center",
-            }}
-          >
-            Showing all {filteredResources.length} resources
+        {!isLoading && !error && filteredResources.length > 0 && (
+          <div className="mt-4">
+            <ListFooter
+              pagination={pagination}
+              onPageChange={(next) => setPage(next)}
+              onPageSizeChange={(next) => {
+                setLimit(next);
+                setPage(1);
+              }}
+            />
           </div>
         )}
 

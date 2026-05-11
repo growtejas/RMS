@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { verifyRefreshToken } from "@/lib/auth/jwt";
+import { withRequestPerf } from "@/lib/perf/request-perf";
 import { refreshForUserId } from "@/lib/services/auth-service";
 import {
   ACCESS_COOKIE,
@@ -16,6 +17,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  return withRequestPerf("POST /api/auth/refresh", () => handle(req));
+}
+
+async function handle(req: Request) {
   try {
     const token = getCookie(req, REFRESH_COOKIE);
     if (!token) {

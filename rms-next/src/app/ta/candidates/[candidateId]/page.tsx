@@ -1,20 +1,10 @@
-"use client";
-
 import React, { Suspense } from "react";
-import { useParams } from "next/navigation";
 
 import { Loader } from "@/components/ui/Loader";
 import CandidateProfileRouteClient from "@/components/shared/CandidateProfileRouteClient";
 
-function TaCandidateProfileInner() {
-  const params = useParams();
-  const raw = params?.candidateId;
-  const id =
-    typeof raw === "string"
-      ? Number.parseInt(raw, 10)
-      : Array.isArray(raw)
-        ? Number.parseInt(raw[0] ?? "", 10)
-        : NaN;
+function TaCandidateProfileInner({ candidateId }: { candidateId: number }) {
+  const id = candidateId;
   if (!Number.isFinite(id)) {
     return (
       <div className="p-8 text-center text-sm text-red-700">
@@ -25,7 +15,12 @@ function TaCandidateProfileInner() {
   return <CandidateProfileRouteClient candidateId={id} />;
 }
 
-export default function TaCandidateProfilePage() {
+export default function TaCandidateProfilePage({
+  params,
+}: {
+  params: { candidateId: string };
+}) {
+  const id = Number.parseInt(params.candidateId, 10);
   return (
     <Suspense
       fallback={
@@ -34,7 +29,7 @@ export default function TaCandidateProfilePage() {
         </div>
       }
     >
-      <TaCandidateProfileInner />
+      <TaCandidateProfileInner candidateId={id} />
     </Suspense>
   );
 }

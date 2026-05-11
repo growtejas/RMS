@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
-  fetchManagerInterviews,
+  fetchManagerInterviewsPage,
   getCandidate,
   updateInterview,
   type Candidate,
@@ -14,14 +14,21 @@ import { useAuth } from "@/contexts/useAuth";
 
 import CandidateDetailModal from "@/components/shared/CandidateDetailModal";
 import { InterviewStatusBadge } from "@/components/interviews/InterviewStatusBadge";
+import { ListFooter } from "@/components/ui/ListFooter";
+import { ListEmpty } from "@/components/ui/ListEmpty";
+import { ListError } from "@/components/ui/ListError";
+import { ListSkeleton } from "@/components/ui/ListSkeleton";
+import {
+  DEFAULT_PAGE_SIZE,
+  type PageSize,
+} from "@/lib/pagination/contract";
+import { usePaginatedList } from "@/lib/pagination/use-paginated-list";
+import { qk } from "@/lib/query/keys";
+import { useQueryClient } from "@tanstack/react-query";
 
 type ManagerInterview = Interview & {
   role_position?: string | null;
 };
-
-function startOfLocalDay(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
 
 function formatInterviewers(iv: ManagerInterview): string {
   if (iv.panelists && iv.panelists.length > 0) {
@@ -35,14 +42,12 @@ function roundTitle(iv: ManagerInterview): string {
   return `Round ${iv.round_number}`;
 }
 
-function Section({
-  title,
+function InterviewTable({
   interviews,
   onOpenCandidate,
   onOpenUpdate,
   onOpenSchedule,
 }: {
-  title: string;
   interviews: ManagerInterview[];
   onOpenCandidate: (iv: ManagerInterview) => void;
   onOpenUpdate: (iv: ManagerInterview) => void;
@@ -50,15 +55,7 @@ function Section({
 }) {
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="text-sm font-bold text-text">{title}</div>
-        <div className="text-xs text-text-muted">{interviews.length} total</div>
-      </div>
-      {interviews.length === 0 ? (
-        <div className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-text-muted shadow-sm">
-          No interviews.
-        </div>
-      ) : (
+      {interviews.length === 0 ? null : (
         <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
           <div className="hidden grid-cols-[1.35fr_1fr_1fr_1fr] gap-3 border-b border-border bg-bg px-4 py-3 text-[11px] font-bold uppercase tracking-[0.14em] text-text-muted sm:grid">
             <div>Candidate</div>
@@ -152,10 +149,23 @@ export default function ManagerInterviewsPage() {
   const router = useRouter();
   const { user } = useAuth();
   const userRoles = useMemo(() => user?.roles ?? [], [user?.roles]);
+  const queryClient = useQueryClient();
 
-  const [rows, setRows] = useState<ManagerInterview[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState<PageSize>(DEFAULT_PAGE_SIZE);
+  const queryParams = useMemo(() => ({ page, limit }), [page, limit]);
+
+  const list = usePaginatedList<Interview>({
+    queryKey: qk.interviews.managerList(queryParams),
+    fetcher: ({ signal }) =>
+      fetchManagerInterviewsPage({
+        page,
+        limit,
+        signal: signal ?? undefined,
+      }),
+  });
+
+  const rows = list.items as ManagerInterview[];
 
   const [candidateModal, setCandidateModal] = useState<Candidate | null>(null);
   const [candidateLoading, setCandidateLoading] = useState(false);
@@ -166,64 +176,15 @@ export default function ManagerInterviewsPage() {
   const [updateFeedback, setUpdateFeedback] = useState("");
   const [updating, setUpdating] = useState(false);
 
-  // Scheduling is handled on a dedicated page now.
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    void fetchManagerInterviews()
-      .then((ivs) => {
-        if (!cancelled) setRows(ivs);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const grouped = useMemo(() => {
-    const now = new Date();
-    const todayStart = startOfLocalDay(now).getTime();
-    const tomorrowStart = new Date(todayStart + 24 * 60 * 60 * 1000).getTime();
-
-    const today: ManagerInterview[] = [];
-    const upcoming: ManagerInterview[] = [];
-    const completed: ManagerInterview[] = [];
-
-    for (const iv of rows) {
-      const t = new Date(iv.scheduled_at).getTime();
-      const status = String(iv.status || "").toUpperCase().replace(/\s+/g, "_");
-
-      if (status === "COMPLETED" || status === "CANCELLED") {
-        completed.push(iv);
-        continue;
-      }
-      if (t >= todayStart && t < tomorrowStart) {
-        today.push(iv);
-        continue;
-      }
-      if (t >= tomorrowStart) {
-        upcoming.push(iv);
-        continue;
-      }
-      // Past but not completed (e.g. NO_SHOW): treat as today bucket for visibility.
-      today.push(iv);
-    }
-
-    const sortAsc = (a: ManagerInterview, b: ManagerInterview) =>
-      new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime();
-    today.sort(sortAsc);
-    upcoming.sort(sortAsc);
-    completed.sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime());
-
-    return { today, upcoming, completed };
-  }, [rows]);
+  const sortedRows = useMemo(
+    () =>
+      [...rows].sort(
+        (a, b) =>
+          new Date(b.scheduled_at).getTime() -
+          new Date(a.scheduled_at).getTime(),
+      ),
+    [rows],
+  );
 
   const openCandidate = async (iv: ManagerInterview) => {
     setCandidateLoading(true);
@@ -251,8 +212,10 @@ export default function ManagerInterviewsPage() {
         notes: updateNotes.trim() || null,
         feedback: updateFeedback.trim() || null,
       };
-      const res = await updateInterview(updateIv.id, payload);
-      setRows((prev) => prev.map((r) => (r.id === updateIv.id ? res.interview : r)));
+      await updateInterview(updateIv.id, payload);
+      await queryClient.invalidateQueries({
+        queryKey: qk.interviews.managerList(queryParams),
+      });
       setUpdateIv(null);
     } finally {
       setUpdating(false);
@@ -267,37 +230,40 @@ export default function ManagerInterviewsPage() {
   };
 
   return (
-    <div className="space-y-8">
-      {loading ? (
-        <div className="text-sm text-text-muted">Loading interviews…</div>
-      ) : error ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 shadow-sm">
-          {error}
-        </div>
+    <div className="space-y-6">
+      {list.isLoading ? (
+        <ListSkeleton variant="cards" rows={limit} />
+      ) : list.isError ? (
+        <ListError
+          title="Failed to load interviews"
+          description={
+            list.error instanceof Error ? list.error.message : undefined
+          }
+          onRetry={() => void list.refetch()}
+        />
+      ) : sortedRows.length === 0 ? (
+        <ListEmpty
+          title="No interviews"
+          description="No interviews to show right now."
+        />
       ) : (
-        <>
-          <Section
-            title="Today’s Interviews"
-            interviews={grouped.today}
-            onOpenCandidate={openCandidate}
-            onOpenUpdate={openUpdate}
-            onOpenSchedule={openSchedule}
-          />
-          <Section
-            title="Upcoming Interviews"
-            interviews={grouped.upcoming}
-            onOpenCandidate={openCandidate}
-            onOpenUpdate={openUpdate}
-            onOpenSchedule={openSchedule}
-          />
-          <Section
-            title="Completed Interviews"
-            interviews={grouped.completed}
-            onOpenCandidate={openCandidate}
-            onOpenUpdate={openUpdate}
-            onOpenSchedule={openSchedule}
-          />
-        </>
+        <InterviewTable
+          interviews={sortedRows}
+          onOpenCandidate={openCandidate}
+          onOpenUpdate={openUpdate}
+          onOpenSchedule={openSchedule}
+        />
+      )}
+
+      {!list.isLoading && !list.isError && (
+        <ListFooter
+          pagination={list.pagination}
+          onPageChange={(next) => setPage(next)}
+          onPageSizeChange={(next) => {
+            setLimit(next);
+            setPage(1);
+          }}
+        />
       )}
 
       {candidateLoading ? (

@@ -3,12 +3,18 @@ import { z } from "zod";
 
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
+import { PAGE_SIZE_OPTIONS } from "@/lib/pagination/contract";
+import { paginatedJson } from "@/lib/pagination/server";
+import { parsePaginationParams } from "@/lib/pagination/zod";
 import {
   getRequisitionDetailRead,
   listRequisitionsRead,
+  listRequisitionsReadPaged,
 } from "@/lib/services/requisitions-read-service";
 import { createRequisitionFromForm } from "@/lib/services/requisitions-write-service";
 import { requisitionItemCreateBody } from "@/lib/validators/requisition-write";
+
+const PAGE_SIZE_NUMS = new Set<number>(PAGE_SIZE_OPTIONS);
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -103,8 +109,13 @@ export async function POST(req: Request) {
 }
 
 /**
- * GET /api/requisitions — parity with FastAPI list (read-only Phase C).
- * Query: status, raised_by, my_assignments, assigned_to=me, assigned_ta
+ * GET /api/requisitions — list requisitions.
+ *
+ * When called with the canonical `?limit=25|50|100` (or any `?page=`),
+ * returns the canonical envelope `{ success, data: { items, pagination }, error }`.
+ *
+ * Otherwise (legacy `?page_size=` or no pagination) returns the legacy bare
+ * array for backwards compatibility while consumers migrate.
  */
 export async function GET(req: Request) {
   try {
@@ -139,14 +150,6 @@ export async function GET(req: Request) {
       assignedTaRaw != null && assignedTaRaw !== ""
         ? Number.parseInt(assignedTaRaw, 10)
         : null;
-    const pageRaw = url.searchParams.get("page");
-    const pageSizeRaw = url.searchParams.get("page_size");
-    const page =
-      pageRaw != null && pageRaw !== "" ? Number.parseInt(pageRaw, 10) : 1;
-    const pageSize =
-      pageSizeRaw != null && pageSizeRaw !== ""
-        ? Number.parseInt(pageSizeRaw, 10)
-        : 50;
 
     if (raisedByRaw != null && raisedByRaw !== "" && !Number.isFinite(raisedBy)) {
       return NextResponse.json({ detail: "Invalid raised_by" }, { status: 422 });
@@ -158,13 +161,49 @@ export async function GET(req: Request) {
     ) {
       return NextResponse.json({ detail: "Invalid assigned_ta" }, { status: 422 });
     }
+
+    const limitRaw = url.searchParams.get("limit");
+    const limitNum = limitRaw != null ? Number.parseInt(limitRaw, 10) : NaN;
+    const useCanonical =
+      url.searchParams.has("page") ||
+      (Number.isFinite(limitNum) && PAGE_SIZE_NUMS.has(limitNum));
+
+    if (useCanonical) {
+      const { page, limit } = parsePaginationParams(url);
+      const result = await listRequisitionsReadPaged({
+        organizationId: user.organizationId,
+        roles: user.roles,
+        currentUserId: user.userId,
+        status,
+        raisedBy: Number.isFinite(raisedBy) ? raisedBy : null,
+        myAssignments,
+        assignedTo,
+        assignedTa: Number.isFinite(assignedTa) ? assignedTa : null,
+        page,
+        limit,
+      });
+      return paginatedJson(result.items, {
+        page: result.pagination.page,
+        limit: result.pagination.limit,
+        total: result.pagination.total,
+      });
+    }
+
+    // Legacy path
+    const pageRaw = url.searchParams.get("page");
+    const pageSizeRaw = url.searchParams.get("page_size");
+    const page =
+      pageRaw != null && pageRaw !== "" ? Number.parseInt(pageRaw, 10) : 1;
+    const pageSize =
+      pageSizeRaw != null && pageSizeRaw !== ""
+        ? Number.parseInt(pageSizeRaw, 10)
+        : 50;
     if (!Number.isFinite(page) || page <= 0) {
       return NextResponse.json({ detail: "Invalid page" }, { status: 422 });
     }
     if (!Number.isFinite(pageSize) || pageSize <= 0) {
       return NextResponse.json({ detail: "Invalid page_size" }, { status: 422 });
     }
-
     const data = await listRequisitionsRead({
       organizationId: user.organizationId,
       roles: user.roles,
@@ -177,7 +216,12 @@ export async function GET(req: Request) {
       page,
       pageSize,
     });
-    return NextResponse.json(data);
+    return NextResponse.json(data, {
+      headers: {
+        "X-RMS-Requisitions-Legacy":
+          "Pass `page` and `limit` (25/50/100) to receive the canonical paginated envelope.",
+      },
+    });
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/requisitions]");
   }

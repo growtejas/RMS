@@ -183,6 +183,41 @@
       "when": 1778100000000,
       "tag": "0025_candidate_intelligence_engine",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1778200000000,
+      "tag": "0026_interview_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1778300000000,
+      "tag": "0027_candidate_parsed_v2_json",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1778400000000,
+      "tag": "0028_pagination_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1778500000000,
+      "tag": "0029_reporting_aggregations",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1778600000000,
+      "tag": "0030_analytics_dynamic_stages",
+      "breakpoints": true
     }
   ]
 }

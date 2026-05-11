@@ -4,6 +4,12 @@ import type { ApiUser } from "@/lib/auth/api-guard";
 import { assertTaOwnershipForCandidate } from "@/lib/auth/ta-ownership";
 import { getDb } from "@/lib/db";
 import {
+  buildPaginationMeta,
+  computePagePosition,
+  type PageSize,
+  type PaginatedData,
+} from "@/lib/pagination/contract";
+import {
   auditLog,
   interviewPanelists,
   interviews,
@@ -189,6 +195,42 @@ export async function listInterviewsJson(
   );
 }
 
+export async function listInterviewsPaged(
+  organizationId: string,
+  args: {
+    page: number;
+    limit: PageSize;
+    filters?: { candidateId?: number | null; requisitionId?: number | null };
+  },
+): Promise<PaginatedData<InterviewJson>> {
+  // The underlying queries already dedupe in memory across union sources;
+  // we slice the result set to the requested page.  When per-org volumes
+  // grow, push LIMIT/OFFSET into the SQL via interviews-repo helpers.
+  const allRows = await repo.selectInterviewsList(organizationId, args.filters);
+  const total = allRows.length;
+  const { page, offset } = computePagePosition({
+    pageRequested: args.page,
+    total,
+    limit: args.limit,
+  });
+  const slice = allRows.slice(offset, offset + args.limit);
+  const ids = slice.map((r) => r.interview.id);
+  const panelMap = await attachPanelistsMap(ids);
+  const items = slice.map((r) =>
+    interviewToJson(r.interview, {
+      panelists: panelMap.get(r.interview.id) ?? [],
+      extras: {
+        candidate_name: r.candidateFullName,
+        candidate_email: r.candidateEmail,
+      },
+    }),
+  );
+  return {
+    items,
+    pagination: buildPaginationMeta({ page, limit: args.limit, total }),
+  };
+}
+
 export async function listManagerInterviewsJson(user: ApiUser) {
   const rows = await ivRepo.listManagerInterviews({
     organizationId: user.organizationId,
@@ -248,6 +290,74 @@ export async function listMyInterviewsAsPanelistJson(user: ApiUser) {
       },
     }),
   );
+}
+
+export async function listMyInterviewsAsPanelistPaged(
+  user: ApiUser,
+  args: { page: number; limit: PageSize },
+): Promise<PaginatedData<InterviewJson>> {
+  const allRows = await ivRepo.listPanelistOnlyInterviews({
+    organizationId: user.organizationId,
+    userId: user.userId,
+  });
+  const total = allRows.length;
+  const { page, offset } = computePagePosition({
+    pageRequested: args.page,
+    total,
+    limit: args.limit,
+  });
+  const slice = allRows.slice(offset, offset + args.limit);
+  const ids = slice.map((r) => r.interview.id);
+  const panelMap = await attachPanelistsMap(ids);
+  const items = slice.map((r) =>
+    interviewToInterviewerJson(r.interview, {
+      panelists: panelMap.get(r.interview.id) ?? [],
+      extras: {
+        candidate_name: r.candidateFullName,
+        candidate_email: r.candidateEmail,
+        requisition_id: r.requisitionId,
+        role_position: r.rolePosition,
+      },
+    }),
+  );
+  return {
+    items,
+    pagination: buildPaginationMeta({ page, limit: args.limit, total }),
+  };
+}
+
+export async function listManagerInterviewsPaged(
+  user: ApiUser,
+  args: { page: number; limit: PageSize },
+): Promise<PaginatedData<InterviewJson>> {
+  const allRows = await ivRepo.listManagerInterviews({
+    organizationId: user.organizationId,
+    managerUserId: user.userId,
+  });
+  const total = allRows.length;
+  const { page, offset } = computePagePosition({
+    pageRequested: args.page,
+    total,
+    limit: args.limit,
+  });
+  const slice = allRows.slice(offset, offset + args.limit);
+  const ids = slice.map((r) => r.interview.id);
+  const panelMap = await attachPanelistsMap(ids);
+  const items = slice.map((r) =>
+    interviewToJson(r.interview, {
+      panelists: panelMap.get(r.interview.id) ?? [],
+      extras: {
+        candidate_name: r.candidateFullName,
+        candidate_email: r.candidateEmail,
+        requisition_id: r.requisitionId,
+        role_position: r.rolePosition,
+      },
+    }),
+  );
+  return {
+    items,
+    pagination: buildPaginationMeta({ page, limit: args.limit, total }),
+  };
 }
 
 export async function getInterviewerInterviewDetail(interviewId: number, user: ApiUser) {
@@ -512,6 +622,7 @@ async function createInterviewV2(
         .values({
           candidateId: payload.candidate_id,
           requisitionItemId: payload.requisition_item_id,
+          applicationId: app.applicationId,
           roundNumber: roundNum,
           roundName: payload.round_name.trim(),
           roundType: payload.round_type,

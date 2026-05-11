@@ -7,6 +7,7 @@ import {
 } from "@/lib/repositories/auth-user";
 import { tryParseAuthorizationAccessToken } from "@/lib/auth/auth-header";
 import { ACCESS_COOKIE, getCookie } from "@/lib/auth/cookies";
+import { notePerfTag, timePerf } from "@/lib/perf/request-perf";
 import {
   resolveOrganizationIdForUser,
   userBelongsToOrganization,
@@ -43,7 +44,7 @@ async function resolveUserFromRequest(
 
   let payload: Awaited<ReturnType<typeof verifyAccessToken>>;
   try {
-    payload = await verifyAccessToken(token);
+    payload = await timePerf("auth_ms_jwt", () => verifyAccessToken(token));
   } catch {
     return {
       ok: false,
@@ -65,7 +66,13 @@ async function resolveUserFromRequest(
     };
   }
 
-  const userWithRoles = await findUserWithRolesById(userId);
+  // Default attribution for the legacy DB-backed path; the fast path overrides
+  // this tag in identity-fastpath.ts.
+  notePerfTag("auth_path", "db_full");
+
+  const userWithRoles = await timePerf("auth_ms_user_db", () =>
+    findUserWithRolesById(userId),
+  );
   if (!userWithRoles) {
     return {
       ok: false,
@@ -79,10 +86,19 @@ async function resolveUserFromRequest(
   const claimOrg =
     typeof claimOrgRaw === "string" && claimOrgRaw.length > 0 ? claimOrgRaw : null;
   let organizationId: string;
-  if (claimOrg && (await userBelongsToOrganization(userId, claimOrg))) {
-    organizationId = claimOrg;
+  if (claimOrg) {
+    const belongs = await timePerf("auth_ms_org_db", () =>
+      userBelongsToOrganization(userId, claimOrg),
+    );
+    organizationId = belongs
+      ? claimOrg
+      : await timePerf("auth_ms_org_db", () =>
+          resolveOrganizationIdForUser(userId),
+        );
   } else {
-    organizationId = await resolveOrganizationIdForUser(userId);
+    organizationId = await timePerf("auth_ms_org_db", () =>
+      resolveOrganizationIdForUser(userId),
+    );
   }
 
   return {
@@ -97,7 +113,41 @@ async function resolveUserFromRequest(
   };
 }
 
+function isReadMethod(method: string): boolean {
+  const m = method.toUpperCase();
+  return m === "GET" || m === "HEAD" || m === "OPTIONS";
+}
+
+/**
+ * Hybrid auth entry point used by the 161 route handlers in `src/app/api/`.
+ *
+ *   - GET / HEAD / OPTIONS  -> claims-trust fast path (no DB).
+ *   - everything else        -> LRU-cached DB-backed identity.
+ *
+ * Routes do not need to change. The fast path is a no-op (delegates back
+ * to the legacy resolver) when `RMS_AUTH_FASTPATH=false` so we have an
+ * instant rollback flag.
+ */
 export async function requireBearerUser(
+  req: Request,
+): Promise<ApiUser | NextResponse> {
+  if (process.env.RMS_AUTH_FASTPATH !== "false") {
+    const { requireGetIdentity, requireWriteIdentity } = await import(
+      "./identity-fastpath"
+    );
+    return isReadMethod(req.method)
+      ? requireGetIdentity(req)
+      : requireWriteIdentity(req);
+  }
+  return legacyRequireBearerUser(req);
+}
+
+/**
+ * Legacy DB-backed resolver, kept exported for explicit "always do the
+ * full DB validation" call sites (e.g. /auth/refresh) and as the rollback
+ * target for `RMS_AUTH_FASTPATH=false`.
+ */
+export async function legacyRequireBearerUser(
   req: Request,
 ): Promise<ApiUser | NextResponse> {
   const resolved = await resolveUserFromRequest(req);

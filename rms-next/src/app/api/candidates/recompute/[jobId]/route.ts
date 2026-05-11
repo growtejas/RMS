@@ -34,7 +34,7 @@ export async function GET(req: Request, { params }: Ctx) {
     if (!row) {
       return NextResponse.json({ detail: "Job not found" }, { status: 404 });
     }
-    if (row.kind !== "cie_recompute") {
+    if (row.kind !== "cie_recompute" && row.kind !== "cie_rematerialize_v2") {
       return NextResponse.json({ detail: "Not a CIE recompute job" }, { status: 400 });
     }
 

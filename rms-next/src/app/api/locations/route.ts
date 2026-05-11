@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
 import { parseFastapiJsonBody } from "@/lib/http/parse-fastapi-body";
+import {
+  isCanonicalListRequest,
+  paginateInMemory,
+} from "@/lib/pagination/in-memory";
 import { getLocationsCatalog } from "@/lib/services/reference-read-service";
 import { createLocation } from "@/lib/services/reference-write-service";
 import { locationCreateBody } from "@/lib/validators/reference-master";
@@ -23,7 +27,13 @@ export async function GET(request: Request) {
     }
 
     const data = await getLocationsCatalog();
-    return NextResponse.json(data);
+    const url = new URL(request.url);
+    if (isCanonicalListRequest(url)) {
+      return paginateInMemory(url, data);
+    }
+    const res = NextResponse.json(data);
+    res.headers.set("Deprecation", "list-locations-bare-shape");
+    return res;
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/locations]");
   }

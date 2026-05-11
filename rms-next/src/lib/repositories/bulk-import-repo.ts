@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
 import { bulkImportJobs } from "@/lib/db/schema";
@@ -45,6 +45,31 @@ export async function listRecentBulkJobs(organizationId: string, limit = 20) {
     .where(eq(bulkImportJobs.organizationId, organizationId))
     .orderBy(desc(bulkImportJobs.createdAt))
     .limit(limit);
+}
+
+export async function listBulkJobsForOrgPaged(
+  organizationId: string,
+  args: { limit: number; offset: number },
+) {
+  const db = getDb();
+  return db
+    .select()
+    .from(bulkImportJobs)
+    .where(eq(bulkImportJobs.organizationId, organizationId))
+    .orderBy(desc(bulkImportJobs.createdAt))
+    .limit(args.limit)
+    .offset(args.offset);
+}
+
+export async function countBulkJobsForOrg(
+  organizationId: string,
+): Promise<number> {
+  const db = getDb();
+  const [row] = await db
+    .select({ c: count() })
+    .from(bulkImportJobs)
+    .where(eq(bulkImportJobs.organizationId, organizationId));
+  return Number(row?.c ?? 0);
 }
 
 export async function markBulkImportJobRunning(id: string) {

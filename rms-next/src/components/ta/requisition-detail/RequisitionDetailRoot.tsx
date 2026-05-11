@@ -1,3 +1,5 @@
+ "use client";
+
 /* eslint-disable @typescript-eslint/no-unused-vars -- legacy Vite migration */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable react/no-unescaped-entities */
@@ -43,6 +45,7 @@ import {
   RefreshCw,
   Eye,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { apiClient } from "@/lib/api/client";
 import { getUsersListCached } from "@/lib/api/users-list-cache";
@@ -84,7 +87,7 @@ import {
   type Interview,
   type RequisitionItemRankingResponse,
 } from "@/lib/api/candidateApi";
-import { useAtsAiScorePolling, useAtsTabInitialLoad } from "@/hooks/useAtsBoard";
+import { useAtsAiScoreStream, useAtsTabInitialLoad } from "@/hooks/useAtsBoard";
 import AtsBucketBoard from "@/components/ta/ats/AtsBucketBoard";
 import PipelineOverview from "@/components/ta/requisition-advanced/PipelineOverview";
 import RankingConfigPanel from "@/components/ta/requisition-advanced/RankingConfigPanel";
@@ -110,9 +113,6 @@ import type {
 import { OverviewTab } from "@/components/ta/requisition-detail/tabs/OverviewTab";
 import { ItemsTab } from "@/components/ta/requisition-detail/tabs/ItemsTab";
 import { CandidatePipelineChrome } from "@/components/ta/requisition-detail/tabs/CandidatePipelineChrome";
-import { AtsTabPanel } from "@/components/ta/requisition-detail/tabs/AtsTabPanel";
-import { ShortlistedTabPanel } from "@/components/ta/requisition-detail/tabs/ShortlistedTabPanel";
-import { InterviewsTabPanel } from "@/components/ta/requisition-detail/tabs/InterviewsTabPanel";
 import { TimelineTab } from "@/components/ta/requisition-detail/tabs/TimelineTab";
 import type { RequisitionPipelineBindings } from "@/components/ta/requisition-detail/tabs/pipelineTabBindings";
 import {
@@ -123,6 +123,66 @@ import {
   resolveExperienceFitFlag,
 } from "@/components/ta/requisition-detail/utils";
 import "../../../styles/hr/hr-dashboard.css";
+
+const AtsTabPanel = dynamic(
+  () =>
+    import("@/components/ta/requisition-detail/tabs/AtsTabPanel").then(
+      (m) => m.AtsTabPanel,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="px-4 py-10 text-center text-sm text-slate-600">
+        Loading ATS…
+      </div>
+    ),
+  },
+);
+
+const ShortlistedTabPanel = dynamic(
+  () =>
+    import("@/components/ta/requisition-detail/tabs/ShortlistedTabPanel").then(
+      (m) => m.ShortlistedTabPanel,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="px-4 py-10 text-center text-sm text-slate-600">
+        Loading shortlisted…
+      </div>
+    ),
+  },
+);
+
+const InterviewsTabPanel = dynamic(
+  () =>
+    import("@/components/ta/requisition-detail/tabs/InterviewsTabPanel").then(
+      (m) => m.InterviewsTabPanel,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="px-4 py-10 text-center text-sm text-slate-600">
+        Loading interviews…
+      </div>
+    ),
+  },
+);
+
+const CandidatesWorkspaceTabPanel = dynamic(
+  () =>
+    import("@/components/ta/requisition-detail/tabs/CandidatesWorkspaceTabPanel").then(
+      (m) => m.CandidatesWorkspaceTabPanel,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="px-4 py-10 text-center text-sm text-slate-600">
+        Loading candidates…
+      </div>
+    ),
+  },
+);
 
 const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
   requisitionId,
@@ -659,55 +719,85 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
       }
     };
 
-    const fetchStatusHistory = async () => {
+    // Phase 2: only the requisition header is needed to render the page
+    // shell. status-history, audit-logs, and the users list are gated to
+    // the tabs that actually consume them (see effects below).
+    fetchRequisition();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [effectiveTicketId]);
+
+  // Phase 2 - per-tab loaders. Each runs only when its tab is active. The
+  // previous "fan out four GETs at mount" pattern was the dominant cause
+  // of the post-click stutter when the requisition detail page opens.
+  useEffect(() => {
+    if (activeTab !== "timeline") return;
+    const reqId = parseReqId(effectiveTicketId);
+    if (!reqId) return;
+    let cancelled = false;
+    void (async () => {
       try {
         const response = await apiClient.get<StatusHistoryEntry[]>(
           `/requisitions/${reqId}/status-history`,
         );
-        if (isMounted) {
-          setStatusHistory(response.data ?? []);
-        }
+        if (!cancelled) setStatusHistory(response.data ?? []);
       } catch {
-        if (isMounted) setStatusHistory([]);
+        if (!cancelled) setStatusHistory([]);
       }
+    })();
+    return () => {
+      cancelled = true;
     };
+  }, [activeTab, effectiveTicketId]);
 
-    const fetchAuditLogs = async () => {
+  useEffect(() => {
+    if (activeTab !== "timeline") return;
+    const reqId = parseReqId(effectiveTicketId);
+    if (!reqId) return;
+    let cancelled = false;
+    void (async () => {
       try {
         const response = await apiClient.get<AuditLogEntry[]>(
           `/audit-logs?entity_name=requisition&entity_id=${reqId}`,
         );
-        if (isMounted) {
-          setAuditLogs(response.data ?? []);
-        }
+        if (!cancelled) setAuditLogs(response.data ?? []);
       } catch {
-        if (isMounted) setAuditLogs([]);
+        if (!cancelled) setAuditLogs([]);
       }
+    })();
+    return () => {
+      cancelled = true;
     };
+  }, [activeTab, effectiveTicketId]);
 
-    const fetchUsers = async () => {
+  useEffect(() => {
+    // The user list is consumed by Items / Candidates / Timeline tabs to
+    // resolve usernames. Lazy-load only when one of those tabs is active.
+    const needsUsers =
+      activeTab === "items" ||
+      activeTab === "candidates" ||
+      activeTab === "timeline";
+    if (!needsUsers) return;
+    let cancelled = false;
+    void (async () => {
       try {
         const rows = await getUsersListCached<UserDirectoryEntry>();
-        if (!isMounted) return;
+        if (cancelled) return;
         const map: Record<number, string> = {};
         rows.forEach((userEntry) => {
           map[userEntry.user_id] = userEntry.username;
         });
         setUsersById(map);
       } catch {
-        if (isMounted) setUsersById({});
+        if (!cancelled) setUsersById({});
       }
-    };
-
-    fetchRequisition();
-    fetchStatusHistory();
-    fetchAuditLogs();
-    fetchUsers();
-
+    })();
     return () => {
-      isMounted = false;
+      cancelled = true;
     };
-  }, [effectiveTicketId]);
+  }, [activeTab]);
 
   // ---- Load candidates when requisition is available ----
   const loadCandidates = useCallback(async () => {
@@ -1045,9 +1135,17 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
     }
   };
 
+  // Phase 2 - candidates are only required by the "candidates", "ats",
+  // and "interviews" tabs. The previous mount-time `loadCandidates()` was
+  // a major contributor to TTFB clusters when opening a requisition.
   useEffect(() => {
-    loadCandidates();
-  }, [loadCandidates]);
+    const needsCandidates =
+      activeTab === "candidates" ||
+      activeTab === "ats" ||
+      activeTab === "interviews";
+    if (!needsCandidates) return;
+    void loadCandidates();
+  }, [activeTab, loadCandidates]);
 
   useEffect(() => {
     if (!ticket?.items.length) {
@@ -1063,7 +1161,7 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
   }, [ticket?.items]);
 
   useAtsTabInitialLoad(activeTab, rankingItemId, loadRanking);
-  useAtsAiScorePolling(
+  useAtsAiScoreStream(
     activeTab === "ats" && rankingItemId != null,
     rankingItemId,
     atsBucketsData,
@@ -1071,39 +1169,14 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
     setRankingData,
   );
 
-  useEffect(() => {
-    if (activeTab !== "ats" || rankingItemId == null || aiEvalWorking) {
-      return;
-    }
-    const pendingIds = Array.from(
-      new Set(
-        (rankingData?.ranked_candidates ?? [])
-          .filter(
-            (r) =>
-              r.score.ai_status !== "OK" ||
-              r.score.final_score == null ||
-              !Number.isFinite(r.score.final_score),
-          )
-          .map((r) => r.candidate_id),
-      ),
-    );
-    if (pendingIds.length === 0) {
-      atsAutoAiEvalRunKeyRef.current = null;
-      return;
-    }
-    const runKey = `${rankingItemId}:${pendingIds.sort((a, b) => a - b).join(",")}`;
-    if (atsAutoAiEvalRunKeyRef.current === runKey) {
-      return;
-    }
-    atsAutoAiEvalRunKeyRef.current = runKey;
-    void runAiEvalForUnscoredCandidates();
-  }, [
-    activeTab,
-    rankingItemId,
-    rankingData?.ranked_candidates,
-    aiEvalWorking,
-    runAiEvalForUnscoredCandidates,
-  ]);
+  // Phase 4: the auto-"recover unscored" effect was removed. It used to
+  // re-fire on every render that surfaced any PENDING/missing AI score,
+  // which compounded with the now-deleted 4 s polling and the old
+  // `loadCandidates` effect. Recovery is now opt-in via the explicit
+  // "Run AI evaluation" button in the ATS tab; backfill of stale jobs is
+  // owned by the periodic `ai-eval-backfill` worker (Phase 7).
+  void atsAutoAiEvalRunKeyRef;
+  void runAiEvalForUnscoredCandidates;
 
   useEffect(() => {
     const maybeRefresh = () => {
@@ -1920,6 +1993,11 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
       icon: <UserCheck size={16} />,
     },
     {
+      id: "candidates" as const,
+      label: "Candidates",
+      icon: <Users size={16} />,
+    },
+    {
       id: "interviews" as const,
       label: "Interviews",
       icon: <Calendar size={16} />,
@@ -2357,6 +2435,15 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
           )}
         </CandidatePipelineChrome>
       )}
+
+      {activeTab === "candidates" &&
+        ticket &&
+        parseReqId(effectiveTicketId) != null && (
+          <CandidatesWorkspaceTabPanel
+            requisitionId={parseReqId(effectiveTicketId)!}
+            ticket={ticket}
+          />
+        )}
 
       {activeTab === "timeline" && (
         <TimelineTab

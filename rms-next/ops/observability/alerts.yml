@@ -1,0 +1,53 @@
+groups:
+  - name: rms-performance-budgets
+    interval: 30s
+    rules:
+      - alert: RmsMetricsEndpointDown
+        expr: up{job="rms-next-web"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: rms-next
+        annotations:
+          summary: "RMS /api/metrics scrape is down"
+          description: "Prometheus cannot scrape rms-next-web for over 2m."
+
+      - alert: RmsQueueWaitingHigh
+        expr: max(rms_queue_waiting_jobs) > 200
+        for: 10m
+        labels:
+          severity: warning
+          service: rms-next
+        annotations:
+          summary: "Queue waiting backlog high"
+          description: "At least one queue has more than 200 waiting jobs for 10m."
+
+      - alert: RmsQueueFailuresSpiking
+        expr: increase(rms_queue_failed_jobs[15m]) > 25
+        for: 5m
+        labels:
+          severity: warning
+          service: rms-next
+        annotations:
+          summary: "Queue failures are increasing"
+          description: "Failed jobs increased by more than 25 over 15m."
+
+      - alert: RmsPromScrapeLatencyHigh
+        expr: max(scrape_duration_seconds{job="rms-next-web"}) > 1.5
+        for: 5m
+        labels:
+          severity: warning
+          service: rms-next
+        annotations:
+          summary: "Metrics scrape latency high"
+          description: "Scrape duration for rms-next-web exceeded 1.5s for 5m."
+
+      - alert: RmsNodeMemoryPressure
+        expr: (process_resident_memory_bytes / nodejs_heap_size_total_bytes) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          service: rms-next
+        annotations:
+          summary: "Node process memory pressure high"
+          description: "RSS to heap-total ratio stayed above 85% for 10m."

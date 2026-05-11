@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 
 /* ======================================================
    Types
@@ -82,6 +83,18 @@ const fulfillmentRatio: FulfillmentRatio = {
 const TAReports: React.FC = () => {
   return (
     <>
+      <div className="stat-card" style={{ marginBottom: 20 }}>
+        <div className="data-manager-header">
+          <h3>Hiring Intelligence Report</h3>
+          <p className="subtitle">Executive-ready analytics with funnel and lifecycle drill-downs.</p>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <Link href="/ta/reports/hiring-intelligence" className="status-badge active">
+            Open Hiring Intelligence
+          </Link>
+        </div>
+      </div>
+
       {/* Header */}
       <div className="manager-header">
         <h2>TA Performance & Reports</h2>

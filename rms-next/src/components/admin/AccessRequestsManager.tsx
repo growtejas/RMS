@@ -4,8 +4,14 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ListFooter } from "@/components/ui/ListFooter";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Table, TBody, THead, TD, TH, TR } from "@/components/ui/Table";
+import {
+  DEFAULT_PAGE_SIZE,
+  buildPaginationMeta,
+  type PageSize,
+} from "@/lib/pagination/contract";
 
 type AccessRequestRow = {
   id: string;
@@ -38,7 +44,7 @@ export default function AccessRequestsManager() {
   const [working, setWorking] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 10;
+  const [limit, setLimit] = useState<PageSize>(DEFAULT_PAGE_SIZE);
 
   const loadCatalog = useCallback(async () => {
     try {
@@ -147,10 +153,23 @@ export default function AccessRequestsManager() {
       })),
     [],
   );
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const pagination = useMemo(
+    () =>
+      buildPaginationMeta({
+        page,
+        limit,
+        total: rows.length,
+      }),
+    [rows.length, page, limit],
+  );
+
   const pagedRows = useMemo(
-    () => rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [page, rows],
+    () =>
+      rows.slice(
+        (pagination.page - 1) * pagination.limit,
+        (pagination.page - 1) * pagination.limit + pagination.limit,
+      ),
+    [rows, pagination.page, pagination.limit],
   );
 
   return (
@@ -261,27 +280,16 @@ export default function AccessRequestsManager() {
           </TBody>
         </Table>
       </div>
-      {rows.length > PAGE_SIZE ? (
-        <div className="mt-4 flex items-center justify-end gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-            disabled={page === 1}
-          >
-            Previous
-          </Button>
-          <span className="text-sm text-[var(--color-text-muted)]">
-            Page {page} of {totalPages}
-          </span>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-            disabled={page === totalPages}
-          >
-            Next
-          </Button>
+      {rows.length > 0 ? (
+        <div className="mt-4">
+          <ListFooter
+            pagination={pagination}
+            onPageChange={(next) => setPage(next)}
+            onPageSizeChange={(next) => {
+              setLimit(next);
+              setPage(1);
+            }}
+          />
         </div>
       ) : null}
 

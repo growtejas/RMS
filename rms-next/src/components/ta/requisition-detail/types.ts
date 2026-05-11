@@ -5,6 +5,7 @@ export type RequisitionDetailTabId =
   | "items"
   | "ats"
   | "shortlisted"
+  | "candidates"
   | "interviews"
   | "timeline";
 

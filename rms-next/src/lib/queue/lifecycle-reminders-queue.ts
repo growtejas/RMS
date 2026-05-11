@@ -1,6 +1,7 @@
-import { Queue, type JobsOptions } from "bullmq";
+import type { JobsOptions, Queue } from "bullmq";
 
-import { getQueueConnectionOptions } from "@/lib/queue/redis";
+import { jobOptionsFor } from "@/lib/queue/queue-policies";
+import { getSharedQueue } from "@/lib/queue/queue-registry";
 
 export const LIFECYCLE_REMINDERS_QUEUE = "lifecycle-reminders";
 export const INTERVIEW_TIME_REMINDER_JOB = "interview-time-reminder";
@@ -11,15 +12,8 @@ export type InterviewReminderJobPayload = {
   organizationId: string;
 };
 
-let queue: Queue<InterviewReminderJobPayload> | null = null;
-
 function getQueue(): Queue<InterviewReminderJobPayload> {
-  if (!queue) {
-    queue = new Queue<InterviewReminderJobPayload>(LIFECYCLE_REMINDERS_QUEUE, {
-      connection: getQueueConnectionOptions(),
-    });
-  }
-  return queue;
+  return getSharedQueue<InterviewReminderJobPayload>(LIFECYCLE_REMINDERS_QUEUE);
 }
 
 function jobIdFor(interviewId: number, kind: "24h" | "1h") {
@@ -53,10 +47,7 @@ export async function scheduleInterviewReminderJobs(input: {
   const d24 = t - 24 * 60 * 60 * 1000 - now;
   const d1 = t - 60 * 60 * 1000 - now;
 
-  const baseOpts: JobsOptions = {
-    removeOnComplete: 100,
-    removeOnFail: 30,
-  };
+  const baseOpts: JobsOptions = jobOptionsFor("lifecycle-reminders");
 
   if (d24 > 0) {
     await q.add(

@@ -3,7 +3,16 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Shield, Database, Users, FileText, UserCheck, Menu, X } from "lucide-react";
+import {
+  Shield,
+  Database,
+  Users,
+  FileText,
+  UserCheck,
+  Menu,
+  X,
+  Layers,
+} from "lucide-react";
 
 interface AdminSidebarProps {
   collapsed: boolean;
@@ -40,6 +49,11 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
       href: "/admin/audit-logs",
       label: "Audit Logs",
       icon: <FileText size={20} />,
+    },
+    {
+      href: "/admin/bulk-operations",
+      label: "Bulk Operations",
+      icon: <Layers size={20} />,
     },
     {
       href: "/admin/users",

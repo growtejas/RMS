@@ -7,7 +7,11 @@ import { interviewCreateBody } from "@/lib/validators/interviews";
 import {
   createInterviewJson,
   listInterviewsJson,
+  listInterviewsPaged,
 } from "@/lib/services/interviews-service";
+import { PAGE_SIZE_OPTIONS } from "@/lib/pagination/contract";
+import { parsePaginationParams } from "@/lib/pagination/zod";
+import { paginatedJson } from "@/lib/pagination/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,6 +22,17 @@ function optInt(raw: string | null): number | null {
   }
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) ? n : null;
+}
+
+function isCanonicalListRequest(url: URL): boolean {
+  if (url.searchParams.has("page")) return true;
+  const rawLimit = url.searchParams.get("limit");
+  if (rawLimit == null) return false;
+  const parsed = Number.parseInt(rawLimit, 10);
+  return (
+    Number.isFinite(parsed) &&
+    (PAGE_SIZE_OPTIONS as readonly number[]).includes(parsed)
+  );
 }
 
 /** GET /api/interviews */
@@ -48,11 +63,30 @@ export async function GET(req: Request) {
       return envelopeFail("requisition_id / requisitionId must be an integer", 422);
     }
 
+    if (isCanonicalListRequest(url)) {
+      const { page, limit } = parsePaginationParams(url);
+      const data = await listInterviewsPaged(user.organizationId, {
+        page,
+        limit,
+        filters: {
+          candidateId: candidateId ?? undefined,
+          requisitionId: requisitionId ?? undefined,
+        },
+      });
+      return paginatedJson(data.items, {
+        page: data.pagination.page,
+        limit: data.pagination.limit,
+        total: data.pagination.total,
+      });
+    }
+
     const rows = await listInterviewsJson(user.organizationId, {
       candidateId: candidateId ?? undefined,
       requisitionId: requisitionId ?? undefined,
     });
-    return envelopeOk({ interviews: rows });
+    const res = envelopeOk({ interviews: rows });
+    res.headers.set("Deprecation", "list-interviews-bare-shape");
+    return res;
   } catch (e) {
     return envelopeCatch(e, "[GET /api/interviews]");
   }

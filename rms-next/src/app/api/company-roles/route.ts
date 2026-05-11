@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
 import { parseFastapiJsonBody } from "@/lib/http/parse-fastapi-body";
+import {
+  isCanonicalListRequest,
+  paginateInMemory,
+} from "@/lib/pagination/in-memory";
 import { getCompanyRolesCatalog } from "@/lib/services/reference-read-service";
 import { createCompanyRole } from "@/lib/services/reference-write-service";
 import { companyRoleCreateBody } from "@/lib/validators/reference-master";
@@ -26,7 +30,12 @@ export async function GET(req: Request) {
     const includeInactive = url.searchParams.get("include_inactive") === "true";
 
     const data = await getCompanyRolesCatalog(includeInactive);
-    return NextResponse.json(data);
+    if (isCanonicalListRequest(url)) {
+      return paginateInMemory(url, data);
+    }
+    const res = NextResponse.json(data);
+    res.headers.set("Deprecation", "list-company-roles-bare-shape");
+    return res;
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/company-roles]");
   }

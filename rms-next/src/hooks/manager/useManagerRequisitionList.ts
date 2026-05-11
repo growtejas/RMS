@@ -1,8 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useMemo } from "react";
 
 import { apiClient } from "@/lib/api/client";
+import {
+  DEFAULT_PAGE_SIZE,
+  type PageSize,
+  type PaginatedData,
+  type PaginatedEnvelope,
+  type PaginationMeta,
+} from "@/lib/pagination/contract";
+import { usePaginatedList } from "@/lib/pagination/use-paginated-list";
+import { qk } from "@/lib/query/keys";
 
 export interface ManagerRequisition {
   req_id: number;
@@ -24,72 +33,93 @@ export interface ManagerRequisition {
 
 export type ManagerRequisitionListScope = "mine" | "org";
 
+interface UseManagerRequisitionListOptions {
+  page?: number;
+  limit?: PageSize;
+}
+
 interface UseManagerRequisitionListResult {
   requisitions: ManagerRequisition[];
+  pagination: PaginationMeta;
   isLoading: boolean;
+  isPaging: boolean;
   error: string | null;
   reload: () => Promise<void>;
 }
 
-function mapRows(data: ManagerRequisition[]): ManagerRequisition[] {
-  return (data ?? []).map((req) => {
-    const itemEstimatedTotal = (req.items ?? []).reduce(
-      (sum, item) => sum + (item.estimated_budget ?? 0),
-      0,
-    );
-    const itemApprovedTotal = (req.items ?? []).reduce(
-      (sum, item) => sum + (item.approved_budget ?? 0),
-      0,
-    );
+function withEffectiveBudget(req: ManagerRequisition): ManagerRequisition {
+  const itemEstimatedTotal = (req.items ?? []).reduce(
+    (sum, item) => sum + (item.estimated_budget ?? 0),
+    0,
+  );
+  const itemApprovedTotal = (req.items ?? []).reduce(
+    (sum, item) => sum + (item.approved_budget ?? 0),
+    0,
+  );
 
-    const headerBudget = req.budget_amount ?? 0;
-    const fallbackBudget = Math.max(itemApprovedTotal, itemEstimatedTotal);
-    const effectiveBudget =
-      headerBudget > 0 ? headerBudget : fallbackBudget > 0 ? fallbackBudget : null;
+  const headerBudget = req.budget_amount ?? 0;
+  const fallbackBudget = Math.max(itemApprovedTotal, itemEstimatedTotal);
+  const effectiveBudget =
+    headerBudget > 0 ? headerBudget : fallbackBudget > 0 ? fallbackBudget : null;
 
-    return {
-      ...req,
-      effective_budget: effectiveBudget,
-    };
-  });
+  return { ...req, effective_budget: effectiveBudget };
 }
 
 export const useManagerRequisitionList = (
   scope: ManagerRequisitionListScope = "mine",
+  opts: UseManagerRequisitionListOptions = {},
 ): UseManagerRequisitionListResult => {
-  const [requisitions, setRequisitions] = useState<ManagerRequisition[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const page = opts.page ?? 1;
+  const limit: PageSize = opts.limit ?? DEFAULT_PAGE_SIZE;
 
-  const fetchRequisitions = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+  const queryParams = useMemo(
+    () => ({ scope, page, limit }),
+    [scope, page, limit],
+  );
 
-    try {
-      const response =
-        scope === "org"
-          ? await apiClient.get<ManagerRequisition[]>("/requisitions", {
-              params: { page: 1, page_size: 200 },
-            })
-          : await apiClient.get<ManagerRequisition[]>("/requisitions/my");
-      setRequisitions(mapRows(response.data ?? []));
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to load requisitions";
-      setError(message);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [scope]);
+  const list = usePaginatedList<ManagerRequisition>({
+    queryKey:
+      scope === "mine"
+        ? qk.requisition.myList(queryParams)
+        : qk.requisition.list(queryParams),
+    fetcher: async ({ signal }) => {
+      const endpoint = scope === "mine" ? "/requisitions/my" : "/requisitions";
+      const params: Record<string, string | number> = { page, limit };
+      const response = await apiClient.get<
+        PaginatedEnvelope<ManagerRequisition>
+      >(endpoint, { params, signal });
+      const data: PaginatedData<ManagerRequisition> = response.data?.data ?? {
+        items: [],
+        pagination: {
+          page,
+          limit,
+          total: 0,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPreviousPage: false,
+        },
+      };
+      return data;
+    },
+  });
 
-  useEffect(() => {
-    void fetchRequisitions();
-  }, [fetchRequisitions]);
+  const requisitions = useMemo(
+    () => list.items.map(withEffectiveBudget),
+    [list.items],
+  );
 
   return {
     requisitions,
-    isLoading,
-    error,
-    reload: fetchRequisitions,
+    pagination: list.pagination,
+    isLoading: list.isLoading,
+    isPaging: list.isPaging,
+    error: list.isError
+      ? list.error instanceof Error
+        ? list.error.message
+        : "Failed to load requisitions"
+      : null,
+    reload: async () => {
+      await list.refetch();
+    },
   };
 };

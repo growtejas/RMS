@@ -1,10 +1,16 @@
 import { apiClient } from "@/lib/api/client";
 
 /**
- * Deduplicates concurrent GET /users and reuses a short in-memory result so
- * multiple screens (TA list, detail, HR tickets) do not each trigger a full fetch.
+ * @deprecated Phase 3 - prefer `useUsersList` from `@/lib/query/hooks`.
+ *
+ * Kept as a non-hook entry point for legacy callers that fetch outside a
+ * React render (e.g. event handlers, services). The TTL is bumped to
+ * 10 minutes to match the rare-change `staleTime` policy used by
+ * `useUsersList`, so a screen that mixes the two flows still hits the
+ * same cache window. Once the remaining 4 call sites are migrated to
+ * `useUsersList`, this file can be deleted.
  */
-const TTL_MS = 45_000;
+const TTL_MS = 10 * 60_000;
 
 let cacheAt = 0;
 let cached: unknown[] | null = null;

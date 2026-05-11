@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { tryResolveBearerUserAllowInactive } from "@/lib/auth/api-guard";
+import { withRequestPerf } from "@/lib/perf/request-perf";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,16 +11,18 @@ export const dynamic = "force-dynamic";
  * the browser does not log a 401 for “not signed in” during client bootstrap.
  */
 export async function GET(req: Request) {
-  const user = await tryResolveBearerUserAllowInactive(req);
-  if (!user) {
-    return NextResponse.json({ authenticated: false });
-  }
-  return NextResponse.json({
-    authenticated: true,
-    user_id: user.userId,
-    username: user.username,
-    roles: user.roles,
-    organization_id: user.organizationId,
-    is_active: user.isActive,
+  return withRequestPerf("GET /api/auth/session", async () => {
+    const user = await tryResolveBearerUserAllowInactive(req);
+    if (!user) {
+      return NextResponse.json({ authenticated: false });
+    }
+    return NextResponse.json({
+      authenticated: true,
+      user_id: user.userId,
+      username: user.username,
+      roles: user.roles,
+      organization_id: user.organizationId,
+      is_active: user.isActive,
+    });
   });
 }

@@ -1,5 +1,7 @@
 import { HttpError } from "@/lib/http/http-error";
 import {
+  countRequisitionsFiltered,
+  countRequisitionsForRaisedBy,
   listRequisitionsFiltered,
   listRequisitionsForRaisedBy,
   selectItemsForReqId,
@@ -9,6 +11,11 @@ import {
   type RequisitionItemRow,
 } from "@/lib/repositories/requisitions-read";
 import { rolesMatchAny } from "@/lib/auth/normalize-roles";
+import {
+  buildPaginationMeta,
+  computePagePosition,
+  type PageSize,
+} from "@/lib/pagination/contract";
 
 /** JSON field names match FastAPI `RequisitionItemResponse` / `RequisitionResponse`. */
 export type RequisitionItemJson = {
@@ -277,6 +284,67 @@ export async function listRequisitionsRead(input: {
   );
 }
 
+/**
+ * Canonical paginated variant of `listRequisitionsRead`.
+ * Returns the standard `{ items, pagination }` shape so the route can
+ * call `paginatedJson` directly.
+ */
+export async function listRequisitionsReadPaged(input: {
+  organizationId: string;
+  roles: readonly string[];
+  currentUserId: number;
+  status: string | null;
+  raisedBy: number | null;
+  myAssignments: boolean;
+  assignedTo: string | null;
+  assignedTa: number | null;
+  page: number;
+  limit: PageSize;
+}): Promise<{
+  items: RequisitionListJson[];
+  pagination: ReturnType<typeof buildPaginationMeta>;
+}> {
+  const filter = {
+    organizationId: input.organizationId,
+    isTaUser: isTaRole(input.roles),
+    currentUserId: input.currentUserId,
+    myAssignments: input.myAssignments,
+    assignedToMeAlias: input.assignedTo === "me",
+    assignedTaFilter: input.assignedTa,
+    status: input.status,
+    raisedBy: input.raisedBy,
+  };
+  const total = await countRequisitionsFiltered(filter);
+  const { page, offset, totalPages } = computePagePosition({
+    pageRequested: input.page,
+    total,
+    limit: input.limit,
+  });
+  const headers =
+    totalPages === 0
+      ? []
+      : await listRequisitionsFiltered({ ...filter, limit: input.limit, offset });
+
+  const reqIds = headers.map((h) => h.reqId);
+  const allItems = await selectItemsForReqIds(reqIds, input.organizationId);
+  const byReq = new Map<number, RequisitionItemRow[]>();
+  for (const it of allItems) {
+    const list = byReq.get(it.reqId) ?? [];
+    list.push(it);
+    byReq.set(it.reqId, list);
+  }
+  const items = headers.map((h) =>
+    headerToListBase(
+      h,
+      (byReq.get(h.reqId) ?? []).map(requisitionItemToJson),
+    ),
+  );
+  return {
+    items,
+    pagination: buildPaginationMeta({ page, limit: input.limit, total }),
+  };
+}
+
 export async function listMyRequisitionsRead(
   organizationId: string,
   userId: number,
@@ -308,6 +376,52 @@ export async function listMyRequisitionsRead(
       (byReq.get(h.reqId) ?? []).map(requisitionItemToJson),
     ),
   );
+}
+
+/** Canonical paginated `my-requisitions` variant. */
+export async function listMyRequisitionsReadPaged(input: {
+  organizationId: string;
+  userId: number;
+  page: number;
+  limit: PageSize;
+}): Promise<{
+  items: RequisitionListJson[];
+  pagination: ReturnType<typeof buildPaginationMeta>;
+}> {
+  const total = await countRequisitionsForRaisedBy(
+    input.organizationId,
+    input.userId,
+  );
+  const { page, offset, totalPages } = computePagePosition({
+    pageRequested: input.page,
+    total,
+    limit: input.limit,
+  });
+  const headers =
+    totalPages === 0
+      ? []
+      : await listRequisitionsForRaisedBy(input.organizationId, input.userId, {
+          limit: input.limit,
+          offset,
+        });
+  const reqIds = headers.map((h) => h.reqId);
+  const allItems = await selectItemsForReqIds(reqIds, input.organizationId);
+  const byReq = new Map<number, RequisitionItemRow[]>();
+  for (const it of allItems) {
+    const list = byReq.get(it.reqId) ?? [];
+    list.push(it);
+    byReq.set(it.reqId, list);
+  }
+  const items = headers.map((h) =>
+    headerToListBase(
+      h,
+      (byReq.get(h.reqId) ?? []).map(requisitionItemToJson),
+    ),
+  );
+  return {
+    items,
+    pagination: buildPaginationMeta({ page, limit: input.limit, total }),
+  };
 }
 
 export async function getRequisitionDetailRead(

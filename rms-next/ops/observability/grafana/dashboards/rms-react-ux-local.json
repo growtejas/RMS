@@ -1,0 +1,119 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "id": null,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "RUM data currently logs to app logs via /api/rum. Add Prometheus recording rules (or Loki) for metric_name=LCP/INP/CLS/HYDRATION to render charts.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "content": "React UX dashboard is scaffolded. Once RUM logs are ingested into Prometheus/Loki, add LCP p75, INP p75, CLS p75, and HYDRATION p75 panels here.",
+        "mode": "markdown"
+      },
+      "title": "RUM Wiring Note",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 2,
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "up{job=\"rms-next-web\"}",
+          "legendFormat": "web up",
+          "refId": "A"
+        }
+      ],
+      "title": "Web Availability (proxy for UX data flow)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 3,
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "scrape_samples_scraped{job=\"rms-next-web\"}",
+          "legendFormat": "samples",
+          "refId": "A"
+        }
+      ],
+      "title": "Prometheus Sample Ingestion",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "tags": [
+    "rms",
+    "react",
+    "ux",
+    "phase8"
+  ],
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "title": "RMS React UX (Local Starter)",
+  "uid": "rms-react-ux-local",
+  "version": 1
+}

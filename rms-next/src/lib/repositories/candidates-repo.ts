@@ -1,4 +1,17 @@
-import { and, asc, count, desc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
+import {
+  type SQL,
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
 import {
@@ -8,11 +21,110 @@ import {
   requisitionItems,
   requisitions,
 } from "@/lib/db/schema";
+import { roleMatchStringsForId } from "@/lib/services/cie/role-catalog";
 import * as ivRepo from "@/lib/repositories/interviews-repo";
 import type { AppDb } from "@/lib/workflow/workflow-db";
 
 export type CandidateRow = typeof candidates.$inferSelect;
 export type InterviewRow = typeof interviews.$inferSelect;
+
+/** Shared filters for org-wide CIE candidate lists (pagination + counts + id export). */
+export type CieCandidateListFilters = {
+  organizationId: string;
+  requisitionId?: number | null;
+  requisitionItemId?: number | null;
+  currentStage?: string | null;
+  roleId?: string | null;
+  searchQuery?: string | null;
+};
+
+export type CieCandidateSortKey =
+  | "created_desc"
+  | "created_asc"
+  | "name_asc"
+  | "name_desc"
+  | "last_evaluated_desc";
+
+/** Max ids returned by `GET /api/cie/candidates/ids` (bulk selection safety). */
+export const CIE_CANDIDATE_IDS_EXPORT_MAX = 1000;
+
+export function buildCieCandidateFilterConds(params: CieCandidateListFilters): SQL[] {
+  const conds: SQL[] = [eq(candidates.organizationId, params.organizationId)];
+  if (params.requisitionId != null) {
+    conds.push(eq(candidates.requisitionId, params.requisitionId));
+  }
+  if (params.requisitionItemId != null) {
+    conds.push(eq(candidates.requisitionItemId, params.requisitionItemId));
+  }
+  if (params.currentStage != null && params.currentStage !== "") {
+    conds.push(eq(candidates.currentStage, params.currentStage));
+  }
+  const q = params.searchQuery?.trim();
+  if (q) {
+    const pat = `%${q}%`;
+    conds.push(or(ilike(candidates.fullName, pat), ilike(candidates.email, pat))!);
+  }
+  const role = params.roleId?.trim();
+  if (role) {
+    const roleIdLower = role.toLowerCase();
+    const displayNamesLower = roleMatchStringsForId(role);
+    const legacyOr =
+      displayNamesLower.length === 0
+        ? sql`false`
+        : sql.join(
+            displayNamesLower.map(
+              (d) =>
+                sql`(jsonb_typeof(elem) = 'string' and lower(trim(elem #>> '{}')) = ${d})`,
+            ),
+            sql` or `,
+          );
+    conds.push(
+      sql`exists (
+        select 1
+        from candidate_reports cr,
+        lateral jsonb_array_elements(coalesce(cr.report_json->'suitableRoles', '[]'::jsonb)) as elem
+        where cr.candidate_id = ${candidates.candidateId}
+          and cr.organization_id = ${candidates.organizationId}
+          and cr.error_message is null
+          and cr.ai_evaluated_at = (
+            select max(cr2.ai_evaluated_at)
+            from candidate_reports cr2
+            where cr2.candidate_id = cr.candidate_id
+              and cr2.organization_id = cr.organization_id
+              and cr2.error_message is null
+          )
+          and (
+            (jsonb_typeof(elem) = 'object' and lower(trim(coalesce(elem->>'roleId',''))) = ${roleIdLower})
+            or (${legacyOr})
+          )
+      )`,
+    );
+  }
+  return conds;
+}
+
+function orderByClauseForCieSort(sort: CieCandidateSortKey): SQL[] {
+  const lastEvalExpr = sql`coalesce((
+    select max(cr.ai_evaluated_at)
+    from candidate_reports cr
+    where cr.candidate_id = ${candidates.candidateId}
+      and cr.organization_id = ${candidates.organizationId}
+      and cr.error_message is null
+  ), '1970-01-01'::timestamptz)`;
+  switch (sort) {
+    case "created_asc":
+      return [asc(candidates.createdAt), asc(candidates.candidateId)];
+    case "name_asc":
+      return [asc(candidates.fullName), asc(candidates.candidateId)];
+    case "name_desc":
+      return [desc(candidates.fullName), desc(candidates.candidateId)];
+    case "last_evaluated_desc":
+      return [desc(lastEvalExpr), desc(candidates.candidateId)];
+    case "created_desc":
+    default:
+      return [desc(candidates.createdAt), desc(candidates.candidateId)];
+  }
+}
 
 export async function selectCandidateById(
   candidateId: number,
@@ -94,28 +206,75 @@ export async function selectCandidateIdByOrgItemPersonTx(
   return row?.candidateId ?? null;
 }
 
+/** Hard server-side cap on unbounded candidate list reads. Prevents one rogue
+ * caller from materializing the whole org. New callers should use the paged
+ * variant `selectCieCandidatesPaged` + `countCieCandidatesFiltered` instead. */
+export const CANDIDATES_LIST_MAX_ROWS = 500;
+
 export async function selectCandidatesFiltered(params: {
   organizationId: string;
   requisitionId?: number | null;
   requisitionItemId?: number | null;
   currentStage?: string | null;
+  /** Canonical CIE role id — filters by latest successful report `suitableRoles`. */
+  roleId?: string | null;
+  /** Case-insensitive match on full name or email. */
+  searchQuery?: string | null;
+  /** Per-call override of the hard cap. Defaults to CANDIDATES_LIST_MAX_ROWS. */
+  maxRows?: number;
 }): Promise<CandidateRow[]> {
   const db = getDb();
-  const conds = [eq(candidates.organizationId, params.organizationId)];
-  if (params.requisitionId != null) {
-    conds.push(eq(candidates.requisitionId, params.requisitionId));
-  }
-  if (params.requisitionItemId != null) {
-    conds.push(eq(candidates.requisitionItemId, params.requisitionItemId));
-  }
-  if (params.currentStage != null && params.currentStage !== "") {
-    conds.push(eq(candidates.currentStage, params.currentStage));
-  }
-  const base = db.select().from(candidates);
-  if (conds.length === 0) {
-    return base.orderBy(desc(candidates.createdAt));
-  }
-  return base.where(and(...conds)).orderBy(desc(candidates.createdAt));
+  const conds = buildCieCandidateFilterConds(params);
+  const cap = Math.max(1, Math.min(params.maxRows ?? CANDIDATES_LIST_MAX_ROWS, CANDIDATES_LIST_MAX_ROWS));
+  return db
+    .select()
+    .from(candidates)
+    .where(and(...conds))
+    .orderBy(desc(candidates.createdAt))
+    .limit(cap);
+}
+
+export async function countCieCandidatesFiltered(
+  filters: CieCandidateListFilters,
+): Promise<number> {
+  const db = getDb();
+  const conds = buildCieCandidateFilterConds(filters);
+  const [row] = await db
+    .select({ n: count() })
+    .from(candidates)
+    .where(and(...conds));
+  return Number(row?.n ?? 0);
+}
+
+export async function selectCieCandidatesPaged(params: {
+  filters: CieCandidateListFilters;
+  limit: number;
+  offset: number;
+  sort: CieCandidateSortKey;
+}): Promise<CandidateRow[]> {
+  const db = getDb();
+  const conds = buildCieCandidateFilterConds(params.filters);
+  const ob = orderByClauseForCieSort(params.sort);
+  return db
+    .select()
+    .from(candidates)
+    .where(and(...conds))
+    .orderBy(...ob)
+    .limit(params.limit)
+    .offset(params.offset);
+}
+
+export async function selectCieCandidateIdsAll(
+  filters: CieCandidateListFilters,
+): Promise<number[]> {
+  const db = getDb();
+  const conds = buildCieCandidateFilterConds(filters);
+  const rows = await db
+    .select({ candidateId: candidates.candidateId })
+    .from(candidates)
+    .where(and(...conds))
+    .orderBy(asc(candidates.candidateId));
+  return rows.map((r) => r.candidateId);
 }
 
 export async function selectInterviewsForCandidates(

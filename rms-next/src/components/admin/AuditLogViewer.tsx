@@ -1,6 +1,5 @@
 "use client";
 
-// Migrated from legacy Vite SPA.
 import React, { useMemo, useState, useEffect } from "react";
 import {
   Search,
@@ -20,6 +19,14 @@ import { Loader } from "@/components/ui/Loader";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Select } from "@/components/ui/Select";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/Table";
+import { ListFooter } from "@/components/ui/ListFooter";
+import {
+  DEFAULT_PAGE_SIZE,
+  type PageSize,
+  type PaginatedEnvelope,
+} from "@/lib/pagination/contract";
+import { usePaginatedList } from "@/lib/pagination/use-paginated-list";
+import { qk } from "@/lib/query/keys";
 
 interface AuditLog {
   id: number;
@@ -95,8 +102,6 @@ const normalizeAudit = (log: AuditLogResponse): AuditLog => {
 };
 
 const AuditLogViewer: React.FC = () => {
-  const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -115,8 +120,57 @@ const AuditLogViewer: React.FC = () => {
   });
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
-  const pageSize = 50;
+  const [limit, setLimit] = useState<PageSize>(DEFAULT_PAGE_SIZE);
+
+  const queryParams = useMemo(
+    () => ({
+      page,
+      limit,
+      q: debouncedSearch || undefined,
+      date_from: filters.dateFrom || undefined,
+      date_to: filters.dateTo || undefined,
+      user_id: filters.user || undefined,
+      action: filters.action || undefined,
+    }),
+    [page, limit, debouncedSearch, filters.dateFrom, filters.dateTo, filters.user, filters.action],
+  );
+
+  const list = usePaginatedList<AuditLogResponse>({
+    queryKey: qk.auditLogs.list(queryParams),
+    fetcher: async ({ signal }) => {
+      const params: Record<string, string | number> = { page, limit };
+      if (debouncedSearch) params.search = debouncedSearch;
+      if (filters.dateFrom) params.date_from = filters.dateFrom;
+      if (filters.dateTo) params.date_to = filters.dateTo;
+      if (filters.user) params.user_id = filters.user;
+      if (filters.action) params.action = filters.action;
+      const { data } = await apiClient.get<PaginatedEnvelope<AuditLogResponse>>(
+        "/audit-logs/",
+        { params, signal },
+      );
+      return data?.data ?? {
+        items: [],
+        pagination: {
+          page,
+          limit,
+          total: 0,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPreviousPage: false,
+        },
+      };
+    },
+  });
+  const isLoading = list.isLoading;
+  const logs = useMemo(() => list.items.map(normalizeAudit), [list.items]);
+
+  useEffect(() => {
+    if (list.isError) {
+      const msg =
+        list.error instanceof Error ? list.error.message : "Failed to load audit logs";
+      setError(msg);
+    }
+  }, [list.isError, list.error]);
 
   const userOptions = useMemo(() => {
     const m = new Map<string, { value: string; label: string }>();
@@ -180,47 +234,6 @@ const AuditLogViewer: React.FC = () => {
     }
   };
 
-  const fetchLogs = async (opts?: { page?: number; append?: boolean }) => {
-    setIsLoading(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const pageToFetch = opts?.page ?? 1;
-      const data = await cachedApiGet<
-        AuditLogResponse[] | { logs: AuditLogResponse[] }
-      >("/audit-logs/", {
-        cacheTtlMs: 10_000,
-        params: {
-          search: debouncedSearch || undefined,
-          date_from: filters.dateFrom || undefined,
-          date_to: filters.dateTo || undefined,
-          user_id: filters.user || undefined,
-          action: filters.action || undefined,
-          page: pageToFetch,
-          page_size: pageSize,
-        },
-      });
-      const raw = Array.isArray(data)
-        ? data
-        : data != null &&
-            typeof data === "object" &&
-            Array.isArray((data as { logs?: unknown }).logs)
-          ? (data as { logs: AuditLogResponse[] }).logs
-          : [];
-      const mapped = raw.map(normalizeAudit);
-      setHasMore(mapped.length === pageSize);
-      setPage(pageToFetch);
-      setLogs((prev) => (opts?.append ? [...prev, ...mapped] : mapped));
-      await fetchSummary();
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to load audit logs";
-      setError(message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       setDebouncedSearch(filters.search);
@@ -230,11 +243,19 @@ const AuditLogViewer: React.FC = () => {
   }, [filters.search]);
 
   useEffect(() => {
-    void fetchLogs({ page: 1, append: false });
-  }, [debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps -- load + debounced refetch
+    void fetchSummary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    debouncedSearch,
+    filters.dateFrom,
+    filters.dateTo,
+    filters.user,
+    filters.action,
+  ]);
 
   const applyFilters = () => {
-    fetchLogs({ page: 1, append: false });
+    setPage(1);
+    void list.refetch();
   };
 
   const resetFilters = () => {
@@ -246,16 +267,12 @@ const AuditLogViewer: React.FC = () => {
       action: "",
     });
     setDebouncedSearch("");
-    fetchLogs({ page: 1, append: false });
+    setPage(1);
   };
 
   const handleRefresh = () => {
-    fetchLogs({ page: 1, append: false });
-  };
-
-  const handleLoadMore = () => {
-    if (isLoading || !hasMore) return;
-    fetchLogs({ page: page + 1, append: true });
+    void list.refetch();
+    void fetchSummary();
   };
 
   const handleExport = async () => {
@@ -544,42 +561,18 @@ const AuditLogViewer: React.FC = () => {
             })}
           </TBody>
         </Table>
-        {!isLoading && hasMore && (
-          <div
-            style={{
-              marginTop: "16px",
-              display: "flex",
-              justifyContent: "center",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            <Button type="button" variant="secondary" onClick={handleLoadMore}>
-              Load more audit logs
-            </Button>
-            <span
-              style={{
-                fontSize: "12px",
-                color: "var(--text-tertiary)",
+        {!isLoading && (
+          <div className="mt-3">
+            <ListFooter
+              pagination={list.pagination}
+              onPageChange={(next) => setPage(next)}
+              onPageSizeChange={(next) => {
+                setLimit(next);
+                setPage(1);
               }}
-            >
-              Loaded {logs.length} logs
-            </span>
+            />
           </div>
         )}
-        {!isLoading && logs.length > 0 && !hasMore && (
-            <div
-              style={{
-                marginTop: "12px",
-                fontSize: "12px",
-                color: "var(--text-tertiary)",
-                textAlign: "center",
-              }}
-            >
-              Loaded all available logs for the current filters
-            </div>
-          )}
         {!isLoading && logs.length === 0 && (
           <div className="empty-logs">
             <AlertTriangle size={48} />

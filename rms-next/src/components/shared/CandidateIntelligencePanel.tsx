@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import type { Candidate } from "@/lib/api/candidateApi";
@@ -17,6 +18,7 @@ export function CandidateIntelligencePanel({
   candidate: Candidate;
   onRefresh: () => void | Promise<void>;
 }) {
+  const router = useRouter();
   const cie = candidate.cie_intel;
   const report = cie?.latest_report ?? null;
   const [question, setQuestion] = useState("");
@@ -174,16 +176,30 @@ export function CandidateIntelligencePanel({
             </div>
             <div>
               {sectionTitle("Suitable roles")}
-              <div className="flex flex-wrap gap-2">
-                {report.suitableRoles.map((r, i) => (
-                  <span
-                    key={i}
-                    className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-800"
-                  >
-                    {r}
-                  </span>
-                ))}
-              </div>
+              {report.suitableRoles.length === 0 ? (
+                <p className="text-sm text-slate-500">No AI role recommendations available.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {report.suitableRoles.map((r) => (
+                    <button
+                      key={r.roleId}
+                      type="button"
+                      title={`Explore candidates for ${r.displayName}`}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-800 transition hover:bg-blue-100"
+                      onClick={() =>
+                        router.push(`/ta/cie?role=${encodeURIComponent(r.roleId)}`)
+                      }
+                    >
+                      <span>{r.displayName}</span>
+                      {r.confidence >= 0.5 ? (
+                        <span className="rounded bg-blue-200/80 px-1 text-[10px] font-semibold text-blue-900">
+                          {(r.confidence * 100).toFixed(0)}%
+                        </span>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               {sectionTitle("Education insights")}

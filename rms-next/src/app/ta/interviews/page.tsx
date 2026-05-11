@@ -1,10 +1,10 @@
 "use client";
 
-import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
+import React, { memo, useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
-  fetchInterviews,
+  fetchInterviewsPage,
   getCandidate,
   type Candidate,
   type Interview,
@@ -14,14 +14,20 @@ import { useAuth } from "@/contexts/useAuth";
 import { InterviewScheduleForm } from "@/components/interviews/InterviewScheduleModal";
 import CandidateDetailModal from "@/components/shared/CandidateDetailModal";
 import { InterviewStatusBadge } from "@/components/interviews/InterviewStatusBadge";
+import { ListFooter } from "@/components/ui/ListFooter";
+import { ListEmpty } from "@/components/ui/ListEmpty";
+import { ListError } from "@/components/ui/ListError";
+import { ListSkeleton } from "@/components/ui/ListSkeleton";
+import {
+  DEFAULT_PAGE_SIZE,
+  type PageSize,
+} from "@/lib/pagination/contract";
+import { usePaginatedList } from "@/lib/pagination/use-paginated-list";
+import { qk } from "@/lib/query/keys";
 
 type TaInterview = Interview & {
   role_position?: string | null;
 };
-
-function startOfLocalDay(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
 
 function formatInterviewers(iv: TaInterview): string {
   if (iv.panelists && iv.panelists.length > 0) {
@@ -146,79 +152,6 @@ const InterviewCard = memo(function InterviewCard({
   );
 });
 
-function Section({
-  title,
-  interviews,
-  onOpenCandidate,
-  onOpenSchedule,
-  onOpenReschedule,
-  page,
-  onPageChange,
-}: {
-  title: string;
-  interviews: TaInterview[];
-  onOpenCandidate: (iv: TaInterview) => void;
-  onOpenSchedule: (iv: TaInterview) => void;
-  onOpenReschedule: (iv: TaInterview) => void;
-  page: number;
-  onPageChange: (page: number) => void;
-}) {
-  const PAGE_SIZE = 20;
-  const totalPages = Math.max(1, Math.ceil(interviews.length / PAGE_SIZE));
-  const currentPage = Math.min(Math.max(page, 1), totalPages);
-  const start = (currentPage - 1) * PAGE_SIZE;
-  const paged = interviews.slice(start, start + PAGE_SIZE);
-
-  return (
-    <section className="space-y-4">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="text-sm font-bold text-text">{title}</div>
-        <div className="text-xs text-text-muted">
-          {interviews.length} total
-          {interviews.length > PAGE_SIZE ? ` · Page ${currentPage}/${totalPages}` : ""}
-        </div>
-      </div>
-      {interviews.length === 0 ? (
-        <div className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-text-muted shadow-sm">
-          No interviews.
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-4">
-          {paged.map((iv) => (
-            <InterviewCard
-              key={iv.id}
-              interview={iv}
-              onOpenCandidate={onOpenCandidate}
-              onOpenSchedule={onOpenSchedule}
-              onOpenReschedule={onOpenReschedule}
-            />
-          ))}
-          {totalPages > 1 ? (
-            <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                disabled={currentPage <= 1}
-                onClick={() => onPageChange(currentPage - 1)}
-                className="rounded-xl border border-border bg-bg px-3 py-1.5 text-xs font-semibold text-text shadow-sm transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Previous
-              </button>
-              <button
-                type="button"
-                disabled={currentPage >= totalPages}
-                onClick={() => onPageChange(currentPage + 1)}
-                className="rounded-xl border border-border bg-bg px-3 py-1.5 text-xs font-semibold text-text shadow-sm transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Next
-              </button>
-            </div>
-          ) : null}
-        </div>
-      )}
-    </section>
-  );
-}
-
 type ScheduleState =
   | { mode: "closed" }
   | {
@@ -232,74 +165,24 @@ export default function TaInterviewsPage() {
   const { user } = useAuth();
   const userRoles = useMemo(() => user?.roles ?? [], [user?.roles]);
 
-  const [rows, setRows] = useState<TaInterview[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState<PageSize>(DEFAULT_PAGE_SIZE);
 
   const [candidateModal, setCandidateModal] = useState<Candidate | null>(null);
   const [candidateLoading, setCandidateLoading] = useState(false);
 
-  const [scheduleState, setScheduleState] = useState<ScheduleState>({ mode: "closed" });
-  const [paging, setPaging] = useState({ today: 1, upcoming: 1, completed: 1 });
+  const [scheduleState, setScheduleState] = useState<ScheduleState>({
+    mode: "closed",
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    void fetchInterviews({})
-      .then((ivs) => {
-        if (!cancelled) setRows(ivs);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const queryParams = useMemo(() => ({ page, limit }), [page, limit]);
+  const list = usePaginatedList<Interview>({
+    queryKey: qk.interviews.list(queryParams),
+    fetcher: ({ signal }) =>
+      fetchInterviewsPage({ page, limit, signal: signal ?? undefined }),
+  });
 
-  const grouped = useMemo(() => {
-    const now = new Date();
-    const todayStart = startOfLocalDay(now).getTime();
-    const tomorrowStart = new Date(todayStart + 24 * 60 * 60 * 1000).getTime();
-
-    const today: TaInterview[] = [];
-    const upcoming: TaInterview[] = [];
-    const completed: TaInterview[] = [];
-
-    for (const iv of rows) {
-      const t = new Date(iv.scheduled_at).getTime();
-      const status = String(iv.status || "").toUpperCase().replace(/\s+/g, "_");
-
-      if (status === "COMPLETED" || status === "CANCELLED") {
-        completed.push(iv);
-        continue;
-      }
-      if (t >= todayStart && t < tomorrowStart) {
-        today.push(iv);
-        continue;
-      }
-      if (t >= tomorrowStart) {
-        upcoming.push(iv);
-        continue;
-      }
-      today.push(iv);
-    }
-
-    const sortAsc = (a: TaInterview, b: TaInterview) =>
-      new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime();
-    today.sort(sortAsc);
-    upcoming.sort(sortAsc);
-    completed.sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime());
-
-    return { today, upcoming, completed };
-  }, [rows]);
-
-  const hasAnyInterviews =
-    grouped.today.length + grouped.upcoming.length + grouped.completed.length > 0;
+  const rows = list.items as TaInterview[];
 
   const openCandidate = useCallback(async (iv: TaInterview) => {
     setCandidateLoading(true);
@@ -311,20 +194,24 @@ export default function TaInterviewsPage() {
     }
   }, []);
 
-  const openSchedule = useCallback((iv: TaInterview) => {
-    if (!iv.requisition_item_id) return;
-    const maxRound = rows
-      .filter(
-        (r) =>
-          r.candidate_id === iv.candidate_id && (r.requisition_item_id ?? null) === iv.requisition_item_id,
-      )
-      .reduce((m, r) => Math.max(m, r.round_number ?? 0), 0);
-    setScheduleState({
-      mode: "schedule",
-      interview: iv,
-      nextRoundNumber: maxRound + 1,
-    });
-  }, [rows]);
+  const openSchedule = useCallback(
+    (iv: TaInterview) => {
+      if (!iv.requisition_item_id) return;
+      const maxRound = rows
+        .filter(
+          (r) =>
+            r.candidate_id === iv.candidate_id &&
+            (r.requisition_item_id ?? null) === iv.requisition_item_id,
+        )
+        .reduce((m, r) => Math.max(m, r.round_number ?? 0), 0);
+      setScheduleState({
+        mode: "schedule",
+        interview: iv,
+        nextRoundNumber: maxRound + 1,
+      });
+    },
+    [rows],
+  );
 
   const openReschedule = useCallback((iv: TaInterview) => {
     setScheduleState({
@@ -334,32 +221,40 @@ export default function TaInterviewsPage() {
     });
   }, []);
 
-  const closeScheduler = useCallback(() => setScheduleState({ mode: "closed" }), []);
+  const closeScheduler = useCallback(
+    () => setScheduleState({ mode: "closed" }),
+    [],
+  );
 
-  const onScheduled = useCallback((_: string[], interview?: Interview) => {
-    if (scheduleState.mode === "reschedule" && interview) {
-      setRows((prev) => prev.map((r) => (r.id === interview.id ? (interview as TaInterview) : r)));
-    } else {
-      void fetchInterviews({}).then((ivs) => setRows(ivs));
-    }
-    setScheduleState({ mode: "closed" });
-  }, [scheduleState.mode]);
+  const onScheduled = useCallback(
+    (_: string[], _interview?: Interview) => {
+      void list.refetch();
+      setScheduleState({ mode: "closed" });
+    },
+    [list],
+  );
 
   return (
-    <div className="space-y-8">
-      {loading ? (
-        <div className="text-sm text-text-muted">Loading interviews…</div>
-      ) : error ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 shadow-sm">
-          {error}
-        </div>
-      ) : !hasAnyInterviews ? (
-        <div className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
-          <div className="text-base font-bold text-text">No interviews scheduled</div>
-          <div className="mt-1 text-sm text-text-muted">
-            Start by selecting a candidate and scheduling the first interview round.
-          </div>
-          <div className="mt-4">
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-bold text-text">Interviews</h2>
+      </div>
+
+      {list.isLoading ? (
+        <ListSkeleton variant="cards" rows={limit} />
+      ) : list.isError ? (
+        <ListError
+          title="Failed to load interviews"
+          description={
+            list.error instanceof Error ? list.error.message : undefined
+          }
+          onRetry={() => void list.refetch()}
+        />
+      ) : rows.length === 0 ? (
+        <ListEmpty
+          title="No interviews scheduled"
+          description="Start by selecting a candidate and scheduling the first interview round."
+          action={
             <button
               type="button"
               className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-black/90"
@@ -367,38 +262,31 @@ export default function TaInterviewsPage() {
             >
               Schedule Interview
             </button>
-          </div>
-        </div>
+          }
+        />
       ) : (
-        <>
-          <Section
-            title="Today’s Interviews"
-            interviews={grouped.today}
-            onOpenCandidate={openCandidate}
-            onOpenSchedule={openSchedule}
-            onOpenReschedule={openReschedule}
-            page={paging.today}
-            onPageChange={(page) => setPaging((prev) => ({ ...prev, today: page }))}
-          />
-          <Section
-            title="Upcoming Interviews"
-            interviews={grouped.upcoming}
-            onOpenCandidate={openCandidate}
-            onOpenSchedule={openSchedule}
-            onOpenReschedule={openReschedule}
-            page={paging.upcoming}
-            onPageChange={(page) => setPaging((prev) => ({ ...prev, upcoming: page }))}
-          />
-          <Section
-            title="Completed Interviews"
-            interviews={grouped.completed}
-            onOpenCandidate={openCandidate}
-            onOpenSchedule={openSchedule}
-            onOpenReschedule={openReschedule}
-            page={paging.completed}
-            onPageChange={(page) => setPaging((prev) => ({ ...prev, completed: page }))}
-          />
-        </>
+        <div className="grid grid-cols-1 gap-4">
+          {rows.map((iv) => (
+            <InterviewCard
+              key={iv.id}
+              interview={iv}
+              onOpenCandidate={openCandidate}
+              onOpenSchedule={openSchedule}
+              onOpenReschedule={openReschedule}
+            />
+          ))}
+        </div>
+      )}
+
+      {!list.isLoading && !list.isError && (
+        <ListFooter
+          pagination={list.pagination}
+          onPageChange={(next) => setPage(next)}
+          onPageSizeChange={(next) => {
+            setLimit(next);
+            setPage(1);
+          }}
+        />
       )}
 
       {candidateLoading ? (
@@ -430,7 +318,9 @@ export default function TaInterviewsPage() {
               submitMode="default"
               mode={scheduleState.mode}
               existingInterview={
-                scheduleState.mode === "reschedule" ? scheduleState.interview : null
+                scheduleState.mode === "reschedule"
+                  ? scheduleState.interview
+                  : null
               }
               onCancel={closeScheduler}
               onScheduled={onScheduled}

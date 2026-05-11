@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
+import {
+  isCanonicalListRequest,
+  paginateInMemory,
+} from "@/lib/pagination/in-memory";
 import { adminListUsers } from "@/lib/repositories/users-directory";
 
 export const runtime = "nodejs";
@@ -23,7 +27,12 @@ export async function GET(request: Request) {
     const search = url.searchParams.get("search");
 
     const data = await adminListUsers(search);
-    return NextResponse.json(data);
+    if (isCanonicalListRequest(url)) {
+      return paginateInMemory(url, data);
+    }
+    const res = NextResponse.json(data);
+    res.headers.set("Deprecation", "list-admin-users-bare-shape");
+    return res;
   } catch (e) {
     return referenceWriteCatch(e, "[GET /api/admin/users]");
   }

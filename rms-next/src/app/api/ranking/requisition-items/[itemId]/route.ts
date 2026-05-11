@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
 import { enrichRankingWithCachedAiEvaluations } from "@/lib/services/ai-evaluation/ai-evaluation-service";
-import { enqueueAiEvaluationJob } from "@/lib/queue/ai-evaluation-queue";
+import { enqueueAiEvaluationJobsBulk } from "@/lib/queue/ai-evaluation-queue";
+import { withRequestPerf } from "@/lib/perf/request-perf";
 import { resolveRankingEngine } from "@/lib/services/scoring/ranking-engine";
 import {
   rankCandidatesForRequisitionItem,
@@ -63,97 +64,146 @@ function parseItemId(raw: string): number | NextResponse {
 
 /** GET /api/ranking/requisition-items/{itemId} — phase 5 deterministic ranking. */
 export async function GET(req: Request, { params }: Ctx) {
-  try {
-    const user = await requireBearerUser(req);
-    if (user instanceof NextResponse) {
-      return user;
-    }
-    const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager");
-    if (denied) {
-      return denied;
-    }
-
-    const itemId = parseItemId(params.itemId);
-    if (itemId instanceof NextResponse) {
-      return itemId;
-    }
-
-    const engine = resolveRankingEngine();
-    if (engine.engine !== "ai_only") {
-      return NextResponse.json(
-        {
-          detail: `Ranking engine misconfigured: expected ai_only, got ${engine.engine} (env RANKING_ENGINE=${process.env.RANKING_ENGINE ?? ""})`,
-        },
-        { status: 500 },
-      );
-    }
-
-    const url = new URL(req.url);
-    const strictSnapshot =
-      url.searchParams.get("strict_snapshot") === "1" ||
-      url.searchParams.get("strict_snapshot") === "true";
-
-    const data = await rankCandidatesForRequisitionItem(itemId, {
-      strictSnapshot,
-    });
-    await assertRequisitionItemInOrganization(itemId, user.organizationId);
-    const enriched = await enrichRankingWithCachedAiEvaluations({
-      organizationId: user.organizationId,
-      itemId,
-      ranking: data,
-    });
-
-    // Mandatory AI trigger: enqueue candidates missing AI score (non-blocking).
-    for (const r of enriched.ranked_candidates) {
-      if (r.score.ai_status === "PENDING" || r.score.final_score == null) {
-        try {
-          await enqueueAiEvaluationJob({
-            organizationId: user.organizationId,
-            itemId,
-            candidateId: r.candidate_id,
-          });
-        } catch {
-          /* optional redis */
+  return withRequestPerf(
+    "GET /api/ranking/requisition-items/[itemId]",
+    async () => {
+      try {
+        const user = await requireBearerUser(req);
+        if (user instanceof NextResponse) {
+          return user;
         }
-      }
-    }
+        const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager");
+        if (denied) {
+          return denied;
+        }
 
-    return NextResponse.json(toStrictAiOnlyRankingResponse(enriched));
-  } catch (e) {
-    return referenceWriteCatch(e, "[GET /api/ranking/requisition-items/[itemId]]");
-  }
+        const itemId = parseItemId(params.itemId);
+        if (itemId instanceof NextResponse) {
+          return itemId;
+        }
+
+        const engine = resolveRankingEngine();
+        if (engine.engine !== "ai_only") {
+          return NextResponse.json(
+            {
+              detail: `Ranking engine misconfigured: expected ai_only, got ${engine.engine} (env RANKING_ENGINE=${process.env.RANKING_ENGINE ?? ""})`,
+            },
+            { status: 500 },
+          );
+        }
+
+        const url = new URL(req.url);
+        const strictSnapshot =
+          url.searchParams.get("strict_snapshot") === "1" ||
+          url.searchParams.get("strict_snapshot") === "true";
+
+        const data = await rankCandidatesForRequisitionItem(itemId, {
+          strictSnapshot,
+        });
+        await assertRequisitionItemInOrganization(itemId, user.organizationId);
+        const enriched = await enrichRankingWithCachedAiEvaluations({
+          organizationId: user.organizationId,
+          itemId,
+          ranking: data,
+        });
+
+        // Phase 4 default: GET is read-only. AI backfill is owned by the
+        // recompute POST (single bulk enqueue after snapshot write) and the
+        // periodic backfill scheduler. Set `RMS_RANKING_NO_ENQUEUE=false` to
+        // restore the legacy in-line behaviour during rollback.
+        if (process.env.RMS_RANKING_NO_ENQUEUE === "false") {
+          const pending = enriched.ranked_candidates
+            .filter(
+              (r) =>
+                r.score.ai_status === "PENDING" || r.score.final_score == null,
+            )
+            .map((r) => ({
+              organizationId: user.organizationId,
+              itemId,
+              candidateId: r.candidate_id,
+            }));
+          if (pending.length > 0) {
+            try {
+              await enqueueAiEvaluationJobsBulk(pending);
+            } catch {
+              /* optional redis */
+            }
+          }
+        }
+
+        return NextResponse.json(toStrictAiOnlyRankingResponse(enriched));
+      } catch (e) {
+        return referenceWriteCatch(
+          e,
+          "[GET /api/ranking/requisition-items/[itemId]]",
+        );
+      }
+    },
+  );
 }
 
 /** POST /api/ranking/requisition-items/{itemId} — force ranking recompute + snapshot write. */
 export async function POST(req: Request, { params }: Ctx) {
-  try {
-    const user = await requireBearerUser(req);
-    if (user instanceof NextResponse) {
-      return user;
-    }
-    const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager");
-    if (denied) {
-      return denied;
-    }
+  return withRequestPerf(
+    "POST /api/ranking/requisition-items/[itemId]",
+    async () => {
+      try {
+        const user = await requireBearerUser(req);
+        if (user instanceof NextResponse) {
+          return user;
+        }
+        const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager");
+        if (denied) {
+          return denied;
+        }
 
-    const itemId = parseItemId(params.itemId);
-    if (itemId instanceof NextResponse) {
-      return itemId;
-    }
+        const itemId = parseItemId(params.itemId);
+        if (itemId instanceof NextResponse) {
+          return itemId;
+        }
 
-    const engine = resolveRankingEngine();
-    if (engine.engine !== "ai_only") {
-      return NextResponse.json(
-        {
-          detail: `Ranking engine misconfigured: expected ai_only, got ${engine.engine} (env RANKING_ENGINE=${process.env.RANKING_ENGINE ?? ""})`,
-        },
-        { status: 500 },
-      );
-    }
+        const engine = resolveRankingEngine();
+        if (engine.engine !== "ai_only") {
+          return NextResponse.json(
+            {
+              detail: `Ranking engine misconfigured: expected ai_only, got ${engine.engine} (env RANKING_ENGINE=${process.env.RANKING_ENGINE ?? ""})`,
+            },
+            { status: 500 },
+          );
+        }
 
-    const data = await recomputeRankingForRequisitionItem(itemId);
-    return NextResponse.json(toStrictAiOnlyRankingResponse(data));
-  } catch (e) {
-    return referenceWriteCatch(e, "[POST /api/ranking/requisition-items/[itemId]]");
-  }
+        const data = await recomputeRankingForRequisitionItem(itemId);
+
+        // Phase 4 - bulk enqueue AI backfill once per snapshot write instead
+        // of N sequential `Queue.add()` calls in the GET hot path. Best-effort:
+        // missing Redis must not regress write latency.
+        if (process.env.RMS_RANKING_NO_ENQUEUE !== "false") {
+          const pending = data.ranked_candidates
+            .filter(
+              (r) =>
+                r.score.ai_status === "PENDING" || r.score.final_score == null,
+            )
+            .map((r) => ({
+              organizationId: user.organizationId,
+              itemId,
+              candidateId: r.candidate_id,
+            }));
+          if (pending.length > 0) {
+            try {
+              await enqueueAiEvaluationJobsBulk(pending);
+            } catch {
+              /* optional redis */
+            }
+          }
+        }
+
+        return NextResponse.json(toStrictAiOnlyRankingResponse(data));
+      } catch (e) {
+        return referenceWriteCatch(
+          e,
+          "[POST /api/ranking/requisition-items/[itemId]]",
+        );
+      }
+    },
+  );
 }

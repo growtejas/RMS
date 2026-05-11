@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
 import { notificationEvents } from "@/lib/db/schema";
@@ -44,6 +44,31 @@ export async function listNotificationEventsForOrg(
     .where(eq(notificationEvents.organizationId, organizationId))
     .orderBy(desc(notificationEvents.createdAt))
     .limit(limit);
+}
+
+export async function listNotificationEventsForOrgPaged(
+  organizationId: string,
+  args: { limit: number; offset: number },
+) {
+  const db = getDb();
+  return db
+    .select()
+    .from(notificationEvents)
+    .where(eq(notificationEvents.organizationId, organizationId))
+    .orderBy(desc(notificationEvents.createdAt))
+    .limit(args.limit)
+    .offset(args.offset);
+}
+
+export async function countNotificationEventsForOrg(
+  organizationId: string,
+): Promise<number> {
+  const db = getDb();
+  const [row] = await db
+    .select({ c: count() })
+    .from(notificationEvents)
+    .where(eq(notificationEvents.organizationId, organizationId));
+  return Number(row?.c ?? 0);
 }
 
 const ACTIVE = ["pending", "sent"] as const;

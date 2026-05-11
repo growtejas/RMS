@@ -8,9 +8,29 @@
  */
 
 import { TA_OWNERSHIP_DENIED_MESSAGE } from "@/lib/auth/ownership-messages";
-import type { ParsedCandidate } from "@/lib/services/cie/cie.schema";
+import {
+  PAGE_SIZE_OPTIONS,
+  type PageSize as PageSizeType,
+  type PaginatedData,
+  type PaginatedEnvelope,
+} from "@/lib/pagination/contract";
+import {
+  parseStoredCandidateReport,
+  type CandidateReport,
+  type ParsedCandidate,
+} from "@/lib/services/cie/cie.schema";
+import type { RoleMaster } from "@/lib/services/cie/role-catalog";
 
 import { apiClient } from "./client";
+
+/**
+ * Canonical page-size whitelist (25 / 50 / 100). Re-exported as
+ * `CIE_PAGE_SIZE_OPTIONS` so legacy code keeps compiling while we migrate
+ * consumers off the alias.
+ */
+export const CIE_PAGE_SIZE_OPTIONS = PAGE_SIZE_OPTIONS;
+export type CiePageSize = PageSizeType;
+export type { PaginationMeta } from "@/lib/pagination/contract";
 
 /** Ranking can parse many resumes / embeddings; default axios 25s is often too short. */
 const RANKING_CLIENT_TIMEOUT_MS = 180_000;
@@ -112,17 +132,27 @@ export interface ResumeStructuredSummary {
 }
 
 /** CIE report payload on GET /api/candidates/:id (`cie_intel.latest_report`). */
-export interface CandidateCieReport {
-  summary: string;
-  strengths: string[];
-  weaknesses: string[];
-  primarySkills: string[];
-  secondarySkills: string[];
-  experienceLevel: string;
-  suitableRoles: string[];
-  educationInsights: { relevance: string; notes: string };
-  riskFlags: string[];
-  confidenceScore: number;
+export type CandidateCieReport = CandidateReport;
+
+/** Tolerates legacy string[] suitableRoles from older stored reports. */
+export function hydrateCandidateCieReport(raw: unknown): CandidateCieReport | null {
+  const p = parseStoredCandidateReport(raw);
+  return p.ok ? p.data : null;
+}
+
+export function normalizeCandidateCieIntel<T extends { cie_intel?: Candidate["cie_intel"] }>(
+  row: T,
+): T {
+  const ci = row.cie_intel;
+  if (!ci?.latest_report) return row;
+  const latest = hydrateCandidateCieReport(ci.latest_report as unknown);
+  return {
+    ...row,
+    cie_intel: {
+      ...ci,
+      latest_report: latest,
+    },
+  };
 }
 
 export interface CandidateCieIntel {
@@ -212,6 +242,8 @@ export interface ApplicationRecord {
   } | null;
   /** From latest CIE report (`suitableRoles` / `experienceLevel`). */
   suitable_roles?: string[] | null;
+  /** Canonical role ids from latest CIE report (talent discovery). */
+  suitable_role_ids?: string[] | null;
   experience_level?: string | null;
 }
 
@@ -425,35 +457,164 @@ export interface CandidateStageUpdate {
 // CANDIDATE ENDPOINTS
 // ============================================================================
 
+/**
+ * Internal helper: read a `Candidate[]` from either the canonical paginated
+ * envelope (`{ success, data: { items, pagination }, error }`) or, defensively,
+ * a legacy bare-array body. We default `limit=100` so legacy callers that
+ * expected the full list still get a useful page; callers that need every row
+ * should switch to `fetchCandidatesPage` instead.
+ */
+async function fetchCandidatesArray(
+  params: Record<string, string | number>,
+): Promise<Candidate[]> {
+  const { data } = await apiClient.get<unknown>("/candidates/", { params });
+  if (Array.isArray(data)) {
+    return data as Candidate[];
+  }
+  const envelope = data as { data?: { items?: Candidate[] } } | undefined;
+  return envelope?.data?.items ?? [];
+}
+
 export async function fetchCandidates(
   requisitionId: number,
 ): Promise<Candidate[]> {
-  const { data } = await apiClient.get<Candidate[]>("/candidates/", {
-    params: { requisition_id: requisitionId },
-  });
-  return data;
+  return fetchCandidatesArray({ requisition_id: requisitionId, limit: 100 });
 }
 
 export async function fetchCandidatesByItem(
   itemId: number,
 ): Promise<Candidate[]> {
-  const { data } = await apiClient.get<Candidate[]>("/candidates/", {
-    params: { requisition_item_id: itemId },
-  });
-  return data;
+  return fetchCandidatesArray({ requisition_item_id: itemId, limit: 100 });
 }
 
-/** Organization-wide candidate rows with lightweight `cie_intel` summary (no full report). */
-export async function fetchOrgCandidatesWithCieSummary(): Promise<Candidate[]> {
-  const { data } = await apiClient.get<Candidate[]>("/candidates/", {
-    params: { cie_summary: "1" },
-  });
-  return data;
+/** Canonical paginated reader for `/api/candidates`. New callers should use this. */
+export async function fetchCandidatesPage(opts: {
+  page: number;
+  limit: PageSizeType;
+  q?: string | null;
+  role?: string | null;
+  sort?: CieCandidateSort | null;
+  requisitionId?: number | null;
+  requisitionItemId?: number | null;
+  currentStage?: string | null;
+  includeCieSummary?: boolean;
+  signal?: AbortSignal;
+}): Promise<PaginatedData<Candidate>> {
+  const params: Record<string, string | number> = {
+    page: opts.page,
+    limit: opts.limit,
+  };
+  if (opts.q?.trim()) params.q = opts.q.trim();
+  if (opts.role?.trim()) params.role = opts.role.trim();
+  if (opts.sort?.trim()) params.sort = opts.sort.trim();
+  if (opts.requisitionId != null) params.requisition_id = opts.requisitionId;
+  if (opts.requisitionItemId != null) params.requisition_item_id = opts.requisitionItemId;
+  if (opts.currentStage?.trim()) params.current_stage = opts.currentStage.trim();
+  if (opts.includeCieSummary) params.cie_summary = 1;
+  const { data } = await apiClient.get<PaginatedEnvelope<Candidate>>(
+    "/candidates/",
+    { params, signal: opts.signal },
+  );
+  const items = (data?.data?.items ?? []).map((row) =>
+    normalizeCandidateCieIntel(row),
+  );
+  const pagination = data?.data?.pagination ?? {
+    page: opts.page,
+    limit: opts.limit,
+    total: items.length,
+    totalPages: items.length > 0 ? 1 : 0,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  };
+  return { items, pagination };
+}
+
+export interface FetchOrgCandidatesCieOptions {
+  /** Canonical role id (e.g. data_engineer). */
+  roleId?: string | null;
+  /** Free-text filter on name / email (server-side). */
+  q?: string | null;
+}
+
+export type CieCandidateSort =
+  | "created_desc"
+  | "created_asc"
+  | "name_asc"
+  | "name_desc"
+  | "last_evaluated_desc";
+
+export async function fetchCieCandidatesPage(opts: {
+  page: number;
+  limit: PageSizeType;
+  q?: string | null;
+  role?: string | null;
+  sort?: CieCandidateSort | null;
+  signal?: AbortSignal;
+}): Promise<PaginatedData<Candidate>> {
+  const params: Record<string, string | number> = {
+    page: opts.page,
+    limit: opts.limit,
+  };
+  if (opts.q?.trim()) params.q = opts.q.trim();
+  if (opts.role?.trim()) params.role = opts.role.trim();
+  if (opts.sort?.trim()) params.sort = opts.sort.trim();
+  const { data } = await apiClient.get<PaginatedEnvelope<Candidate>>(
+    "/cie/candidates",
+    { params, signal: opts.signal },
+  );
+  const rows = Array.isArray(data?.data?.items) ? data.data.items : [];
+  const pagination = data?.data?.pagination ?? {
+    page: opts.page,
+    limit: opts.limit,
+    total: rows.length,
+    totalPages: rows.length > 0 ? 1 : 0,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  };
+  return {
+    items: rows.map((row) => normalizeCandidateCieIntel(row)),
+    pagination,
+  };
+}
+
+export async function fetchCieCandidateIds(opts: {
+  q?: string | null;
+  role?: string | null;
+}): Promise<{ ids: number[]; total: number }> {
+  const params: Record<string, string> = {};
+  if (opts.q?.trim()) params.q = opts.q.trim();
+  if (opts.role?.trim()) params.role = opts.role.trim();
+  const { data } = await apiClient.get<{
+    success: boolean;
+    data: number[];
+    meta: { total: number };
+  }>("/cie/candidates/ids", { params });
+  return {
+    ids: Array.isArray(data?.data) ? data.data : [],
+    total: data?.meta?.total ?? 0,
+  };
+}
+
+/** Organization-wide candidate rows with `cie_intel` including latest CIE report when available. */
+export async function fetchOrgCandidatesWithCieSummary(
+  opts?: FetchOrgCandidatesCieOptions,
+): Promise<Candidate[]> {
+  const params: Record<string, string | number> = { cie_summary: 1, limit: 100 };
+  if (opts?.roleId?.trim()) params.role = opts.roleId.trim();
+  if (opts?.q?.trim()) params.q = opts.q.trim();
+  const rows = await fetchCandidatesArray(params);
+  return rows.map((row) => normalizeCandidateCieIntel(row));
+}
+
+/** Canonical CIE role catalog for typeahead / display labels. */
+export async function fetchCieRoleCatalog(): Promise<RoleMaster[]> {
+  const { data } = await apiClient.get<{ roles: RoleMaster[] }>("/cie/role-catalog");
+  return Array.isArray(data?.roles) ? data.roles : [];
 }
 
 export async function getCandidate(candidateId: number): Promise<Candidate> {
   const { data } = await apiClient.get<Candidate>(`/candidates/${candidateId}`);
-  return data;
+  return normalizeCandidateCieIntel(data);
 }
 
 /** Per-field provenance for adaptive v2 (read-only, UI/debug only). */
@@ -730,6 +891,21 @@ export async function requestCieRecompute(
   return data;
 }
 
+export async function requestCieRematerializeV2(
+  candidateIds: number[],
+  enqueueRecompute?: boolean,
+): Promise<{ bulk_job_id: string; queued: number; status: string }> {
+  const { data } = await apiClient.post<{
+    bulk_job_id: string;
+    queued: number;
+    status: string;
+  }>("/cie/candidates/rematerialize", {
+    candidateIds,
+    enqueueRecompute: enqueueRecompute ?? true,
+  });
+  return data;
+}
+
 export async function fetchCieRecomputeJob(jobId: string): Promise<{
   bulk_job_id: string;
   status: string;
@@ -876,6 +1052,40 @@ export async function fetchApplicationsOrgRoster(
     params: { limit },
   });
   return data;
+}
+
+/** Canonical paginated reader for `/api/applications`. */
+export async function fetchApplicationsPage(opts: {
+  page: number;
+  limit: PageSizeType;
+  requisitionId?: number | null;
+  requisitionItemId?: number | null;
+  candidateId?: number | null;
+  currentStage?: string | null;
+  signal?: AbortSignal;
+}): Promise<PaginatedData<ApplicationRecord>> {
+  const params: Record<string, string | number> = {
+    page: opts.page,
+    limit: opts.limit,
+  };
+  if (opts.requisitionId != null) params.requisitionId = opts.requisitionId;
+  if (opts.requisitionItemId != null) params.requisition_item_id = opts.requisitionItemId;
+  if (opts.candidateId != null) params.candidate_id = opts.candidateId;
+  if (opts.currentStage?.trim()) params.current_stage = opts.currentStage.trim();
+  const { data } = await apiClient.get<PaginatedEnvelope<ApplicationRecord>>(
+    "/applications",
+    { params, signal: opts.signal },
+  );
+  const items = data?.data?.items ?? [];
+  const pagination = data?.data?.pagination ?? {
+    page: opts.page,
+    limit: opts.limit,
+    total: items.length,
+    totalPages: items.length > 0 ? 1 : 0,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  };
+  return { items, pagination };
 }
 
 export async function fetchCandidatesFromApplications(params: {
@@ -1170,6 +1380,33 @@ export async function fetchInterviews(filters: {
   return data.data.interviews;
 }
 
+/**
+ * Canonical paginated reader for /api/interviews. Returns
+ * `PaginatedData<Interview>` from the canonical envelope.
+ */
+export async function fetchInterviewsPage(args: {
+  page: number;
+  limit: PageSizeType;
+  candidateId?: number;
+  requisitionId?: number;
+  signal?: AbortSignal;
+}): Promise<PaginatedData<Interview>> {
+  const params: Record<string, string | number> = {
+    page: args.page,
+    limit: args.limit,
+  };
+  if (args.candidateId != null) params.candidate_id = args.candidateId;
+  if (args.requisitionId != null) params.requisitionId = args.requisitionId;
+  const { data } = await apiClient.get<PaginatedEnvelope<Interview>>(
+    "/interviews/",
+    { params, signal: args.signal },
+  );
+  if (!data.success || !data.data) {
+    throw new Error((data.error as string | null) ?? "Failed to load interviews");
+  }
+  return data.data;
+}
+
 export async function fetchManagerInterviews(): Promise<Interview[]> {
   const { data } = await apiClient.get<
     InterviewApiEnvelope<{ interviews: Interview[] }>
@@ -1178,6 +1415,25 @@ export async function fetchManagerInterviews(): Promise<Interview[]> {
     throw new Error(data.error ?? "Failed to load interviews");
   }
   return data.data.interviews;
+}
+
+/** Canonical paginated reader for /api/manager/interviews. */
+export async function fetchManagerInterviewsPage(args: {
+  page: number;
+  limit: PageSizeType;
+  signal?: AbortSignal;
+}): Promise<PaginatedData<Interview>> {
+  const { data } = await apiClient.get<PaginatedEnvelope<Interview>>(
+    "/manager/interviews",
+    {
+      params: { page: args.page, limit: args.limit },
+      signal: args.signal,
+    },
+  );
+  if (!data.success || !data.data) {
+    throw new Error((data.error as string | null) ?? "Failed to load interviews");
+  }
+  return data.data;
 }
 
 /** Assigned interviews for users with the Interviewer role (panelist scope). */
@@ -1189,6 +1445,25 @@ export async function fetchMyInterviewerInterviews(): Promise<Interview[]> {
     throw new Error(data.error ?? "Failed to load interviews");
   }
   return data.data.interviews;
+}
+
+/** Canonical paginated reader for /api/interviews/my. */
+export async function fetchMyInterviewerInterviewsPage(args: {
+  page: number;
+  limit: PageSizeType;
+  signal?: AbortSignal;
+}): Promise<PaginatedData<Interview>> {
+  const { data } = await apiClient.get<PaginatedEnvelope<Interview>>(
+    "/interviews/my",
+    {
+      params: { page: args.page, limit: args.limit },
+      signal: args.signal,
+    },
+  );
+  if (!data.success || !data.data) {
+    throw new Error((data.error as string | null) ?? "Failed to load interviews");
+  }
+  return data.data;
 }
 
 export type InterviewerRecommendation =
@@ -1332,6 +1607,192 @@ export async function deleteInterview(interviewId: number): Promise<void> {
   if (!data.success) {
     throw new Error(data.error ?? "Failed to delete interview");
   }
+}
+
+// ============================================================================
+// INTERVIEW LIFECYCLE
+// ============================================================================
+
+export type LifecycleRoundStatus =
+  | "scheduled"
+  | "completed"
+  | "cancelled"
+  | "no_show"
+  | "rescheduled";
+
+export type LifecycleResult = "pending" | "passed" | "failed" | "hold";
+
+export type LifecycleColor =
+  | "grey"
+  | "blue"
+  | "yellow"
+  | "green"
+  | "red"
+  | "orange";
+
+export type LifecycleStageState = "not_started" | "current" | "past" | "rejected";
+
+export interface LifecycleRound {
+  interview_id: number;
+  round_number: number;
+  round_name: string | null;
+  round_type: string | null;
+  status: LifecycleRoundStatus;
+  result: LifecycleResult;
+  color: LifecycleColor;
+  scheduled_at: string | null;
+  end_time: string | null;
+  meeting_link: string | null;
+  location: string | null;
+  feedback: string | null;
+}
+
+export interface LifecycleStage {
+  key: "Sourced" | "Shortlisted" | "Interviewing" | "Offered" | "Hired";
+  label: string;
+  state: LifecycleStageState;
+  color: LifecycleColor;
+  rounds?: LifecycleRound[];
+}
+
+export interface LifecyclePayload {
+  application_id: number;
+  candidate_id: number;
+  current_stage: string;
+  is_rejected: boolean;
+  top_level: LifecycleStage[];
+  can_schedule_next: boolean;
+  next_round_number: number;
+}
+
+export type RequisitionWorkspaceRecruiterFacet = { id: number; name: string };
+
+export interface RequisitionWorkspaceCandidateRow {
+  application_id: number;
+  candidate_id: number;
+  requisition_item_id: number;
+  role_label: string | null;
+  full_name: string;
+  email: string;
+  phone: string | null;
+  current_stage: string;
+  source: string;
+  created_at: string | null;
+  recruiter: RequisitionWorkspaceRecruiterFacet | null;
+  experience: { years: number | null; cie_level: string | null };
+  lifecycle: LifecyclePayload;
+}
+
+/** Inner data shape of the canonical paginated workspace envelope. */
+export interface RequisitionCandidatesWorkspaceData {
+  items: RequisitionWorkspaceCandidateRow[];
+  pagination: import("@/lib/pagination/contract").PaginationMeta;
+  facets: {
+    stages: string[];
+    sources: string[];
+    recruiters: RequisitionWorkspaceRecruiterFacet[];
+  };
+}
+
+export async function fetchRequisitionCandidatesWorkspace(
+  requisitionId: number,
+  params: {
+    page?: number;
+    /** Canonical page size (25 / 50 / 100). */
+    limit?: PageSizeType;
+    q?: string;
+    requisition_item_id?: number;
+    current_stage?: string;
+    source?: string;
+    created_by?: number;
+    applied_from?: string;
+    applied_to?: string;
+    exp_min?: number;
+    exp_max?: number;
+    include_unknown_exp?: boolean;
+    interview_status?: string;
+    signal?: AbortSignal;
+  },
+): Promise<RequisitionCandidatesWorkspaceData> {
+  const { data } = await apiClient.get<{
+    success: boolean;
+    data: RequisitionCandidatesWorkspaceData;
+    error: string | null;
+  }>(
+    `/requisitions/${requisitionId}/candidates-workspace`,
+    {
+      signal: params.signal,
+      params: {
+        page: params.page,
+        limit: params.limit,
+        q: params.q,
+        requisition_item_id: params.requisition_item_id,
+        current_stage: params.current_stage,
+        source: params.source,
+        created_by: params.created_by,
+        applied_from: params.applied_from,
+        applied_to: params.applied_to,
+        exp_min: params.exp_min,
+        exp_max: params.exp_max,
+        include_unknown_exp:
+          params.include_unknown_exp === true ? "true" : undefined,
+        interview_status: params.interview_status,
+      },
+    },
+  );
+  return data?.data;
+}
+
+export interface ScheduleNextRoundPayload {
+  application_id: number;
+  round_name: string;
+  round_type: "TECHNICAL" | "HR" | "MANAGERIAL";
+  interview_mode: "ONLINE" | "OFFLINE";
+  scheduled_at: string;
+  end_time: string;
+  timezone: string;
+  interviewer_ids: number[];
+  meeting_link?: string | null;
+  location?: string | null;
+  notes?: string | null;
+}
+
+export async function fetchApplicationLifecycle(
+  applicationId: number,
+): Promise<LifecyclePayload> {
+  const { data } = await apiClient.get<InterviewApiEnvelope<LifecyclePayload>>(
+    `/applications/${applicationId}/lifecycle`,
+  );
+  if (!data.success || !data.data) {
+    throw new Error(data.error ?? "Failed to load interview lifecycle");
+  }
+  return data.data;
+}
+
+export async function submitInterviewResultApi(
+  interviewId: number,
+  result: Exclude<LifecycleResult, "pending">,
+): Promise<LifecyclePayload> {
+  const { data } = await apiClient.post<InterviewApiEnvelope<LifecyclePayload>>(
+    `/interviews/${interviewId}/result`,
+    { result },
+  );
+  if (!data.success || !data.data) {
+    throw new Error(data.error ?? "Failed to submit interview result");
+  }
+  return data.data;
+}
+
+export async function scheduleNextRoundApi(
+  payload: ScheduleNextRoundPayload,
+): Promise<InterviewMutationResult> {
+  const { data } = await apiClient.post<
+    InterviewApiEnvelope<InterviewMutationResult>
+  >("/interviews/schedule-next", payload);
+  if (!data.success || !data.data) {
+    throw new Error(data.error ?? "Failed to schedule next round");
+  }
+  return data.data;
 }
 
 // ============================================================================

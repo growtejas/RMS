@@ -1,5 +1,8 @@
+"use client";
+
 /* eslint-disable @typescript-eslint/no-unused-vars -- legacy Vite migration */
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
   Filter,
   Search,
@@ -21,7 +24,15 @@ import { useAuth } from "@/contexts/useAuth";
 import { normalizeStatus } from "@/types/workflow";
 import { PlainStatusText } from "@/components/common/PlainStatusText";
 import { PlainPriorityText } from "@/components/common/PlainPriorityText";
+import { ListFooter } from "@/components/ui/ListFooter";
 import { Table, TBody, THead, TH, TR } from "@/components/ui/Table";
+import {
+  DEFAULT_PAGE_SIZE,
+  type PageSize,
+  type PaginatedEnvelope,
+} from "@/lib/pagination/contract";
+import { usePaginatedList } from "@/lib/pagination/use-paginated-list";
+import { qk } from "@/lib/query/keys";
 
 /* ======================================================
    Types
@@ -398,12 +409,10 @@ const Requisitions: React.FC<RequisitionsProps> = ({
   onSelfAssign,
   onManageItems,
 }) => {
+  const router = useRouter();
   const { user } = useAuth();
   const currentUserId = user?.user_id ?? null;
   const currentTaLabel = user?.username ?? currentTA;
-  const [requisitions, setRequisitions] = useState<Requisition[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<
     "all" | "my" | "unassigned" | "high" | "overdue"
   >("all");
@@ -411,53 +420,62 @@ const Requisitions: React.FC<RequisitionsProps> = ({
   const [assigningReqId, setAssigningReqId] = useState<string | null>(null);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [allUsers, setAllUsers] = useState<BackendUser[]>([]);
-  const [visibleCount, setVisibleCount] = useState(20);
-  const lastRequisitionFetchAt = useRef(0);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState<PageSize>(DEFAULT_PAGE_SIZE);
 
   useEffect(() => {
-    setVisibleCount(20);
+    setPage(1);
   }, [activeFilter, searchQuery]);
 
-  const resolveUserName = (userId?: number | null): string => {
-    if (userId == null) return "—";
-    const u = allUsers.find((x) => x.user_id === userId);
-    return u?.username ?? `User #${userId}`;
-  };
-
-  const fetchRequisitions = useCallback(
-    async (opts?: { cacheBust?: boolean }) => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        const baseEndpoint =
-          activeFilter === "my"
-            ? "/requisitions?my_assignments=true"
-            : "/requisitions";
-        const cacheBust = opts?.cacheBust ?? false;
-        const endpoint = cacheBust
-          ? `${baseEndpoint}${baseEndpoint.includes("?") ? "&" : "?"}_t=${Date.now()}`
-          : baseEndpoint;
-        const response = await apiClient.get<BackendRequisition[]>(endpoint);
-        lastRequisitionFetchAt.current = Date.now();
-        setRequisitions(mapRequisitions(response.data));
-        setVisibleCount(20);
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to load requisitions";
-        setError(message);
-      } finally {
-        setIsLoading(false);
-      }
+  const resolveUserName = useCallback(
+    (userId?: number | null): string => {
+      if (userId == null) return "—";
+      const u = allUsers.find((x) => x.user_id === userId);
+      return u?.username ?? `User #${userId}`;
     },
-    [activeFilter],
+    [allUsers],
   );
+
+  const queryParams = useMemo(
+    () => ({
+      page,
+      limit,
+      my_assignments: activeFilter === "my" ? true : undefined,
+    }),
+    [page, limit, activeFilter],
+  );
+
+  const list = usePaginatedList<BackendRequisition>({
+    queryKey: qk.requisition.list(queryParams),
+    fetcher: async ({ signal }) => {
+      const params: Record<string, string | number> = { page, limit };
+      if (activeFilter === "my") params.my_assignments = "true";
+      const { data } = await apiClient.get<PaginatedEnvelope<BackendRequisition>>(
+        "/requisitions",
+        { params, signal },
+      );
+      return data?.data ?? { items: [], pagination: { page, limit, total: 0, totalPages: 0, hasNextPage: false, hasPreviousPage: false } };
+    },
+  });
+
+  // Sync URL/local page when the server clamps page above the corrected total.
+  useEffect(() => {
+    if (
+      list.pagination.totalPages > 0 &&
+      list.pagination.page !== page
+    ) {
+      setPage(list.pagination.page);
+    }
+  }, [list.pagination.totalPages, list.pagination.page, page]);
+
+  const requisitions = useMemo(() => mapRequisitions(list.items), [list.items]);
 
   useEffect(() => {
     let isMounted = true;
     const fetchUsers = async () => {
       try {
-        const list = await getUsersListCached<BackendUser>();
-        if (isMounted) setAllUsers(list);
+        const userList = await getUsersListCached<BackendUser>();
+        if (isMounted) setAllUsers(userList);
       } catch {
         if (isMounted) setAllUsers([]);
       }
@@ -469,63 +487,59 @@ const Requisitions: React.FC<RequisitionsProps> = ({
   }, []);
 
   useEffect(() => {
-    void fetchRequisitions();
-
-    const handleFocus = () => {
-      if (Date.now() - lastRequisitionFetchAt.current < 15_000) {
-        return;
-      }
-      void fetchRequisitions();
-    };
-
     const handleReassignment = () => {
-      void fetchRequisitions({ cacheBust: true });
+      void list.refetch();
     };
-
-    window.addEventListener("focus", handleFocus);
     window.addEventListener("requisition-reassigned", handleReassignment);
-    const intervalId = window.setInterval(() => {
-      void fetchRequisitions();
-    }, 60_000);
-
     return () => {
-      window.removeEventListener("focus", handleFocus);
       window.removeEventListener("requisition-reassigned", handleReassignment);
-      window.clearInterval(intervalId);
     };
-  }, [fetchRequisitions]);
+  }, [list]);
+
+  const isLoading = list.isLoading;
+  const error = list.isError
+    ? list.error instanceof Error
+      ? list.error.message
+      : "Failed to load requisitions"
+    : null;
 
   // PHASE 3: TA users can see APPROVED requisitions (Active) and Fulfilled
   // Active = in recruitment; Fulfilled = all positions filled (still visible for reference)
-  const visibleRequisitions = requisitions.filter((req) => {
-    const status = normalizeStatus(req.overallStatus);
-    return status === "Active" || status === "Fulfilled";
-  });
+  const visibleRequisitions = useMemo(
+    () =>
+      requisitions.filter((req) => {
+        const status = normalizeStatus(req.overallStatus);
+        return status === "Active" || status === "Fulfilled";
+      }),
+    [requisitions],
+  );
 
-  // Filter requisitions
-  const filteredRequisitions = visibleRequisitions.filter((req) => {
-    // Status filter
-    if (activeFilter === "my" && req.assignedTAId !== currentUserId)
-      return false;
-    if (activeFilter === "unassigned" && req.assignedTAId) return false;
-    if (activeFilter === "high" && req.priority !== "High") return false;
-    if (activeFilter === "overdue" && calculateAgingDays(req.dateCreated) <= 30)
-      return false;
+  // Client-side chip filters apply on top of the current server page.
+  const filteredRequisitions = useMemo(
+    () =>
+      visibleRequisitions.filter((req) => {
+        if (activeFilter === "my" && req.assignedTAId !== currentUserId)
+          return false;
+        if (activeFilter === "unassigned" && req.assignedTAId) return false;
+        if (activeFilter === "high" && req.priority !== "High") return false;
+        if (activeFilter === "overdue" && calculateAgingDays(req.dateCreated) <= 30)
+          return false;
 
-    // Search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      const raisedByName = resolveUserName(req.raised_by).toLowerCase();
-      return (
-        req.id.toLowerCase().includes(query) ||
-        req.project.toLowerCase().includes(query) ||
-        req.client?.toLowerCase().includes(query) ||
-        raisedByName.includes(query)
-      );
-    }
+        if (searchQuery) {
+          const query = searchQuery.toLowerCase();
+          const raisedByName = resolveUserName(req.raised_by).toLowerCase();
+          return (
+            req.id.toLowerCase().includes(query) ||
+            req.project.toLowerCase().includes(query) ||
+            req.client?.toLowerCase().includes(query) ||
+            raisedByName.includes(query)
+          );
+        }
 
-    return true;
-  });
+        return true;
+      }),
+    [visibleRequisitions, activeFilter, searchQuery, currentUserId, resolveUserName],
+  );
 
   /**
    * Self-assign a requisition to the current TA user.
@@ -550,21 +564,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
 
       try {
         await assignRequisitionTA(numericId, currentUserId);
-
-        // Update local state
-        setRequisitions((prev) =>
-          prev.map((req) =>
-            req.id === reqId
-              ? {
-                  ...req,
-                  assignedTAId: currentUserId,
-                  assignedTA: currentTaLabel,
-                }
-              : req,
-          ),
-        );
-
-        // Notify parent
+        await list.refetch();
         onSelfAssign?.(reqId);
       } catch (err) {
         const message =
@@ -583,7 +583,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
         setAssigningReqId(null);
       }
     },
-    [currentUserId, currentTaLabel, onSelfAssign],
+    [currentUserId, list, onSelfAssign],
   );
 
   // Calculate stats for current TA
@@ -934,7 +934,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
 
             {!isLoading &&
               !error &&
-              filteredRequisitions.slice(0, visibleCount).map((req) => {
+              filteredRequisitions.map((req) => {
                 const agingDays = calculateAgingDays(req.dateCreated);
                 const completion = calculateCompletion(req.items);
 
@@ -1224,7 +1224,15 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                               {/* Unassigned: View only (no Map Resource/Shortlist) */}
                               <button
                                 className="action-button"
-                                onClick={() => onViewRequisition?.(req.id)}
+                                onClick={() => {
+                                  if (onViewRequisition) {
+                                    onViewRequisition(req.id);
+                                  } else {
+                                    router.push(
+                                      `/ta/requisitions/${encodeURIComponent(req.reqId)}`,
+                                    );
+                                  }
+                                }}
                                 style={{
                                   fontSize: "12px",
                                   padding: "6px 12px",
@@ -1250,7 +1258,15 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                               </button> */}
                               <button
                                 className="action-button"
-                                onClick={() => onViewRequisition?.(req.id)}
+                                onClick={() => {
+                                  if (onViewRequisition) {
+                                    onViewRequisition(req.id);
+                                  } else {
+                                    router.push(
+                                      `/ta/requisitions/${encodeURIComponent(req.reqId)}`,
+                                    );
+                                  }
+                                }}
                                 style={{
                                   fontSize: "12px",
                                   padding: "6px 12px",
@@ -1264,7 +1280,15 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                               {/* Assigned to another TA: View only, no edit */}
                               <button
                                 className="action-button"
-                                onClick={() => onViewRequisition?.(req.id)}
+                                onClick={() => {
+                                  if (onViewRequisition) {
+                                    onViewRequisition(req.id);
+                                  } else {
+                                    router.push(
+                                      `/ta/requisitions/${encodeURIComponent(req.reqId)}`,
+                                    );
+                                  }
+                                }}
                                 style={{
                                   fontSize: "12px",
                                   padding: "6px 12px",
@@ -1323,33 +1347,15 @@ const Requisitions: React.FC<RequisitionsProps> = ({
         </Table>
       </div>
 
-      {!isLoading && !error && filteredRequisitions.length > visibleCount && (
-        <div
-          style={{
-            marginTop: "16px",
-            display: "flex",
-            justifyContent: "center",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "8px",
+      {!isLoading && !error && (
+        <ListFooter
+          pagination={list.pagination}
+          onPageChange={(next) => setPage(next)}
+          onPageSizeChange={(next) => {
+            setLimit(next);
+            setPage(1);
           }}
-        >
-          <button
-            type="button"
-            className="action-button"
-            onClick={() => setVisibleCount((prev) => prev + 20)}
-          >
-            Load more requisitions
-          </button>
-          <span
-            style={{
-              fontSize: "12px",
-              color: "var(--text-tertiary)",
-            }}
-          >
-            Showing {visibleCount} of {filteredRequisitions.length} requisitions
-          </span>
-        </div>
+        />
       )}
 
       {/* Summary Footer */}
@@ -1371,11 +1377,8 @@ const Requisitions: React.FC<RequisitionsProps> = ({
           }}
         >
           <div>
-            Showing{" "}
-            <strong>
-              {Math.min(visibleCount, filteredRequisitions.length)}
-            </strong>{" "}
-            of <strong>{filteredRequisitions.length}</strong> requisitions
+            Showing <strong>{filteredRequisitions.length}</strong> of{" "}
+            <strong>{list.pagination.total}</strong> requisitions
             {activeFilter === "my" && (
               <span
                 style={{ marginLeft: "12px", color: "var(--primary-accent)" }}

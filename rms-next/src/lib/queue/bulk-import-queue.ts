@@ -1,6 +1,7 @@
-import { Queue, type JobsOptions } from "bullmq";
+import type { JobsOptions, Queue } from "bullmq";
 
-import { getQueueConnectionOptions } from "@/lib/queue/redis";
+import { jobOptionsFor } from "@/lib/queue/queue-policies";
+import { getSharedQueue } from "@/lib/queue/queue-registry";
 
 export const BULK_IMPORT_QUEUE_NAME = "bulk-import";
 export const PROCESS_BULK_IMPORT_JOB = "process-bulk-import";
@@ -9,15 +10,8 @@ export type BulkImportJobPayload = {
   bulkJobId: string;
 };
 
-let queue: Queue<BulkImportJobPayload> | null = null;
-
 function getQueue(): Queue<BulkImportJobPayload> {
-  if (!queue) {
-    queue = new Queue<BulkImportJobPayload>(BULK_IMPORT_QUEUE_NAME, {
-      connection: getQueueConnectionOptions(),
-    });
-  }
-  return queue;
+  return getSharedQueue<BulkImportJobPayload>(BULK_IMPORT_QUEUE_NAME);
 }
 
 export async function enqueueBulkImportJob(
@@ -28,6 +22,6 @@ export async function enqueueBulkImportJob(
   await q.add(
     PROCESS_BULK_IMPORT_JOB,
     { bulkJobId },
-    { removeOnComplete: 100, removeOnFail: 50, ...opts },
+    { ...jobOptionsFor("bulk-import"), ...opts },
   );
 }

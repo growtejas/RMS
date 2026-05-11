@@ -7,6 +7,11 @@ import * as applicationsRepo from "@/lib/repositories/applications-repo";
 import * as candidatesRepo from "@/lib/repositories/candidates-repo";
 import * as cieRepo from "@/lib/repositories/cie-repo";
 import * as rankingMetadataRepo from "@/lib/repositories/ranking-metadata-repo";
+import {
+  buildPaginationMeta,
+  computePagePosition,
+  type PageSize,
+} from "@/lib/pagination/contract";
 import { ensureApplicationForCandidateTx } from "@/lib/services/application-sync-service";
 import {
   ATS_BUCKET_KEYS,
@@ -46,7 +51,11 @@ function applicationHistoryToJson(row: applicationsRepo.ApplicationStageHistoryR
 
 function applicationToJson(
   row: applicationsRepo.ApplicationWithCandidateRow,
-  cie?: { suitable_roles: string[]; experience_level: string | null } | null,
+  cie?: {
+    suitable_roles: string[];
+    suitable_role_ids: string[];
+    experience_level: string | null;
+  } | null,
 ) {
   return {
     application_id: row.application.applicationId,
@@ -61,6 +70,7 @@ function applicationToJson(
     created_at: row.application.createdAt?.toISOString() ?? null,
     updated_at: row.application.updatedAt?.toISOString() ?? null,
     suitable_roles: cie?.suitable_roles?.length ? cie.suitable_roles : null,
+    suitable_role_ids: cie?.suitable_role_ids?.length ? cie.suitable_role_ids : null,
     experience_level: cie?.experience_level ?? null,
     candidate: {
       candidate_id: row.candidate.candidateId,
@@ -90,6 +100,51 @@ export async function listApplicationsJson(params: {
   return rows.map((r) =>
     applicationToJson(r, cieMap.get(r.candidate.candidateId) ?? null),
   );
+}
+
+/** Canonical paginated applications list (offset/limit). */
+export async function listApplicationsPaged(params: {
+  organizationId: string;
+  page: number;
+  limit: PageSize;
+  requisitionId?: number | null;
+  requisitionItemId?: number | null;
+  currentStage?: string | null;
+  candidateId?: number | null;
+}) {
+  const filterParams = {
+    organizationId: params.organizationId,
+    requisitionId: params.requisitionId ?? null,
+    requisitionItemId: params.requisitionItemId ?? null,
+    currentStage: params.currentStage ?? null,
+    candidateId: params.candidateId ?? null,
+  };
+  const total = await applicationsRepo.countApplicationsFiltered(filterParams);
+  const { page, offset, totalPages } = computePagePosition({
+    pageRequested: params.page,
+    total,
+    limit: params.limit,
+  });
+  const rows =
+    totalPages === 0
+      ? []
+      : await applicationsRepo.selectApplicationsFilteredPaged({
+          ...filterParams,
+          limit: params.limit,
+          offset,
+        });
+  const ids = rows.map((r) => r.candidate.candidateId);
+  const cieMap = await cieRepo.selectLatestReportFieldsByCandidateIds(
+    params.organizationId,
+    ids,
+  );
+  const items = rows.map((r) =>
+    applicationToJson(r, cieMap.get(r.candidate.candidateId) ?? null),
+  );
+  return {
+    items,
+    pagination: buildPaginationMeta({ page, limit: params.limit, total }),
+  };
 }
 
 type ApplicationJson = ReturnType<typeof applicationToJson>;

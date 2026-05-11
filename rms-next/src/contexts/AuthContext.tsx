@@ -5,6 +5,7 @@ import React, {
   useState,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   ReactNode,
 } from "react";
@@ -29,6 +30,45 @@ function readBrowserCookie(name: string): string | null {
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(
+  undefined,
+);
+
+/**
+ * Phase 6 - split contexts.
+ *
+ * `AuthStateContext` carries the data that changes during a session
+ * (`user`, `isHydrating`, `isLoading`, `error`). It is what consumers
+ * actually subscribe to.
+ *
+ * `AuthActionsContext` carries stable callbacks (`login`, `logout`,
+ * `refreshSession`, `clearError`). These references never change after
+ * the first render, so consumers that only need actions never re-render
+ * when the user updates.
+ *
+ * The legacy `AuthContext` value is preserved (and memoized) for
+ * backwards compatibility with the dozens of `useAuth()` call sites; it
+ * derives from the same primitives but its identity also stabilises
+ * because every field comes from `useState` / `useCallback`.
+ */
+type AuthStateValue = {
+  user: User | null;
+  isAuthenticated: boolean;
+  isHydrating: boolean;
+  isLoading: boolean;
+  error: string | null;
+};
+
+type AuthActionsValue = {
+  login: AuthContextType["login"];
+  logout: AuthContextType["logout"];
+  refreshSession: AuthContextType["refreshSession"];
+  clearError: AuthContextType["clearError"];
+};
+
+export const AuthStateContext = createContext<AuthStateValue | undefined>(
+  undefined,
+);
+export const AuthActionsContext = createContext<AuthActionsValue | undefined>(
   undefined,
 );
 
@@ -250,18 +290,53 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     setError(null);
   }, []);
 
-  const value: AuthContextType = {
-    user,
-    token: null,
-    isAuthenticated: Boolean(user),
-    isHydrating,
-    isLoading,
-    error,
-    login,
-    refreshSession,
-    logout,
-    clearError,
-  };
+  const stateValue = useMemo<AuthStateValue>(
+    () => ({
+      user,
+      isAuthenticated: Boolean(user),
+      isHydrating,
+      isLoading,
+      error,
+    }),
+    [user, isHydrating, isLoading, error],
+  );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  const actionsValue = useMemo<AuthActionsValue>(
+    () => ({
+      login,
+      logout,
+      refreshSession,
+      clearError,
+    }),
+    [login, logout, refreshSession, clearError],
+  );
+
+  // Legacy value reused by `useAuth()` consumers. Memoised so any
+  // sub-tree that compares `value` by identity sees a change only when a
+  // real auth field flips.
+  const value = useMemo<AuthContextType>(
+    () => ({
+      user: stateValue.user,
+      token: null,
+      isAuthenticated: stateValue.isAuthenticated,
+      isHydrating: stateValue.isHydrating,
+      isLoading: stateValue.isLoading,
+      error: stateValue.error,
+      login: actionsValue.login,
+      refreshSession: actionsValue.refreshSession,
+      logout: actionsValue.logout,
+      clearError: actionsValue.clearError,
+    }),
+    [stateValue, actionsValue],
+  );
+
+  return (
+    <AuthContext.Provider value={value}>
+      <AuthStateContext.Provider value={stateValue}>
+        <AuthActionsContext.Provider value={actionsValue}>
+          {children}
+        </AuthActionsContext.Provider>
+      </AuthStateContext.Provider>
+    </AuthContext.Provider>
+  );
 };

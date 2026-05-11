@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
 import { parseFastapiJsonBody } from "@/lib/http/parse-fastapi-body";
+import { estimateJsonBytes, withRequestPerf } from "@/lib/perf/request-perf";
 import {
   deleteCandidateJson,
   getCandidateJson,
@@ -25,26 +26,32 @@ function parseId(s: string): number | NextResponse {
 
 /** GET /api/candidates/{candidate_id} */
 export async function GET(req: Request, { params }: Ctx) {
-  try {
-    const user = await requireBearerUser(req);
-    if (user instanceof NextResponse) {
-      return user;
-    }
-    const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager");
-    if (denied) {
-      return denied;
-    }
+  return withRequestPerf("GET /api/candidates/[candidateId]", async () => {
+    try {
+      const user = await requireBearerUser(req);
+      if (user instanceof NextResponse) {
+        return user;
+      }
+      const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager");
+      if (denied) {
+        return denied;
+      }
 
-    const candidateId = parseId(params.candidateId);
-    if (candidateId instanceof NextResponse) {
-      return candidateId;
-    }
+      const candidateId = parseId(params.candidateId);
+      if (candidateId instanceof NextResponse) {
+        return candidateId;
+      }
 
-    const data = await getCandidateJson(candidateId, user.organizationId);
-    return NextResponse.json(data);
-  } catch (e) {
-    return referenceWriteCatch(e, "[GET /api/candidates/[candidateId]]");
-  }
+      const data = await getCandidateJson(candidateId, user.organizationId);
+      return NextResponse.json(data, {
+        headers: {
+          "x-rms-perf-payload-bytes": String(estimateJsonBytes(data)),
+        },
+      });
+    } catch (e) {
+      return referenceWriteCatch(e, "[GET /api/candidates/[candidateId]]");
+    }
+  });
 }
 
 /** PATCH /api/candidates/{candidate_id} */

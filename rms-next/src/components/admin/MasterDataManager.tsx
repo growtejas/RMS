@@ -7,9 +7,15 @@ import { apiClient } from "@/lib/api/client";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Input";
+import { ListFooter } from "@/components/ui/ListFooter";
 import { Loader } from "@/components/ui/Loader";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/Table";
+import {
+  DEFAULT_PAGE_SIZE,
+  buildPaginationMeta,
+  type PageSize,
+} from "@/lib/pagination/contract";
 import {
   cachedApiGet,
   invalidateCachedApiGetByUrlSubstring,
@@ -116,7 +122,7 @@ const MasterDataManager: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [limit, setLimit] = useState<PageSize>(DEFAULT_PAGE_SIZE);
   const [newItem, setNewItem] = useState<NewItemState>({
     name: "",
     description: "",
@@ -396,8 +402,19 @@ const MasterDataManager: React.FC = () => {
   const filteredItems = currentItems.filter((item) =>
     item.name.toLowerCase().includes(searchTerm.toLowerCase()),
   );
-  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
-  const pagedItems = filteredItems.slice((page - 1) * pageSize, page * pageSize);
+  const pagination = useMemo(
+    () =>
+      buildPaginationMeta({
+        page,
+        limit,
+        total: filteredItems.length,
+      }),
+    [filteredItems.length, page, limit],
+  );
+  const pagedItems = filteredItems.slice(
+    (pagination.page - 1) * pagination.limit,
+    (pagination.page - 1) * pagination.limit + pagination.limit,
+  );
 
   const canSaveNew = useMemo(
     () => Boolean(newItem.name.trim()),
@@ -545,27 +562,16 @@ const MasterDataManager: React.FC = () => {
             description={error ?? "Add your first item to get started."}
           />
         )}
-        {filteredItems.length > pageSize && (
-          <div className="mt-4 flex items-center justify-end gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-              disabled={page === 1}
-            >
-              Previous
-            </Button>
-            <span className="text-sm text-[--color-text-subtle]">
-              Page {page} of {totalPages}
-            </span>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-              disabled={page === totalPages}
-            >
-              Next
-            </Button>
+        {filteredItems.length > 0 && (
+          <div className="mt-4">
+            <ListFooter
+              pagination={pagination}
+              onPageChange={(next) => setPage(next)}
+              onPageSizeChange={(next) => {
+                setLimit(next);
+                setPage(1);
+              }}
+            />
           </div>
         )}
       </div>

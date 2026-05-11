@@ -43,6 +43,19 @@ import {
   type EvaluationCardContext,
 } from "@/components/evaluation/mapRankedCandidateToEvaluationCard";
 import { CandidateIntelligencePanel } from "@/components/shared/CandidateIntelligencePanel";
+import dynamic from "next/dynamic";
+
+const InterviewLifecycle = dynamic(
+  () => import("@/components/shared/InterviewLifecycle"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="rounded-xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-600">
+        Loading lifecycle…
+      </div>
+    ),
+  },
+);
 
 /** Re-export for callers that need the 403 message text. */
 export { TA_OWNERSHIP_DENIED_MESSAGE } from "@/lib/api/candidateApi";
@@ -60,6 +73,12 @@ export interface CandidateDetailViewProps {
   pipelineWorkspace?: "evaluate" | "execute";
   /** Full-page layout vs inner panel for modal shell */
   variant?: "page" | "modal";
+  /**
+   * When true, do not auto-refetch full candidate data on mount.
+   * Use this when the caller already loaded the full candidate payload (page route),
+   * to avoid duplicate requests and interaction latency.
+   */
+  disableAutoHydrate?: boolean;
 }
 
 /** Tailwind classes for stage pills and transition buttons */
@@ -90,6 +109,7 @@ export default function CandidateDetailView({
   evaluationShortlistBlockedReason,
   pipelineWorkspace,
   variant = "page",
+  disableAutoHydrate = false,
 }: CandidateDetailViewProps) {
   const isEvaluateWorkspace = pipelineWorkspace === "evaluate";
 
@@ -123,6 +143,7 @@ export default function CandidateDetailView({
   const [aiEvalWorking, setAiEvalWorking] = useState(false);
   const [deletingCandidate, setDeletingCandidate] = useState(false);
   const [detailTab, setDetailTab] = useState<"profile" | "intelligence">("profile");
+  const [lifecycleOpen, setLifecycleOpen] = useState(false);
 
   /** Bumped when opening / hydrating or when user mutates candidate so stale fetches cannot overwrite. */
   const candidateHydrateGenRef = useRef(0);
@@ -138,6 +159,9 @@ export default function CandidateDetailView({
 
   useEffect(() => {
     setCandidate(initialCandidate);
+    if (disableAutoHydrate) {
+      return;
+    }
     const gen = ++candidateHydrateGenRef.current;
     const { candidate_id, application_id } = initialCandidate;
     void (async () => {
@@ -559,6 +583,36 @@ export default function CandidateDetailView({
               <AlertCircle size={14} /> {error}
             </div>
           )}
+
+          {/* ---- Interview Lifecycle (hybrid pipeline) ---- */}
+          {candidate.application_id != null &&
+          candidate.requisition_item_id != null ? (
+            <div className="mb-4">
+              <button
+                type="button"
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm font-semibold text-slate-900 hover:bg-slate-50"
+                onClick={() => setLifecycleOpen((v) => !v)}
+              >
+                Interview lifecycle
+                <span className="ml-2 text-xs font-medium text-slate-500">
+                  {lifecycleOpen ? "Hide" : "Show"}
+                </span>
+              </button>
+              {lifecycleOpen ? (
+                <div className="mt-3">
+                  <InterviewLifecycle
+                    applicationId={candidate.application_id}
+                    candidateId={candidate.candidate_id}
+                    requisitionItemId={candidate.requisition_item_id}
+                    userRoles={userRoles}
+                    onLifecycleChanged={() => {
+                      void refresh();
+                    }}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="mb-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
             <button

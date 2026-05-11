@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
+import { estimateJsonBytes, withRequestPerf } from "@/lib/perf/request-perf";
 import {
   batchUpdateResumeParseCache,
   selectCandidateById,
@@ -10,6 +11,7 @@ import { resolveLegacyResumeArtifactForCandidate } from "@/lib/services/cie/cie-
 import {
   resolveCieParserSource,
 } from "@/lib/services/cie/cie-llm";
+import * as cieRepo from "@/lib/repositories/cie-repo";
 import {
   legacyParsedDataHints,
   tryBuildParsedCandidateFromLegacyParsedData,
@@ -92,18 +94,20 @@ function readViewMode(req: Request): "full" | "v2" {
  * - `parsed_candidate_structured`: rules/structured profile → CIE shape (richer jobs/education when present)
  * - `cie_effective_*`: which snapshot matches `CIE_PARSER_SOURCE` + fallbacks (read-only preview; no DB writes)
  * - `parsed_candidate_v2*`: adaptive v2 (UI/debug only). Returned when env `RESUME_STRUCTURE_V2_ENABLED=true`
- *   or the request carries `?v2=1`. Never persisted, never used by ATS or CIE pipeline.
+ *   or the request carries `?v2=1` (bypasses the env gate for this request only). Not persisted by this route.
+ *   CIE can use the same v2→ParsedCandidate path when `CIE_RESUME_V2_PARSE=true` (or site-wide v2 env is on).
  */
 export async function GET(_req: Request, { params }: Ctx) {
-  try {
-    const user = await requireBearerUser(_req);
-    if (user instanceof NextResponse) {
-      return user;
-    }
-    const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager");
-    if (denied) {
-      return denied;
-    }
+  return withRequestPerf("GET /api/candidates/[candidateId]/parsed-resume", async () => {
+    try {
+      const user = await requireBearerUser(_req);
+      if (user instanceof NextResponse) {
+        return user;
+      }
+      const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager");
+      if (denied) {
+        return denied;
+      }
 
     const candidateId = parseId(params.candidateId);
     if (candidateId instanceof NextResponse) {
@@ -138,7 +142,7 @@ export async function GET(_req: Request, { params }: Ctx) {
     let parsedCandidate: ParsedCandidate | null = null;
     let parsedCandidateError: string | null = null;
     let legacyHints = emptyHints();
-    let fromCache = resolved?.fromCache ?? false;
+    const fromCache = resolved?.fromCache ?? false;
 
     if (resolved?.artifact.status === "processed") {
       const pd =
@@ -214,6 +218,7 @@ export async function GET(_req: Request, { params }: Ctx) {
         const r = await runStrictResumeV2FromText({
           resumeText: rawText,
           logContext: { candidate_id: candidateId, path: "parsed_resume_v2" },
+          bypassResumeStructureV2EnabledGate: v2QueryRequested,
         });
         if (r.ok) {
           parsedCandidateV2 = r.data;
@@ -260,12 +265,34 @@ export async function GET(_req: Request, { params }: Ctx) {
       body.cie_effective_source = cieEffectiveSource;
       body.cie_effective_legacy_hints = cieEffectiveLegacyHints;
     }
+
+    if (debug) {
+      try {
+        const stored = await cieRepo.selectLatestParsedRow(
+          candidateId,
+          user.organizationId,
+        );
+        body.cie_stored_parsed_candidate = stored?.parsed ?? null;
+        body.cie_stored_parsed_v2 = stored?.parsedV2 ?? null;
+        body.cie_stored_parsed_version = stored?.version ?? null;
+      } catch {
+        body.cie_stored_parsed_candidate = null;
+        body.cie_stored_parsed_v2 = null;
+        body.cie_stored_parsed_version = null;
+      }
+    }
+
     if (body.detail === undefined) {
       delete body.detail;
     }
 
-    return NextResponse.json(body);
-  } catch (e) {
-    return referenceWriteCatch(e, "[GET /api/candidates/[candidateId]/parsed-resume]");
-  }
+      return NextResponse.json(body, {
+        headers: {
+          "x-rms-perf-payload-bytes": String(estimateJsonBytes(body)),
+        },
+      });
+    } catch (e) {
+      return referenceWriteCatch(e, "[GET /api/candidates/[candidateId]/parsed-resume]");
+    }
+  });
 }

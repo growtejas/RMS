@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 
-import { getDb } from "@/lib/db";
+import { getReadDb } from "@/lib/db";
 import {
   applications,
   candidates,
@@ -9,11 +9,16 @@ import {
 } from "@/lib/db/schema";
 import { HttpError } from "@/lib/http/http-error";
 
+/**
+ * Phase 5 - tenant assertions are read-only existence checks. They run on
+ * every authenticated route, so attaching them to the read replica handle
+ * keeps the primary pool reserved for actual writes.
+ */
 export async function assertRequisitionItemInOrganization(
   itemId: number,
   organizationId: string,
 ): Promise<void> {
-  const db = getDb();
+  const db = getReadDb();
   const [row] = await db
     .select({ one: requisitionItems.itemId })
     .from(requisitionItems)
@@ -34,7 +39,7 @@ export async function assertRequisitionInOrganization(
   reqId: number,
   organizationId: string,
 ): Promise<void> {
-  const db = getDb();
+  const db = getReadDb();
   const [row] = await db
     .select({ one: requisitions.reqId })
     .from(requisitions)
@@ -51,7 +56,7 @@ export async function assertCandidateInOrganization(
   candidateId: number,
   organizationId: string,
 ): Promise<void> {
-  const db = getDb();
+  const db = getReadDb();
   const [row] = await db
     .select({ one: candidates.candidateId })
     .from(candidates)
@@ -71,7 +76,7 @@ export async function assertApplicationInOrganization(
   applicationId: number,
   organizationId: string,
 ): Promise<void> {
-  const db = getDb();
+  const db = getReadDb();
   const [row] = await db
     .select({ one: applications.applicationId })
     .from(applications)

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, type SQL } from "drizzle-orm";
 
 import { getDb } from "@/lib/db";
 import {
@@ -8,6 +8,17 @@ import {
 } from "@/lib/db/schema";
 import { requisitionItemToJson } from "@/lib/services/requisitions-read-service";
 
+function buildJobsConds(params: {
+  organizationId: string;
+  itemStatus?: string | null;
+}): SQL[] {
+  const conds: SQL[] = [eq(requisitions.organizationId, params.organizationId)];
+  if (params.itemStatus != null && params.itemStatus !== "") {
+    conds.push(eq(requisitionItems.itemStatus, params.itemStatus));
+  }
+  return conds;
+}
+
 /** ATS "job" = `requisition_item` row with org scope (see docs/ATS gap matrix). */
 export async function listJobsForOrganization(params: {
   organizationId: string;
@@ -16,10 +27,7 @@ export async function listJobsForOrganization(params: {
   offset?: number;
 }) {
   const db = getDb();
-  const conds = [eq(requisitions.organizationId, params.organizationId)];
-  if (params.itemStatus != null && params.itemStatus !== "") {
-    conds.push(eq(requisitionItems.itemStatus, params.itemStatus));
-  }
+  const conds = buildJobsConds(params);
   const rows = await db
     .select({ item: requisitionItems })
     .from(requisitionItems)
@@ -32,6 +40,20 @@ export async function listJobsForOrganization(params: {
     job_id: r.item.itemId,
     requisition_item: requisitionItemToJson(r.item),
   }));
+}
+
+export async function countJobsForOrganization(params: {
+  organizationId: string;
+  itemStatus?: string | null;
+}): Promise<number> {
+  const db = getDb();
+  const conds = buildJobsConds(params);
+  const [row] = await db
+    .select({ n: count() })
+    .from(requisitionItems)
+    .innerJoin(requisitions, eq(requisitionItems.reqId, requisitions.reqId))
+    .where(and(...conds));
+  return Number(row?.n ?? 0);
 }
 
 export async function getJobForOrganization(itemId: number, organizationId: string) {

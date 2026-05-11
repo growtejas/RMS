@@ -30,6 +30,12 @@ export function resolveCieStrictLlmParse(): boolean {
   return v === "1" || v === "true" || v === "yes";
 }
 
+/** When false (default), strict LLM parse must not replace a successful v2→ParsedCandidate projection. */
+export function resolveCieStrictLlmParseOverrideV2(): boolean {
+  const v = process.env.CIE_STRICT_LLM_PARSE_OVERRIDE_V2?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 /**
  * OpenAI-compatible JSON parse of resume text into `StrictLlmResumeParse`.
  * Uses RESUME_STRUCTURE_OPENAI_*.
