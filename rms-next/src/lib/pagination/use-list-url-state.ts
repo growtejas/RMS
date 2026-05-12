@@ -72,7 +72,7 @@ export function useListUrlState<TFilters extends Record<string, string>>(
   setSort: (sort: string) => void;
   setFilters: (next: Partial<TFilters>) => void;
   resetFilters: () => void;
-  buildHref: (next: Partial<ListUrlState<TFilters>>) => string;
+  buildHref: (next: Partial<Omit<ListUrlState<TFilters>, "filters">> & { filters?: Partial<TFilters> }) => string;
 } {
   const router = useRouter();
   const pathname = usePathname();
@@ -96,13 +96,17 @@ export function useListUrlState<TFilters extends Record<string, string>>(
   }, [params, opts.filterKeys, fallbackLimit, fallbackSort]);
 
   const buildHref = useCallback(
-    (next: Partial<ListUrlState<TFilters>>): string => {
+    (
+      next: Partial<Omit<ListUrlState<TFilters>, "filters">> & {
+        filters?: Partial<TFilters>;
+      },
+    ): string => {
       const merged: ListUrlState<TFilters> = {
         page: next.page ?? state.page,
         limit: next.limit ?? state.limit,
         q: next.q ?? state.q,
         sort: next.sort ?? state.sort,
-        filters: { ...state.filters, ...(next.filters ?? {}) },
+        filters: { ...state.filters, ...(next.filters ?? {}) } as TFilters,
       };
       const sp = new URLSearchParams();
       if (merged.page > MIN_PAGE) sp.set("page", String(merged.page));
@@ -156,7 +160,7 @@ export function useListUrlState<TFilters extends Record<string, string>>(
 
   const setFilters = useCallback(
     (next: Partial<TFilters>) => {
-      replace(buildHref({ page: MIN_PAGE, filters: next as Partial<TFilters> }));
+      replace(buildHref({ page: MIN_PAGE, filters: next }));
     },
     [buildHref, replace],
   );
@@ -171,7 +175,7 @@ export function useListUrlState<TFilters extends Record<string, string>>(
         page: MIN_PAGE,
         q: "",
         sort: fallbackSort,
-        filters: cleared as Partial<TFilters>,
+        filters: cleared,
       }),
     );
   }, [buildHref, replace, opts.filterKeys, fallbackSort]);

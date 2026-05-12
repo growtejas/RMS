@@ -45,7 +45,7 @@ export async function applyInterviewerReportScope(
   if (!scope.interviewerOnly) {
     return filters;
   }
-  const allowedReqIds = [...scope.requisitionIds];
+  const allowedReqIds = Array.from(scope.requisitionIds);
   if (allowedReqIds.length === 0) {
     return { ...filters, requisitionIds: [-1] };
   }

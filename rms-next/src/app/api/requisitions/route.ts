@@ -8,6 +8,7 @@ import { PAGE_SIZE_OPTIONS } from "@/lib/pagination/contract";
 import { paginatedJson } from "@/lib/pagination/server";
 import { parsePaginationParams } from "@/lib/pagination/zod";
 import {
+  getRequisitionDetailRead,
   listRequisitionsRead,
   listRequisitionsReadPaged,
 } from "@/lib/services/requisitions-read-service";

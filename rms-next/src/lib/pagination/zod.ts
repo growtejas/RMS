@@ -55,7 +55,7 @@ export const qSchema = z
 export function sortSchemaFor<T extends string>(
   allowed: readonly T[],
   fallback: T,
-): z.ZodType<T, T, unknown> {
+) {
   const allowedSet = new Set<string>(allowed);
   return z
     .union([z.string(), z.null(), z.undefined()])

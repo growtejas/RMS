@@ -78,7 +78,7 @@ function buildHandle(opts: {
       application_name: `rms-next:${opts.label}`,
       // Enforce per-class statement timeouts at the session level so a slow
       // query cannot hold a pool slot indefinitely.
-      statement_timeout: String(opts.statementTimeoutMs),
+      statement_timeout: opts.statementTimeoutMs,
     },
   };
   const sql = postgres(opts.url, sqlOptions);
