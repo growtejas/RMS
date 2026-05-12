@@ -218,6 +218,13 @@
       "when": 1778600000000,
       "tag": "0030_analytics_dynamic_stages",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1778580559775,
+      "tag": "0031_lumpy_rocket_raccoon",
+      "breakpoints": true
     }
   ]
 }
