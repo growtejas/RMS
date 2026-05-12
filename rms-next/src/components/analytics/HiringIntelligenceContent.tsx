@@ -3,7 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Line, LineChart, ResponsiveContainer } from "recharts";
 
 import { AnalyticsFilterBar } from "@/components/analytics/AnalyticsFilterBar";
 import { CandidateFunnel } from "@/components/analytics/CandidateFunnel";
@@ -187,7 +187,10 @@ export function HiringIntelligenceContent(props: HiringIntelligenceContentProps)
 
   const stageRows = useMemo(() => pipelineQuery.data?.stages ?? [], [pipelineQuery.data?.stages]);
   const kpis = pipelineQuery.data?.kpis;
-  const recruiterRows = recruiterQuery.data?.rows ?? [];
+  const recruiterRows = useMemo(
+    () => recruiterQuery.data?.rows ?? [],
+    [recruiterQuery.data?.rows],
+  );
   const sourceRows = sourceQuery.data?.rows ?? [];
 
   const recruiterPagination = buildPaginationMeta({

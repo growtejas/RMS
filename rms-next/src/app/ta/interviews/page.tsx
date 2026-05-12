@@ -226,13 +226,10 @@ export default function TaInterviewsPage() {
     [],
   );
 
-  const onScheduled = useCallback(
-    (_: string[], _interview?: Interview) => {
-      void list.refetch();
-      setScheduleState({ mode: "closed" });
-    },
-    [list],
-  );
+  const onScheduled = useCallback(() => {
+    void list.refetch();
+    setScheduleState({ mode: "closed" });
+  }, [list]);
 
   return (
     <div className="space-y-6">

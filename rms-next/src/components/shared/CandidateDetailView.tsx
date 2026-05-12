@@ -205,7 +205,7 @@ export default function CandidateDetailView({
         // Keep initialCandidate (already set); list payloads often omit interviews[]
       }
     })();
-  }, [initialCandidate]);
+  }, [initialCandidate, disableAutoHydrate]);
 
   useEffect(() => {
     if (isEvaluateWorkspace) {
@@ -319,12 +319,12 @@ export default function CandidateDetailView({
     evaluationContext?.requiredExperienceYears,
     evaluationContext?.requiredSkillsCount,
     isEvaluateWorkspace,
-    evaluationRefreshKey,
+    aiEvalWorking,
   ]);
 
   useEffect(() => {
     void loadEvaluation();
-  }, [loadEvaluation]);
+  }, [loadEvaluation, evaluationRefreshKey]);
 
   const handleEvaluationShortlist = async () => {
     setError(null);

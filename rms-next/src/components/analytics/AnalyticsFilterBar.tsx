@@ -83,7 +83,7 @@ export function AnalyticsFilterBar(props: AnalyticsFilterBarProps) {
       value: arrays[key][0] ?? "",
       options: dropdownOptions?.[key] ?? [],
     }));
-  }, [arrays, dropdownOptions]);
+  }, [arrays, dropdownOptions, requisitionOnly]);
 
   if (requisitionOnly) {
     const reqField = arrayFields.find((f) => f.key === "requisitionIds");

@@ -1,6 +1,6 @@
 import { eq, inArray, sql } from "drizzle-orm";
 
-import { getDb, getReadDb } from "@/lib/db";
+import { getReadDb } from "@/lib/db";
 import {
   employees,
   roles,

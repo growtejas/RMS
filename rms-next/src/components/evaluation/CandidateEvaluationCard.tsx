@@ -13,14 +13,12 @@ export default function CandidateEvaluationCard({
   onReject,
   disabled,
   shortlistDisabledReason,
-  shortlistDone,
   rejectDone,
   readOnly,
 }: CandidateEvaluationCardProps) {
   const [shortlistOpen, setShortlistOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [aiExpanded, setAiExpanded] = useState(false);
-  const [shortlistBlockedNudge, setShortlistBlockedNudge] = useState(false);
 
   const aiDisplay =
     model.ai.score != null
@@ -307,12 +305,6 @@ export default function CandidateEvaluationCard({
                 }}
               >
                 {shortlistDisabledReason}
-              </div>
-            ) : null}
-
-            {shortlistBlockedNudge && disabled && shortlistDisabledReason ? (
-              <div style={{ marginTop: 6, fontSize: 11, color: "var(--warning, #f59e0b)" }}>
-                Shortlist is blocked: {shortlistDisabledReason}
               </div>
             ) : null}
           </div>
