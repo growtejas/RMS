@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { useAuth } from "@/contexts/useAuth";
+import { getRoleHomePath, getDefaultRole } from "@/lib/auth/role-routing";
 import "@/styles/legacy/Login.css";
 
 type Me = {
@@ -23,16 +24,6 @@ type AccessRequest = {
   reviewed_at?: string | null;
   reviewed_by?: number | null;
 };
-
-function roleHome(roles: string[]): string {
-  const r = roles.map((x) => x.toLowerCase());
-  if (r.includes("owner")) return "/owner";
-  if (r.includes("admin")) return "/admin";
-  if (r.includes("hr")) return "/hr";
-  if (r.includes("ta")) return "/ta";
-  if (r.includes("manager")) return "/manager";
-  return "/dashboard";
-}
 
 export default function AccessRequestPage() {
   const router = useRouter();
@@ -77,7 +68,8 @@ export default function AccessRequestPage() {
         if (cancelled) return;
         setMe(meJson);
         if (meJson.is_active && (meJson.roles?.length ?? 0) > 0) {
-          router.replace(roleHome(meJson.roles));
+          const role = getDefaultRole(meJson.roles);
+          router.replace(getRoleHomePath(role));
           return;
         }
         const r = await fetch("/api/access-requests/me", { cache: "no-store" });

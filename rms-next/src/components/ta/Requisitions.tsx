@@ -150,6 +150,7 @@ interface RequisitionsProps {
   onSelfAssign?: (reqId: string) => void;
   onManageItems?: (reqId: string) => void;
   onAssignToOther?: (reqId: string, taName: string) => void;
+  readOnly?: boolean;
 }
 
 /* ======================================================
@@ -408,6 +409,7 @@ const Requisitions: React.FC<RequisitionsProps> = ({
   onViewRequisition,
   onSelfAssign,
   onManageItems,
+  readOnly = false,
 }) => {
   const router = useRouter();
   const { user } = useAuth();
@@ -615,9 +617,11 @@ const Requisitions: React.FC<RequisitionsProps> = ({
     <>
       {/* Header */}
       <div className="manager-header">
-        <h2>Talent Acquisition Dashboard</h2>
+        <h2>{readOnly ? "Requisitions Dashboard (Read Only)" : "Talent Acquisition Dashboard"}</h2>
         <p className="subtitle">
-          Manage assigned requisitions and fulfill positions item by item
+          {readOnly
+            ? "View requisitions and item progress. Editing and assignment actions are disabled."
+            : "Manage assigned requisitions and fulfill positions item by item"}
         </p>
       </div>
 
@@ -1188,7 +1192,27 @@ const Requisitions: React.FC<RequisitionsProps> = ({
                       {/* PHASE 3: Permission-based action buttons */}
                       <td>
                         <div style={{ display: "flex", gap: "8px" }}>
-                          {isUnassigned ? (
+                          {readOnly ? (
+                            <button
+                              className="action-button"
+                              onClick={() => {
+                                if (onViewRequisition) {
+                                  onViewRequisition(req.id);
+                                } else {
+                                  router.push(
+                                    `/ta/requisitions/${encodeURIComponent(req.reqId)}`,
+                                  );
+                                }
+                              }}
+                              style={{
+                                fontSize: "12px",
+                                padding: "6px 12px",
+                              }}
+                              title="Read-only requisition view"
+                            >
+                              View
+                            </button>
+                          ) : isUnassigned ? (
                             <>
                               {/* Unassigned: TA can self-assign */}
                               <button

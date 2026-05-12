@@ -9,12 +9,14 @@ export interface User {
 export interface AuthContextType {
   user: User | null;
   token: string | null;
+  activeRole: string | null;
   isAuthenticated: boolean;
   isHydrating: boolean;
   isLoading: boolean;
   error: string | null;
   login: (username: string, password: string) => Promise<User>;
   refreshSession: () => Promise<User | null>;
+  setActiveRole: (role: string) => void;
   logout: () => void;
   clearError: () => void;
 }

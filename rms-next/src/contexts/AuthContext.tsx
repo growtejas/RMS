@@ -13,6 +13,7 @@ import axios from "axios";
 
 import type { User, AuthContextType } from "@/types/auth";
 import { fetchSession, logout as apiLogout, refreshAccessToken } from "@/lib/api/auth";
+import { resolveActiveRole } from "@/lib/auth/role-routing";
 
 function readBrowserCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
@@ -52,6 +53,7 @@ export const AuthContext = createContext<AuthContextType | undefined>(
  */
 type AuthStateValue = {
   user: User | null;
+  activeRole: string | null;
   isAuthenticated: boolean;
   isHydrating: boolean;
   isLoading: boolean;
@@ -62,6 +64,7 @@ type AuthActionsValue = {
   login: AuthContextType["login"];
   logout: AuthContextType["logout"];
   refreshSession: AuthContextType["refreshSession"];
+  setActiveRole: AuthContextType["setActiveRole"];
   clearError: AuthContextType["clearError"];
 };
 
@@ -76,10 +79,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [activeRole, setActiveRoleState] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** True until client has read localStorage and finished any /auth/refresh (avoids flash redirects in Next.js). */
   const [isHydrating, setIsHydrating] = useState(true);
+
+  const setActiveRole = useCallback((role: string) => {
+    const next = role.toLowerCase();
+    setActiveRoleState(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("rms_active_role", next);
+    }
+  }, []);
 
   const login = useCallback(async (username: string, password: string) => {
     setIsLoading(true);
@@ -154,7 +166,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
         is_active: true,
       };
 
+      const preferredRole =
+        typeof window !== "undefined"
+          ? window.localStorage.getItem("rms_active_role")
+          : null;
+      const nextActiveRole = resolveActiveRole(userObj.roles, preferredRole);
       setUser(userObj);
+      setActiveRoleState(nextActiveRole);
+      if (typeof window !== "undefined" && nextActiveRole) {
+        window.localStorage.setItem("rms_active_role", nextActiveRole);
+      }
       setIsHydrating(false);
 
       return userObj;
@@ -191,13 +212,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
         roles: normalizedRoles,
         is_active: true,
       };
+      const preferredRole =
+        typeof window !== "undefined"
+          ? window.localStorage.getItem("rms_active_role")
+          : null;
+      const nextActiveRole = resolveActiveRole(userObj.roles, preferredRole);
       setUser(userObj);
+      setActiveRoleState(nextActiveRole);
+      if (typeof window !== "undefined" && nextActiveRole) {
+        window.localStorage.setItem("rms_active_role", nextActiveRole);
+      }
       return userObj;
     } catch (e) {
       if (axios.isAxiosError(e)) {
         const status = e.response?.status;
         if (status === 401 || status === 403) {
           setUser(null);
+          setActiveRoleState(null);
         }
       }
       return null;
@@ -241,6 +272,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
       try {
         const session = await fetchSession();
         if (session.authenticated) {
+          const preferredRole = window.localStorage.getItem("rms_active_role");
+          const nextActiveRole = resolveActiveRole(session.roles, preferredRole);
           setUser({
             user_id: session.user_id,
             username: session.username,
@@ -249,6 +282,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
               : [],
             is_active: session.is_active,
           });
+          setActiveRoleState(nextActiveRole);
+          if (nextActiveRole) {
+            window.localStorage.setItem("rms_active_role", nextActiveRole);
+          }
         } else {
           // Access missing/expired: try refresh if we likely have a refresh cookie (httpOnly);
           // `rfm_csrf` is set with login/refresh and is a cheap signal.
@@ -257,10 +294,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
             await refreshSession();
           } else {
             setUser(null);
+            setActiveRoleState(null);
           }
         }
       } catch {
         setUser(null);
+        setActiveRoleState(null);
       } finally {
         window.clearTimeout(maxTimer);
         finishBootstrap();
@@ -280,8 +319,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
         await apiLogout();
       } finally {
         setUser(null);
+        setActiveRoleState(null);
         setError(null);
         setIsHydrating(false);
+        if (typeof window !== "undefined") {
+          window.localStorage.removeItem("rms_active_role");
+        }
       }
     })();
   }, []);
@@ -293,12 +336,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   const stateValue = useMemo<AuthStateValue>(
     () => ({
       user,
+      activeRole,
       isAuthenticated: Boolean(user),
       isHydrating,
       isLoading,
       error,
     }),
-    [user, isHydrating, isLoading, error],
+    [user, activeRole, isHydrating, isLoading, error],
   );
 
   const actionsValue = useMemo<AuthActionsValue>(
@@ -306,9 +350,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
       login,
       logout,
       refreshSession,
+      setActiveRole,
       clearError,
     }),
-    [login, logout, refreshSession, clearError],
+    [login, logout, refreshSession, setActiveRole, clearError],
   );
 
   // Legacy value reused by `useAuth()` consumers. Memoised so any
@@ -318,12 +363,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     () => ({
       user: stateValue.user,
       token: null,
+      activeRole: stateValue.activeRole,
       isAuthenticated: stateValue.isAuthenticated,
       isHydrating: stateValue.isHydrating,
       isLoading: stateValue.isLoading,
       error: stateValue.error,
       login: actionsValue.login,
       refreshSession: actionsValue.refreshSession,
+      setActiveRole: actionsValue.setActiveRole,
       logout: actionsValue.logout,
       clearError: actionsValue.clearError,
     }),

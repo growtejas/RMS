@@ -13,11 +13,9 @@ import { Button } from "@/components/ui/Button";
 
 const TABS: Array<{ id: string; label: string; sections: AnalyticsSection[] }> = [
   { id: "overview", label: "Overview", sections: ALL_ANALYTICS_SECTIONS },
-  { id: "pipeline", label: "Pipeline", sections: ["header", "filters", "kpis", "candidateFunnel", "aiInsights"] },
-  { id: "interviews", label: "Interviews", sections: ["header", "filters", "interviewFunnel", "interviewers"] },
+  { id: "pipeline", label: "Pipeline", sections: ["header", "filters", "kpis", "candidateFunnel"] },
   { id: "sources", label: "Sources", sections: ["header", "filters", "sources"] },
-  { id: "recruiters", label: "Recruiters", sections: ["header", "filters", "recruiters", "tables"] },
-  { id: "time", label: "Time Analytics", sections: ["header", "filters", "timeToHire"] },
+  { id: "recruiters", label: "Recruiters", sections: ["header", "filters", "tables"] },
   { id: "offers", label: "Offers", sections: ["header", "filters", "kpis"] },
 ];
 

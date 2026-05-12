@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { requireAnyRole, requireBearerUser, type ApiUser } from "@/lib/auth/api-guard";
+import { getInterviewerScope } from "@/lib/auth/interviewer-scope";
 import { envelopeCatch, envelopeOk } from "@/lib/http/api-envelope";
 import { log } from "@/lib/logging/logger";
+import type { ReportFilters } from "@/lib/reports/types";
 
 export async function requireReportsUser(req: Request): Promise<ApiUser | NextResponse> {
   const user = await requireBearerUser(req);
@@ -33,6 +35,28 @@ export interface WithReportHandlerOptions {
   routeName?: string;
   /** Override for cache TTL when a route serves more volatile data. */
   cacheControl?: string;
+}
+
+export async function applyInterviewerReportScope(
+  user: ApiUser,
+  filters: ReportFilters,
+): Promise<ReportFilters> {
+  const scope = await getInterviewerScope(user);
+  if (!scope.interviewerOnly) {
+    return filters;
+  }
+  const allowedReqIds = [...scope.requisitionIds];
+  if (allowedReqIds.length === 0) {
+    return { ...filters, requisitionIds: [-1] };
+  }
+  if (filters.requisitionIds.length === 0) {
+    return { ...filters, requisitionIds: allowedReqIds };
+  }
+  const allowedSet = new Set(allowedReqIds);
+  return {
+    ...filters,
+    requisitionIds: filters.requisitionIds.filter((id) => allowedSet.has(id)),
+  };
 }
 
 export async function withReportHandler<T>(

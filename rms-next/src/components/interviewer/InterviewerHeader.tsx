@@ -2,6 +2,7 @@
 
 import React from "react";
 import { User } from "lucide-react";
+import RoleSwitcherMenu from "@/components/shared/RoleSwitcherMenu";
 
 interface InterviewerHeaderProps {
   title: string;
@@ -33,6 +34,7 @@ export default function InterviewerHeader({
             <div className="user-info">
               <div className="user-name">{displayName}</div>
               <div className="user-role">{displayRole}</div>
+              <RoleSwitcherMenu />
             </div>
 
             <button

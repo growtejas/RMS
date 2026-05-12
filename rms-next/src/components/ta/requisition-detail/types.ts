@@ -13,6 +13,8 @@ export interface RequisitionDetailsProps {
   requisitionId?: string | null;
   onBack?: () => void;
   onUpdate?: (ticket: TicketData) => void;
+  readOnly?: boolean;
+  candidateBasePath?: string;
 }
 
 export interface RequisitionItem {

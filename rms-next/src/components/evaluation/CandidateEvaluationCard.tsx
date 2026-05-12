@@ -276,32 +276,6 @@ export default function CandidateEvaluationCard({
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               <button
                 type="button"
-                className="action-button primary"
-                aria-disabled={disabled || shortlistDone ? true : undefined}
-                title={shortlistDisabledReason}
-                style={{
-                  fontSize: 11,
-                  padding: "6px 12px",
-                  opacity: disabled || shortlistDone ? 0.6 : 1,
-                  cursor: disabled || shortlistDone ? "not-allowed" : "pointer",
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (shortlistDone) {
-                    return;
-                  }
-                  if (disabled) {
-                    setShortlistBlockedNudge(true);
-                    window.setTimeout(() => setShortlistBlockedNudge(false), 2000);
-                    return;
-                  }
-                  setShortlistOpen(true);
-                }}
-              >
-                {shortlistDone ? "Shortlisted" : "Shortlist"}
-              </button>
-              <button
-                type="button"
                 className="action-button"
                 style={{
                   fontSize: 11,

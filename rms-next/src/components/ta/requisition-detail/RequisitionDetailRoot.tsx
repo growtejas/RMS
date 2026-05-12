@@ -188,6 +188,8 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
   requisitionId,
   onBack,
   onUpdate,
+  readOnly = false,
+  candidateBasePath = "/ta/candidates",
 }) => {
   const params = useParams();
   const id = params?.id as string | undefined;
@@ -378,9 +380,9 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
       if (pathname) {
         q.set("returnTo", pathname);
       }
-      router.push(`/ta/candidates/${c.candidate_id}?${q.toString()}`);
+      router.push(`${candidateBasePath}/${c.candidate_id}?${q.toString()}`);
     },
-    [router, pathname],
+    [router, pathname, candidateBasePath],
   );
 
   const pipelineCountByStage = useMemo(() => {
@@ -2131,12 +2133,14 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
               Requisition Details
             </h1>
             <p style={{ fontSize: "13px", color: "var(--text-tertiary)" }}>
-              Manage and update resource requirements - HR/TA View
+              {readOnly
+                ? "Read-only requisition details"
+                : "Manage and update resource requirements - HR/TA View"}
             </p>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          {!isEditing ? (
+          {readOnly ? null : !isEditing ? (
             <button
               className="action-button primary"
               onClick={() => setIsEditing(true)}
@@ -2388,7 +2392,7 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
           }}
           resolveUserName={resolveUserName}
           setActiveTab={setActiveTab}
-          setIsEditing={setIsEditing}
+          setIsEditing={readOnly ? () => undefined : setIsEditing}
         />
       )}
 
@@ -2442,6 +2446,7 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
           <CandidatesWorkspaceTabPanel
             requisitionId={parseReqId(effectiveTicketId)!}
             ticket={ticket}
+            candidateBasePath={candidateBasePath}
           />
         )}
 

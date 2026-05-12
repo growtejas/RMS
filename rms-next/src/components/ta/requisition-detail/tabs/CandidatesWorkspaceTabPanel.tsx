@@ -226,6 +226,7 @@ type CandidateWorkspaceCardProps = {
   row: RequisitionWorkspaceCandidateRow;
   viewMode: ViewMode;
   returnTo: string;
+  candidateBasePath: string;
   onOpenWorkspace: (
     candidateId: number,
     applicationId: number,
@@ -237,6 +238,7 @@ const CandidateWorkspaceCard = memo(function CandidateWorkspaceCard({
   row,
   viewMode,
   returnTo,
+  candidateBasePath,
   onOpenWorkspace,
 }: CandidateWorkspaceCardProps) {
   const router = useRouter();
@@ -245,8 +247,8 @@ const CandidateWorkspaceCard = memo(function CandidateWorkspaceCard({
     const q = new URLSearchParams();
     q.set("application_id", String(row.application_id));
     if (returnTo) q.set("returnTo", returnTo);
-    router.push(`/ta/candidates/${row.candidate_id}?${q.toString()}`);
-  }, [router, row.application_id, row.candidate_id, returnTo]);
+    router.push(`${candidateBasePath}/${row.candidate_id}?${q.toString()}`);
+  }, [router, row.application_id, row.candidate_id, returnTo, candidateBasePath]);
 
   const copyEmail = useCallback(() => {
     try {
@@ -514,11 +516,13 @@ const CandidateWorkspaceCard = memo(function CandidateWorkspaceCard({
 export interface CandidatesWorkspaceTabPanelProps {
   requisitionId: number;
   ticket: TicketData;
+  candidateBasePath?: string;
 }
 
 export function CandidatesWorkspaceTabPanel({
   requisitionId,
   ticket,
+  candidateBasePath = "/ta/candidates",
 }: CandidatesWorkspaceTabPanelProps) {
   const router = useRouter();
   const pathname = usePathname() ?? "";
@@ -704,9 +708,9 @@ export function CandidatesWorkspaceTabPanel({
       q.set("application_id", String(applicationId));
       q.set("workspace", workspace);
       if (pathname) q.set("returnTo", pathname);
-      router.push(`/ta/candidates/${candidateId}?${q.toString()}`);
+      router.push(`${candidateBasePath}/${candidateId}?${q.toString()}`);
     },
-    [router, pathname],
+    [router, pathname, candidateBasePath],
   );
 
   const stages = data?.facets.stages ?? [];
@@ -1057,6 +1061,7 @@ export function CandidatesWorkspaceTabPanel({
                     row={row}
                     viewMode="list"
                     returnTo={pathname}
+                    candidateBasePath={candidateBasePath}
                     onOpenWorkspace={onOpenWorkspace}
                   />
                 </div>
@@ -1078,6 +1083,7 @@ export function CandidatesWorkspaceTabPanel({
                   row={row}
                   viewMode={viewMode}
                   returnTo={pathname}
+                  candidateBasePath={candidateBasePath}
                   onOpenWorkspace={onOpenWorkspace}
                 />
               ))}

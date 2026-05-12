@@ -4,6 +4,7 @@ import React from "react";
 import { User as UserIcon } from "lucide-react";
 
 import type { User } from "@/types/auth";
+import RoleSwitcherMenu from "@/components/shared/RoleSwitcherMenu";
 
 interface TAHeaderProps {
   title: string;
@@ -45,6 +46,7 @@ const TAHeader: React.FC<TAHeaderProps> = ({
             <div className="user-info">
               <div className="user-name">{displayName}</div>
               <div className="user-role">{displayRole}</div>
+              <RoleSwitcherMenu />
             </div>
 
             <button

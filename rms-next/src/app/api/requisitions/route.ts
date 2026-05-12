@@ -3,11 +3,11 @@ import { z } from "zod";
 
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
+import { getInterviewerScope } from "@/lib/auth/interviewer-scope";
 import { PAGE_SIZE_OPTIONS } from "@/lib/pagination/contract";
 import { paginatedJson } from "@/lib/pagination/server";
 import { parsePaginationParams } from "@/lib/pagination/zod";
 import {
-  getRequisitionDetailRead,
   listRequisitionsRead,
   listRequisitionsReadPaged,
 } from "@/lib/services/requisitions-read-service";
@@ -130,6 +130,7 @@ export async function GET(req: Request) {
       "HR",
       "Employee",
       "TA",
+      "Interviewer",
     );
     if (denied) {
       return denied;
@@ -168,7 +169,30 @@ export async function GET(req: Request) {
       url.searchParams.has("page") ||
       (Number.isFinite(limitNum) && PAGE_SIZE_NUMS.has(limitNum));
 
+    const interviewerScope = await getInterviewerScope(user);
     if (useCanonical) {
+      if (interviewerScope.interviewerOnly) {
+        const { page, limit } = parsePaginationParams(url);
+        const all = await listRequisitionsRead({
+          organizationId: user.organizationId,
+          roles: user.roles,
+          currentUserId: user.userId,
+          status,
+          raisedBy: Number.isFinite(raisedBy) ? raisedBy : null,
+          myAssignments,
+          assignedTo,
+          assignedTa: Number.isFinite(assignedTa) ? assignedTa : null,
+          page: 1,
+          pageSize: 500,
+        });
+        const scoped = all.filter((r) =>
+          interviewerScope.requisitionIds.has(r.req_id),
+        );
+        const total = scoped.length;
+        const start = (page - 1) * limit;
+        const items = scoped.slice(start, start + limit);
+        return paginatedJson(items, { page, limit, total });
+      }
       const { page, limit } = parsePaginationParams(url);
       const result = await listRequisitionsReadPaged({
         organizationId: user.organizationId,
@@ -216,7 +240,10 @@ export async function GET(req: Request) {
       page,
       pageSize,
     });
-    return NextResponse.json(data, {
+    const scopedData = interviewerScope.interviewerOnly
+      ? data.filter((r) => interviewerScope.requisitionIds.has(r.req_id))
+      : data;
+    return NextResponse.json(scopedData, {
       headers: {
         "X-RMS-Requisitions-Legacy":
           "Pass `page` and `limit` (25/50/100) to receive the canonical paginated envelope.",
