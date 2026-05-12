@@ -2,6 +2,7 @@
 
 import React from "react";
 import { User } from "lucide-react";
+import RoleSwitcherMenu from "@/components/shared/RoleSwitcherMenu";
 
 interface AdminHeaderProps {
   title: string;
@@ -35,6 +36,7 @@ const AdminHeader: React.FC<AdminHeaderProps> = ({
             <div className="user-info">
               <div className="user-name">{displayName}</div>
               <div className="user-role">{displayRole}</div>
+              <RoleSwitcherMenu />
             </div>
 
             <button

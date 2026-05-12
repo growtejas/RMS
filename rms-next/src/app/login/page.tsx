@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { Briefcase, Shield } from "lucide-react";
 
 import { useAuth } from "@/contexts/useAuth";
+import { getRoleHomePath, resolveActiveRole } from "@/lib/auth/role-routing";
 
 const notoSans = Noto_Sans({
   subsets: ["latin"],
@@ -257,20 +258,13 @@ export default function LoginPage() {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [error, setError] = useState("");
   const [forceShowForm, setForceShowForm] = useState(false);
-  const { login, isAuthenticated, user, isHydrating } = useAuth();
+  const { login, isAuthenticated, user, isHydrating, activeRole } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
     const id = window.setTimeout(() => setForceShowForm(true), 12_000);
     return () => window.clearTimeout(id);
   }, []);
-
-  const isOwner = user?.roles?.some((r) => r === "owner");
-  const isAdmin = user?.roles?.some((r) => r === "admin" || r === "owner");
-  const isHr = user?.roles?.some((r) => r === "hr");
-  const isTa = user?.roles?.some((r) => r === "ta");
-  const isManager = user?.roles?.some((r) => r === "manager");
-  const isInterviewer = user?.roles?.some((r) => r === "interviewer");
 
   useEffect(() => {
     if (isHydrating || !isAuthenticated || !user) {
@@ -280,29 +274,18 @@ export default function LoginPage() {
       router.replace("/access-request");
       return;
     }
-    const target = isOwner
-      ? "/owner"
-      : isAdmin
-        ? "/admin"
-        : isHr
-          ? "/hr"
-          : isTa
-            ? "/ta"
-            : isManager
-              ? "/manager"
-              : isInterviewer
-                ? "/interviewer/dashboard"
-                : "/dashboard";
+    const preferredRole =
+      activeRole ||
+      (typeof window !== "undefined"
+        ? window.localStorage.getItem("rms_active_role")
+        : null);
+    const nextRole = resolveActiveRole(user.roles, preferredRole);
+    const target = getRoleHomePath(nextRole);
     router.replace(target);
   }, [
-    isAdmin,
     isAuthenticated,
-    isHr,
     isHydrating,
-    isInterviewer,
-    isManager,
-    isOwner,
-    isTa,
+    activeRole,
     router,
     user,
   ]);
@@ -323,19 +306,14 @@ export default function LoginPage() {
     try {
       const loggedInUser = await login(username, password);
       const from = readFromQuery();
+      const preferredRole =
+        typeof window !== "undefined"
+          ? window.localStorage.getItem("rms_active_role")
+          : null;
+      const nextRole = resolveActiveRole(loggedInUser.roles, preferredRole);
       const defaultRedirect = needsAccessRequestOnboarding(loggedInUser)
         ? "/access-request"
-        : loggedInUser.roles.some(
-            (r) => r === "admin" || r === "owner",
-          )
-          ? "/admin"
-          : loggedInUser.roles.some((r) => r === "hr")
-            ? "/hr"
-            : loggedInUser.roles.some((r) => r === "ta")
-              ? "/ta"
-              : loggedInUser.roles.some((r) => r === "manager")
-                ? "/manager"
-                : "/dashboard";
+        : getRoleHomePath(nextRole);
       const target =
         from && from !== "/login" ? decodeURIComponent(from) : defaultRedirect;
       router.replace(target);

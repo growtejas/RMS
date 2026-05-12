@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
+import { getInterviewerScope } from "@/lib/auth/interviewer-scope";
 import { parseFastapiJsonBody } from "@/lib/http/parse-fastapi-body";
 import { estimateJsonBytes, withRequestPerf } from "@/lib/perf/request-perf";
 import {
@@ -32,7 +33,14 @@ export async function GET(req: Request, { params }: Ctx) {
       if (user instanceof NextResponse) {
         return user;
       }
-      const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager");
+      const denied = requireAnyRole(
+        user,
+        "TA",
+        "HR",
+        "Admin",
+        "Manager",
+        "Interviewer",
+      );
       if (denied) {
         return denied;
       }
@@ -40,6 +48,16 @@ export async function GET(req: Request, { params }: Ctx) {
       const candidateId = parseId(params.candidateId);
       if (candidateId instanceof NextResponse) {
         return candidateId;
+      }
+      const interviewerScope = await getInterviewerScope(user);
+      if (
+        interviewerScope.interviewerOnly &&
+        !interviewerScope.candidateIds.has(candidateId)
+      ) {
+        return NextResponse.json(
+          { detail: "Access denied for this candidate." },
+          { status: 403 },
+        );
       }
 
       const data = await getCandidateJson(candidateId, user.organizationId);

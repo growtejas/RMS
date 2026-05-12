@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { CalendarClock, LayoutDashboard, Menu, X } from "lucide-react";
+import { BarChart3, CalendarClock, LayoutDashboard, Menu, Briefcase, X } from "lucide-react";
 
 import { useAuth } from "@/contexts/useAuth";
 import Header from "@/components/Header";
@@ -15,6 +15,8 @@ import "@/styles/manager/manager-dashboard.css";
 const viewLabels: Record<string, string> = {
   dashboard: "Dashboard",
   interviews: "Interviews",
+  requisitions: "Requisitions",
+  reports: "Reports",
 };
 
 function InterviewerSidebar({
@@ -36,6 +38,16 @@ function InterviewerSidebar({
       href: "/interviewer/interviews",
       label: "Interviews",
       icon: <CalendarClock size={20} />,
+    },
+    {
+      href: "/interviewer/requisitions",
+      label: "Requisitions",
+      icon: <Briefcase size={20} />,
+    },
+    {
+      href: "/interviewer/reports",
+      label: "Reports",
+      icon: <BarChart3 size={20} />,
     },
   ];
 
@@ -93,6 +105,12 @@ export default function InterviewerShell({ children }: { children: React.ReactNo
   );
 
   const activeLabel = useMemo(() => {
+    if (pathname.startsWith("/interviewer/reports")) {
+      return viewLabels.reports!;
+    }
+    if (pathname.startsWith("/interviewer/requisitions")) {
+      return viewLabels.requisitions!;
+    }
     if (pathname.startsWith("/interviewer/interviews")) {
       return viewLabels.interviews!;
     }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
+import { getInterviewerScope } from "@/lib/auth/interviewer-scope";
 import { parseFastapiJsonBody } from "@/lib/http/parse-fastapi-body";
 import { paginatedJson } from "@/lib/pagination/server";
 import { parseListQueryParams } from "@/lib/pagination/zod";
@@ -44,7 +45,14 @@ export async function GET(req: Request) {
     if (user instanceof NextResponse) {
       return user;
     }
-    const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager");
+    const denied = requireAnyRole(
+      user,
+      "TA",
+      "HR",
+      "Admin",
+      "Manager",
+      "Interviewer",
+    );
     if (denied) {
       return denied;
     }
@@ -96,6 +104,12 @@ export async function GET(req: Request) {
       roleId,
       searchQuery: q,
     });
+    const interviewerScope = await getInterviewerScope(user);
+    const scopedItems = interviewerScope.interviewerOnly
+      ? result.items.filter((row) =>
+          interviewerScope.candidateIds.has(row.candidate_id),
+        )
+      : result.items;
 
     const headers = new Headers();
     if (requisitionId != null) {
@@ -110,11 +124,13 @@ export async function GET(req: Request) {
       );
     }
     return paginatedJson(
-      result.items,
+      scopedItems,
       {
         page: result.pagination.page,
         limit: result.pagination.limit,
-        total: result.pagination.total,
+        total: interviewerScope.interviewerOnly
+          ? scopedItems.length
+          : result.pagination.total,
       },
       { headers },
     );

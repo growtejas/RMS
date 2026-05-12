@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { referenceWriteCatch } from "@/lib/api/reference-write-errors";
 import { requireAnyRole, requireBearerUser } from "@/lib/auth/api-guard";
+import { getInterviewerScope } from "@/lib/auth/interviewer-scope";
 import { withRequestPerf } from "@/lib/perf/request-perf";
 import {
   countRequisitionStatusHistory,
@@ -45,6 +46,7 @@ export async function GET(req: Request, { params }: Ctx) {
           "HR",
           "Employee",
           "TA",
+          "Interviewer",
         );
         if (denied) {
           return denied;
@@ -53,6 +55,16 @@ export async function GET(req: Request, { params }: Ctx) {
         const reqId = parseReqId(params);
         if (reqId instanceof NextResponse) {
           return reqId;
+        }
+        const interviewerScope = await getInterviewerScope(user);
+        if (
+          interviewerScope.interviewerOnly &&
+          !interviewerScope.requisitionIds.has(reqId)
+        ) {
+          return NextResponse.json(
+            { detail: "Access denied for this requisition." },
+            { status: 403 },
+          );
         }
 
         const url = new URL(req.url);

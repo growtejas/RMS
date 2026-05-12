@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 
@@ -18,6 +18,8 @@ export function InterviewerInterviewCard({
 }) {
   const time = formatDateTime(interview);
   const jobTitle = interview.role_position?.trim() || "—";
+  const requisitionLabel =
+    interview.requisition_id != null ? `REQ-${interview.requisition_id}` : "REQ-—";
 
   return (
     <article
@@ -34,6 +36,7 @@ export function InterviewerInterviewCard({
             {interview.candidate_name ?? `Candidate #${interview.candidate_id}`}
           </Link>
           <div className="mt-1 text-xs text-text-muted">{jobTitle}</div>
+          <div className="mt-0.5 text-xs text-text-muted">{requisitionLabel}</div>
           <div className="mt-0.5 text-xs font-medium text-text">
             {roundTitle(interview)}
           </div>
