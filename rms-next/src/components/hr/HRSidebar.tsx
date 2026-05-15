@@ -10,6 +10,7 @@ import {
   Users,
   Award,
   FileText,
+  BarChart3,
   Menu,
   X,
 } from "lucide-react";
@@ -56,6 +57,11 @@ const HrSidebar: React.FC<HrSidebarProps> = ({
       href: "/hr/requisitions",
       label: "Requisition",
       icon: <FileText size={20} />,
+    },
+    {
+      href: "/hr/reports",
+      label: "Reports",
+      icon: <BarChart3 size={20} />,
     },
     { href: "/hr/skills", label: "Skills", icon: <Award size={20} /> },
   ];

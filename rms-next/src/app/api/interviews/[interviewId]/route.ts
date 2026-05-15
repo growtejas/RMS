@@ -9,6 +9,7 @@ import {
   deleteInterviewJson,
   getInterviewerInterviewDetail,
   getInterviewJson,
+  patchInterviewAsInterviewerJson,
   patchInterviewAsManagerJson,
   patchInterviewJson,
 } from "@/lib/services/interviews-service";
@@ -39,18 +40,20 @@ export async function GET(req: Request, { params }: Ctx) {
       return interviewId;
     }
 
+    if (rolesMatchAny(user.roles, ["Interviewer"])) {
+      const detail = await getInterviewerInterviewDetail(interviewId, user);
+      if (!detail) {
+        // If the user is also staff but not assigned as panelist on this interview,
+        // fall through to staff shape instead of hard 404.
+      } else {
+        return envelopeOk(detail);
+      }
+    }
+
     const staffRoles = ["TA", "HR", "Admin", "Manager", "Owner"] as const;
     if (rolesMatchAny(user.roles, staffRoles)) {
       const interview = await getInterviewJson(interviewId, user.organizationId);
       return envelopeOk({ interview });
-    }
-
-    if (rolesMatchAny(user.roles, ["Interviewer"])) {
-      const detail = await getInterviewerInterviewDetail(interviewId, user);
-      if (!detail) {
-        return envelopeFail("Interview not found", 404);
-      }
-      return envelopeOk(detail);
     }
 
     return NextResponse.json(
@@ -69,7 +72,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
     if (user instanceof NextResponse) {
       return user;
     }
-    const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager");
+    const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager", "Interviewer");
     if (denied) {
       return denied;
     }
@@ -86,6 +89,15 @@ export async function PATCH(req: Request, { params }: Ctx) {
         typeof errBody.detail === "string" ? errBody.detail : "Invalid request body",
         422,
       );
+    }
+
+    if (rolesMatchAny(user.roles, ["Interviewer"])) {
+      const data = await patchInterviewAsInterviewerJson(
+        interviewId,
+        parsed.data,
+        user,
+      );
+      return envelopeOk(data);
     }
 
     const isManagerOnly =

@@ -18,9 +18,8 @@ import {
   Phone,
   Trash2,
 } from "lucide-react";
-import type { Candidate, Interview } from "@/lib/api/candidateApi";
+import type { Candidate } from "@/lib/api/candidateApi";
 import {
-  updateInterview,
   deleteInterview,
   deleteCandidate,
   getCandidateWithApplication,
@@ -121,11 +120,8 @@ export default function CandidateDetailView({
 
   const [scheduleWarnings, setScheduleWarnings] = useState<string[]>([]);
 
-  // Inline interview update
+  // Inline interviewer review view
   const [editingInterview, setEditingInterview] = useState<number | null>(null);
-  const [editStatus, setEditStatus] = useState<string>("");
-  const [editResult, setEditResult] = useState<string>("");
-  const [editFeedback, setEditFeedback] = useState<string>("");
 
   const [evaluationLoading, setEvaluationLoading] = useState(false);
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
@@ -463,24 +459,6 @@ export default function CandidateDetailView({
       );
     } finally {
       setOfferUploading(false);
-    }
-  };
-
-  // ---- Update interview result ----
-  const handleUpdateInterview = async (interview: Interview) => {
-    setError(null);
-    try {
-      await updateInterview(interview.id, {
-        status: editStatus,
-        result: editResult ? editResult : undefined,
-        feedback: editFeedback || undefined,
-      });
-      setEditingInterview(null);
-      await refresh();
-    } catch (err: unknown) {
-      setError(
-        getCandidateActionErrorMessage(err, "Failed to update interview"),
-      );
     }
   };
 
@@ -1533,16 +1511,9 @@ export default function CandidateDetailView({
                                   }}
                                   onClick={() => {
                                     setEditingInterview(iv.id);
-                                    setEditStatus(normalizeInterviewStatus(iv.status));
-                                    setEditResult(
-                                      iv.result
-                                        ? normalizeInterviewStatus(iv.result)
-                                        : "",
-                                    );
-                                    setEditFeedback(iv.feedback ?? "");
                                   }}
                                 >
-                                  Update Result
+                                  View Review
                                 </button>
                                 <button
                                   type="button"
@@ -1558,66 +1529,17 @@ export default function CandidateDetailView({
                               </div>
                             ) : (
                               <div className="mt-2.5 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    gap: "10px",
-                                    marginBottom: "8px",
-                                    flexWrap: "wrap",
-                                  }}
-                                >
-                                  <select
-                                    value={editStatus}
-                                    onChange={(e) =>
-                                      setEditStatus(e.target.value)
-                                    }
-                                    style={{
-                                      padding: "6px 10px",
-                                      borderRadius: "6px",
-                                      border: "1px solid var(--border-subtle)",
-                                      fontSize: "12px",
-                                    }}
-                                  >
-                                    <option value="SCHEDULED">Scheduled</option>
-                                    <option value="COMPLETED">Completed</option>
-                                    <option value="CANCELLED">Cancelled</option>
-                                    <option value="NO_SHOW">No show</option>
-                                  </select>
-                                  <select
-                                    value={editResult}
-                                    onChange={(e) =>
-                                      setEditResult(e.target.value)
-                                    }
-                                    style={{
-                                      padding: "6px 10px",
-                                      borderRadius: "6px",
-                                      border: "1px solid var(--border-subtle)",
-                                      fontSize: "12px",
-                                    }}
-                                  >
-                                    <option value="">No Result</option>
-                                    <option value="PASS">Pass</option>
-                                    <option value="FAIL">Fail</option>
-                                    <option value="HOLD">Hold</option>
-                                  </select>
+                                <div className="mb-2 text-xs font-semibold text-slate-700">
+                                  Interviewer result:{" "}
+                                  <span className="uppercase">
+                                    {iv.result ?? "Not submitted"}
+                                  </span>
                                 </div>
-                                <textarea
-                                  placeholder="Feedback..."
-                                  value={editFeedback}
-                                  onChange={(e) =>
-                                    setEditFeedback(e.target.value)
-                                  }
-                                  rows={2}
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 10px",
-                                    borderRadius: "6px",
-                                    border: "1px solid var(--border-subtle)",
-                                    fontSize: "12px",
-                                    resize: "vertical",
-                                    marginBottom: "8px",
-                                  }}
-                                />
+                                <div className="rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-600">
+                                  {iv.feedback?.trim()
+                                    ? iv.feedback
+                                    : "No interviewer feedback submitted yet."}
+                                </div>
                                 <div
                                   style={{
                                     display: "flex",
@@ -1626,6 +1548,7 @@ export default function CandidateDetailView({
                                   }}
                                 >
                                   <button
+                                    type="button"
                                     className="action-button"
                                     style={{
                                       fontSize: "11px",
@@ -1633,17 +1556,7 @@ export default function CandidateDetailView({
                                     }}
                                     onClick={() => setEditingInterview(null)}
                                   >
-                                    Cancel
-                                  </button>
-                                  <button
-                                    className="action-button primary"
-                                    style={{
-                                      fontSize: "11px",
-                                      padding: "4px 10px",
-                                    }}
-                                    onClick={() => handleUpdateInterview(iv)}
-                                  >
-                                    Save
+                                    Close
                                   </button>
                                 </div>
                               </div>

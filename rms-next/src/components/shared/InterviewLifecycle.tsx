@@ -286,7 +286,7 @@ export default function InterviewLifecycle({
                   <RoundBox
                     round={round}
                     isLatest={round.interview_id === latestRoundId}
-                    canWrite={canWrite}
+                    canWrite={false}
                     isBusy={resultBusyId === round.interview_id}
                     wide
                     readOnly={false}

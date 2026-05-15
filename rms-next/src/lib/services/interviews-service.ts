@@ -709,6 +709,13 @@ export async function patchInterviewJson(
   patch: InterviewPatchInput,
   user: ApiUser,
 ) {
+  if (patch.status !== undefined || patch.result !== undefined) {
+    throw new HttpError(
+      403,
+      "Only assigned interviewers can update interview status or result",
+    );
+  }
+
   const existing = await repo.selectInterviewById(
     interviewId,
     user.organizationId,
@@ -972,6 +979,77 @@ export async function patchInterviewJson(
     }
     throw e;
   }
+}
+
+export async function patchInterviewAsInterviewerJson(
+  interviewId: number,
+  patch: InterviewPatchInput,
+  user: ApiUser,
+) {
+  const allowed = await ivRepo.userIsPanelistForInterview({
+    organizationId: user.organizationId,
+    userId: user.userId,
+    interviewId,
+  });
+  if (!allowed) {
+    throw new HttpError(404, "Interview not found");
+  }
+
+  const existing = await repo.selectInterviewById(interviewId, user.organizationId);
+  if (!existing) {
+    throw new HttpError(404, "Interview not found");
+  }
+
+  const triesDisallowed =
+    patch.result !== undefined ||
+    patch.feedback !== undefined ||
+    patch.scheduled_at !== undefined ||
+    patch.end_time !== undefined ||
+    patch.timezone !== undefined ||
+    patch.meeting_link !== undefined ||
+    patch.location !== undefined ||
+    patch.round_name !== undefined ||
+    patch.round_type !== undefined ||
+    patch.interview_mode !== undefined ||
+    patch.interviewer_name !== undefined ||
+    patch.interviewer_ids !== undefined ||
+    patch.reschedule_reason !== undefined;
+  if (triesDisallowed) {
+    throw new HttpError(
+      403,
+      "Interviewer can only update interview status and notes",
+    );
+  }
+  if (patch.status === undefined && patch.notes === undefined) {
+    throw new HttpError(422, "Provide status or notes to update");
+  }
+
+  const db = getDb();
+  const updated = await db.transaction(async (tx) => {
+    const row = await ivRepo.updateInterviewFull(tx, interviewId, {
+      status: patch.status,
+      notes: patch.notes === undefined ? undefined : patch.notes,
+      updatedBy: user.userId,
+    });
+    if (!row) {
+      throw new HttpError(404, "Interview not found");
+    }
+    await repo.insertInterviewAuditUpdate({
+      interviewId,
+      performedBy: user.userId,
+      oldValue: `status=${existing.status}, notes=${existing.notes ?? ""}`,
+      newValue: `status=${row.status}, notes=${row.notes ?? ""}`,
+    });
+    return row;
+  });
+
+  const panelMap = await attachPanelistsMap([interviewId]);
+  return {
+    interview: interviewToJson(updated, {
+      panelists: panelMap.get(interviewId) ?? [],
+    }),
+    warnings: [] as string[],
+  };
 }
 
 export async function patchInterviewAsManagerJson(

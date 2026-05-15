@@ -6,7 +6,10 @@ import { useParams } from "next/navigation";
 
 import {
   fetchInterviewerInterviewDetail,
+  submitInterviewResultApi,
   submitInterviewerFeedback,
+  updateInterview,
+  type LifecycleResult,
   type InterviewerInterviewDetailResponse,
   type InterviewerRecommendation,
 } from "@/lib/api/candidateApi";
@@ -64,6 +67,15 @@ export default function InterviewerInterviewDetailPage() {
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [resultChoice, setResultChoice] =
+    useState<Exclude<LifecycleResult, "pending">>("passed");
+  const [resultSubmitting, setResultSubmitting] = useState(false);
+  const [resultError, setResultError] = useState<string | null>(null);
+  const [statusChoice, setStatusChoice] = useState<
+    "SCHEDULED" | "COMPLETED" | "CANCELLED" | "NO_SHOW"
+  >("SCHEDULED");
+  const [statusSubmitting, setStatusSubmitting] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!Number.isFinite(interviewId)) {
@@ -98,6 +110,17 @@ export default function InterviewerInterviewDetailPage() {
 
   const cancelled = iv ? isCancelled(iv.status) : false;
   const hasSubmitted = Boolean(detail?.my_scorecard);
+  const hasResult = Boolean(iv?.result && String(iv.result).trim() !== "");
+
+  function normalizeExistingResultLabel(raw: string | null | undefined): string {
+    const v = String(raw ?? "")
+      .trim()
+      .toUpperCase();
+    if (v === "PASS") return "Pass";
+    if (v === "FAIL") return "Fail";
+    if (v === "HOLD") return "Hold";
+    return v || "Not set";
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -116,6 +139,36 @@ export default function InterviewerInterviewDetailPage() {
       setSubmitError(err instanceof Error ? err.message : "Submit failed");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function onSubmitResult(e: React.FormEvent) {
+    e.preventDefault();
+    if (!Number.isFinite(interviewId) || cancelled || hasResult) return;
+    setResultSubmitting(true);
+    setResultError(null);
+    try {
+      await submitInterviewResultApi(interviewId, resultChoice);
+      await load();
+    } catch (err: unknown) {
+      setResultError(err instanceof Error ? err.message : "Submit failed");
+    } finally {
+      setResultSubmitting(false);
+    }
+  }
+
+  async function onSubmitStatus(e: React.FormEvent) {
+    e.preventDefault();
+    if (!Number.isFinite(interviewId)) return;
+    setStatusSubmitting(true);
+    setStatusError(null);
+    try {
+      await updateInterview(interviewId, { status: statusChoice });
+      await load();
+    } catch (err: unknown) {
+      setStatusError(err instanceof Error ? err.message : "Status update failed");
+    } finally {
+      setStatusSubmitting(false);
     }
   }
 
@@ -235,6 +288,98 @@ export default function InterviewerInterviewDetailPage() {
             </dd>
           </div>
         </dl>
+      </section>
+
+      <section className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+        <h2 className="text-base font-bold text-text">Interview status</h2>
+        <p className="mt-2 text-xs text-text-muted">
+          Current: <span className="font-semibold text-text">{iv.status}</span>
+        </p>
+        <form className="mt-3 space-y-3" onSubmit={onSubmitStatus}>
+          <div>
+            <label className="block text-xs font-semibold text-text-muted" htmlFor="status">
+              Update status
+            </label>
+            <select
+              id="status"
+              className="mt-1 w-full rounded-lg border border-border bg-white px-3 py-2 text-sm"
+              value={statusChoice}
+              onChange={(e) =>
+                setStatusChoice(
+                  e.target.value as "SCHEDULED" | "COMPLETED" | "CANCELLED" | "NO_SHOW",
+                )
+              }
+            >
+              <option value="SCHEDULED">Scheduled</option>
+              <option value="COMPLETED">Completed</option>
+              <option value="CANCELLED">Cancelled</option>
+              <option value="NO_SHOW">No Show</option>
+            </select>
+          </div>
+          {statusError ? (
+            <p className="text-sm text-red-700" role="alert">
+              {statusError}
+            </p>
+          ) : null}
+          <button
+            type="submit"
+            disabled={statusSubmitting}
+            className="rounded-xl bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-neutral-800 disabled:opacity-60"
+          >
+            {statusSubmitting ? "Saving…" : "Update status"}
+          </button>
+        </form>
+      </section>
+
+      <section className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+        <h2 className="text-base font-bold text-text">Interview outcome</h2>
+        {cancelled ? (
+          <p className="mt-3 text-sm text-amber-800">
+            This interview was cancelled; result cannot be submitted.
+          </p>
+        ) : hasResult ? (
+          <div className="mt-4 space-y-2 rounded-xl border border-border bg-bg p-4 text-sm">
+            <p className="font-semibold text-text">Submitted</p>
+            <p>
+              <span className="font-semibold">Result: </span>
+              {normalizeExistingResultLabel(iv.result)}
+            </p>
+          </div>
+        ) : (
+          <form className="mt-4 space-y-3" onSubmit={onSubmitResult}>
+            <div>
+              <label className="block text-xs font-semibold text-text-muted" htmlFor="result">
+                Result
+              </label>
+              <select
+                id="result"
+                className="mt-1 w-full rounded-lg border border-border bg-white px-3 py-2 text-sm"
+                value={resultChoice}
+                onChange={(e) =>
+                  setResultChoice(
+                    e.target.value as Exclude<LifecycleResult, "pending">,
+                  )
+                }
+              >
+                <option value="passed">Pass</option>
+                <option value="failed">Fail</option>
+                <option value="hold">Hold</option>
+              </select>
+            </div>
+            {resultError ? (
+              <p className="text-sm text-red-700" role="alert">
+                {resultError}
+              </p>
+            ) : null}
+            <button
+              type="submit"
+              disabled={resultSubmitting}
+              className="rounded-xl bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-neutral-800 disabled:opacity-60"
+            >
+              {resultSubmitting ? "Submitting…" : "Submit result"}
+            </button>
+          </form>
+        )}
       </section>
 
       <section className="rounded-2xl border border-border bg-surface p-5 shadow-sm">

@@ -196,6 +196,7 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
   const router = useRouter();
   const pathname = usePathname();
   const { user } = useAuth();
+  const isInterviewerRoute = pathname?.startsWith("/interviewer/") ?? false;
   const effectiveTicketId = requisitionId ?? id;
   const getTodayDate = () =>
     new Date().toISOString().split("T")[0] ?? new Date().toISOString();
@@ -223,6 +224,7 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
   // TA can edit items explicitly assigned to them OR,
   // if they are the header-level TA and the item has no item-level TA yet.
   const canEditItem = (item: RequisitionItem): boolean => {
+    if (readOnly) return false;
     if (!currentUserId) return false;
     // HR/Admin can edit any item
     if (isHRUser) return true;
@@ -2007,7 +2009,12 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
     { id: "timeline" as const, label: "Timeline", icon: <History size={16} /> },
   ];
 
+  const visibleTabs = isInterviewerRoute
+    ? tabs.filter((tab) => tab.id !== "shortlisted" && tab.id !== "timeline")
+    : tabs;
+
   const pipelineBindings: RequisitionPipelineBindings = {
+    readOnly,
     activeTab,
     ticket,
     canEditItem,
@@ -2349,7 +2356,7 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
           borderRadius: "12px",
         }}
       >
-        {tabs.map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
@@ -2391,13 +2398,23 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
             totalItems: completionStats.totalItems,
           }}
           resolveUserName={resolveUserName}
-          setActiveTab={setActiveTab}
+          setActiveTab={(tab) => {
+            if (
+              isInterviewerRoute &&
+              (tab === "shortlisted" || tab === "timeline")
+            ) {
+              setActiveTab("overview");
+              return;
+            }
+            setActiveTab(tab);
+          }}
           setIsEditing={readOnly ? () => undefined : setIsEditing}
         />
       )}
 
       {activeTab === "items" && (
         <ItemsTab
+          readOnly={readOnly}
           ticket={ticket}
           canAssignResources={canAssignResources}
           canEditItem={canEditItem}
@@ -2427,11 +2444,11 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
       )}
 
       {(activeTab === "ats" ||
-        activeTab === "shortlisted" ||
+        (!isInterviewerRoute && activeTab === "shortlisted") ||
         activeTab === "interviews") && (
         <CandidatePipelineChrome bindings={pipelineBindings}>
           {activeTab === "ats" && <AtsTabPanel bindings={pipelineBindings} />}
-          {activeTab === "shortlisted" && (
+          {!isInterviewerRoute && activeTab === "shortlisted" && (
             <ShortlistedTabPanel bindings={pipelineBindings} />
           )}
           {activeTab === "interviews" && (
@@ -2450,7 +2467,7 @@ const RequisitionDetailRoot: React.FC<RequisitionDetailsProps> = ({
           />
         )}
 
-      {activeTab === "timeline" && (
+      {!isInterviewerRoute && activeTab === "timeline" && (
         <TimelineTab
           timelineWithStatus={timelineWithStatus}
           isEditing={isEditing}

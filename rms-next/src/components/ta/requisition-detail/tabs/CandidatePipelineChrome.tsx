@@ -37,7 +37,8 @@ export function CandidatePipelineChrome({ bindings, children }: CandidatePipelin
             : "Interviewing-stage roster and scheduled rounds for this requisition."}
       </p>
     </div>
-    {bindings.ticket.items.some((it) => bindings.canEditItem(it)) && (
+    {!bindings.readOnly &&
+      bindings.ticket.items.some((it) => bindings.canEditItem(it)) && (
       <button
         className="action-button primary"
         style={{ display: "flex", alignItems: "center", gap: "6px" }}
@@ -60,7 +61,7 @@ export function CandidatePipelineChrome({ bindings, children }: CandidatePipelin
   </div>
 
   {/* Add Candidate Form */}
-  {bindings.showAddCandidate && (
+  {!bindings.readOnly && bindings.showAddCandidate && (
     <form
       onSubmit={bindings.handleAddCandidate}
       style={{

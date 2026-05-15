@@ -465,10 +465,24 @@ export async function submitInterviewResult(params: {
   if (!row) {
     throw new HttpError(404, "Interview not found");
   }
+  const panelistAllowed = await ivRepo.userIsPanelistForInterview({
+    organizationId: user.organizationId,
+    userId: user.userId,
+    interviewId,
+  });
+  if (!panelistAllowed) {
+    throw new HttpError(404, "Interview not found");
+  }
   if (String(row.status).toUpperCase() !== "COMPLETED") {
     throw new HttpError(
       409,
       "Result can only be submitted on a completed interview",
+    );
+  }
+  if (row.result != null && String(row.result).trim() !== "") {
+    throw new HttpError(
+      409,
+      "Interview result is already submitted and cannot be changed",
     );
   }
 

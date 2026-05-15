@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, ne, notInArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, ne, notInArray } from "drizzle-orm";
 
 import type { ApiUser } from "@/lib/auth/api-guard";
 import {
@@ -6,7 +6,14 @@ import {
   assertTaOwnershipForRequisitionItem,
 } from "@/lib/auth/ta-ownership";
 import { getDb } from "@/lib/db";
-import { auditLog, candidates, interviews, requisitions, requisitionItems } from "@/lib/db/schema";
+import {
+  auditLog,
+  candidates,
+  interviews,
+  interviewScorecards,
+  requisitions,
+  requisitionItems,
+} from "@/lib/db/schema";
 import { HttpError } from "@/lib/http/http-error";
 import * as repo from "@/lib/repositories/candidates-repo";
 import { findOrCreatePersonTx } from "@/lib/repositories/candidate-persons-repo";
@@ -55,7 +62,33 @@ const VALID_STAGE_TRANSITIONS: Record<string, string[]> = {
   Rejected: ["Sourced"],
 };
 
-function interviewToJson(row: repo.InterviewRow) {
+function isInterviewLockActive(
+  status: string | null | undefined,
+  result: string | null | undefined,
+): boolean {
+  const normalizedStatus = String(status ?? "")
+    .trim()
+    .toUpperCase();
+  const normalizedResult = String(result ?? "")
+    .trim()
+    .toUpperCase();
+  if (normalizedResult === "PASS" || normalizedResult === "FAIL" || normalizedResult === "HOLD") {
+    return false;
+  }
+  return (
+    normalizedStatus === "SCHEDULED" ||
+    normalizedStatus === "RESCHEDULED" ||
+    normalizedStatus === "COMPLETED" ||
+    normalizedStatus === "NO_SHOW"
+  );
+}
+
+function interviewToJson(
+  row: repo.InterviewRow,
+  feedbackByInterviewId?: Map<number, string>,
+) {
+  const normalizedDbFeedback = row.feedback?.trim() || null;
+  const scorecardFeedback = feedbackByInterviewId?.get(row.id) ?? null;
   return {
     id: row.id,
     candidate_id: row.candidateId,
@@ -73,7 +106,7 @@ function interviewToJson(row: repo.InterviewRow) {
     notes: row.notes ?? null,
     status: row.status,
     result: row.result ?? null,
-    feedback: row.feedback ?? null,
+    feedback: normalizedDbFeedback ?? scorecardFeedback,
     conducted_by: row.conductedBy ?? null,
     created_by: row.createdBy ?? null,
     updated_by: row.updatedBy ?? null,
@@ -83,7 +116,11 @@ function interviewToJson(row: repo.InterviewRow) {
   };
 }
 
-function candidateToJson(row: repo.CandidateRow, ivs: repo.InterviewRow[]) {
+function candidateToJson(
+  row: repo.CandidateRow,
+  ivs: repo.InterviewRow[],
+  feedbackByInterviewId?: Map<number, string>,
+) {
   return {
     candidate_id: row.candidateId,
     person_id: row.personId,
@@ -107,8 +144,65 @@ function candidateToJson(row: repo.CandidateRow, ivs: repo.InterviewRow[]) {
     added_by: row.addedBy ?? null,
     created_at: row.createdAt?.toISOString() ?? null,
     updated_at: row.updatedAt?.toISOString() ?? null,
-    interviews: ivs.map(interviewToJson),
+    interviews: ivs.map((iv) => interviewToJson(iv, feedbackByInterviewId)),
   };
+}
+
+function extractScorecardText(scores: unknown, notes: string | null): string | null {
+  const parts: string[] = [];
+  if (scores && typeof scores === "object") {
+    const obj = scores as Record<string, unknown>;
+    const rec =
+      typeof obj.recommendation === "string" ? obj.recommendation.trim() : "";
+    const strengths =
+      typeof obj.strengths === "string" ? obj.strengths.trim() : "";
+    const weaknesses =
+      typeof obj.weaknesses === "string" ? obj.weaknesses.trim() : "";
+    if (rec) {
+      parts.push(`Recommendation: ${rec.replace(/_/g, " ")}`);
+    }
+    if (strengths) {
+      parts.push(`Strengths: ${strengths}`);
+    }
+    if (weaknesses) {
+      parts.push(`Weaknesses: ${weaknesses}`);
+    }
+  }
+  const noteText = notes?.trim() ?? "";
+  if (noteText) {
+    parts.push(`Notes: ${noteText}`);
+  }
+  return parts.length ? parts.join(" | ") : null;
+}
+
+async function getInterviewFeedbackMap(
+  interviewIds: number[],
+): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  if (interviewIds.length === 0) {
+    return out;
+  }
+  const db = getDb();
+  const rows = await db
+    .select({
+      interviewId: interviewScorecards.interviewId,
+      scores: interviewScorecards.scores,
+      notes: interviewScorecards.notes,
+      submittedAt: interviewScorecards.submittedAt,
+    })
+    .from(interviewScorecards)
+    .where(inArray(interviewScorecards.interviewId, interviewIds))
+    .orderBy(asc(interviewScorecards.interviewId), asc(interviewScorecards.submittedAt));
+
+  for (const row of rows) {
+    const text = extractScorecardText(row.scores, row.notes ?? null);
+    if (!text) {
+      continue;
+    }
+    const prev = out.get(row.interviewId);
+    out.set(row.interviewId, prev ? `${prev}\n${text}` : text);
+  }
+  return out;
 }
 
 function buildCandidateEmbeddingSourceText(input: {
@@ -235,6 +329,7 @@ export async function listCandidatesJson(params: {
   const rows = await repo.selectCandidatesFiltered(params);
   const ids = rows.map((r) => r.candidateId);
   const ivs = await repo.selectInterviewsForCandidates(ids);
+  const feedbackByInterviewId = await getInterviewFeedbackMap(ivs.map((iv) => iv.id));
   const by = new Map<number, repo.InterviewRow[]>();
   for (const i of ivs) {
     const arr = by.get(i.candidateId) ?? [];
@@ -250,7 +345,11 @@ export async function listCandidatesJson(params: {
       : null;
 
   return rows.map((r) => {
-    const base = candidateToJson(r, by.get(r.candidateId) ?? []);
+    const base = candidateToJson(
+      r,
+      by.get(r.candidateId) ?? [],
+      feedbackByInterviewId,
+    );
     if (!cieById) {
       return base;
     }
@@ -320,6 +419,7 @@ export async function listCandidatesPaged(params: {
         });
   const ids = rows.map((r) => r.candidateId);
   const ivs = await repo.selectInterviewsForCandidates(ids);
+  const feedbackByInterviewId = await getInterviewFeedbackMap(ivs.map((iv) => iv.id));
   const by = new Map<number, repo.InterviewRow[]>();
   for (const i of ivs) {
     const arr = by.get(i.candidateId) ?? [];
@@ -334,7 +434,11 @@ export async function listCandidatesPaged(params: {
         )
       : null;
   const items = rows.map((r) => {
-    const base = candidateToJson(r, by.get(r.candidateId) ?? []);
+    const base = candidateToJson(
+      r,
+      by.get(r.candidateId) ?? [],
+      feedbackByInterviewId,
+    );
     if (!cieById) return base;
     const s = cieById.get(r.candidateId);
     return {
@@ -420,6 +524,7 @@ export async function listCieCandidatesPaged(params: {
         });
   const ids = rowList.map((r) => r.candidateId);
   const ivs = await repo.selectInterviewsForCandidates(ids);
+  const feedbackByInterviewId = await getInterviewFeedbackMap(ivs.map((iv) => iv.id));
   const by = new Map<number, repo.InterviewRow[]>();
   for (const i of ivs) {
     const arr = by.get(i.candidateId) ?? [];
@@ -431,7 +536,11 @@ export async function listCieCandidatesPaged(params: {
     ids,
   );
   const items = rowList.map((r) => {
-    const base = candidateToJson(r, by.get(r.candidateId) ?? []);
+    const base = candidateToJson(
+      r,
+      by.get(r.candidateId) ?? [],
+      feedbackByInterviewId,
+    );
     const s = cieById.get(r.candidateId);
     return {
       ...base,
@@ -496,6 +605,7 @@ export async function getCandidateJson(
     throw new HttpError(404, "Candidate not found");
   }
   const ivs = await repo.selectInterviewsForCandidate(candidateId);
+  const feedbackByInterviewId = await getInterviewFeedbackMap(ivs.map((iv) => iv.id));
   let resume_structured: {
     schema_version: number;
     extractor: string;
@@ -521,7 +631,7 @@ export async function getCandidateJson(
   const latestParsed = await cieRepo.selectLatestParsedRow(candidateId, organizationId);
 
   return {
-    ...candidateToJson(row, ivs),
+    ...candidateToJson(row, ivs, feedbackByInterviewId),
     resume_parse: resumeParseCacheToApiRecord(row.resumeParseCache),
     resume_structured,
     cie_intel: {
@@ -962,6 +1072,20 @@ export async function patchCandidateStageJson(
       throw new HttpError(
         400,
         `Cannot move from '${oldStage}' to '${newStage}'. Allowed: ${allowed}`,
+      );
+    }
+
+    const interviewRows = await tx
+      .select({
+        status: interviews.status,
+        result: interviews.result,
+      })
+      .from(interviews)
+      .where(eq(interviews.candidateId, candidateId));
+    if (interviewRows.some((iv) => isInterviewLockActive(iv.status, iv.result))) {
+      throw new HttpError(
+        409,
+        "Candidate is locked in pipeline until the assigned interviewer submits an interview result.",
       );
     }
 

@@ -37,6 +37,9 @@ export default function HrShell({ children }: { children: React.ReactNode }) {
     if (pathname.startsWith("/hr/requisitions")) {
       return "Requisitions";
     }
+    if (pathname.startsWith("/hr/reports")) {
+      return "Reports";
+    }
     if (pathname.startsWith("/hr/skills")) {
       return "Skills";
     }

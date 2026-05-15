@@ -29,6 +29,7 @@ import {
 } from "@/components/ta/requisition-detail/utils";
 
 export type ItemsTabProps = {
+  readOnly: boolean;
   ticket: TicketData;
   canAssignResources: boolean;
   canEditItem: (item: RequisitionItem) => boolean;
@@ -64,6 +65,7 @@ export type ItemsTabProps = {
 };
 
 export function ItemsTab({
+  readOnly,
   ticket,
   canAssignResources,
   canEditItem,
@@ -754,7 +756,7 @@ export function ItemsTab({
                       <span style={{ fontSize: "13px", fontWeight: 600 }}>
                         Candidates ({itemCandidates.length})
                       </span>
-                      {canEditItem(item) && (
+                      {!readOnly && canEditItem(item) && (
                         <button
                           className="action-button primary"
                           style={{

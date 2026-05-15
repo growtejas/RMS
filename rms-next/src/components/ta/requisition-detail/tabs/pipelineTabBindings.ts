@@ -32,6 +32,7 @@ export type AtsBoardScoreMap = Map<
 
 /** Props bag passed from RequisitionDetail orchestrator into pipeline chrome + tab panels. */
 export type RequisitionPipelineBindings = {
+  readOnly: boolean;
   activeTab: RequisitionDetailTabId;
   ticket: TicketData;
   canEditItem: (item: RequisitionItem) => boolean;

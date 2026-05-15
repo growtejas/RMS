@@ -171,7 +171,6 @@ export default function ManagerInterviewsPage() {
   const [candidateLoading, setCandidateLoading] = useState(false);
 
   const [updateIv, setUpdateIv] = useState<ManagerInterview | null>(null);
-  const [updateResult, setUpdateResult] = useState<"PASS" | "FAIL" | "HOLD" | "">("");
   const [updateNotes, setUpdateNotes] = useState("");
   const [updateFeedback, setUpdateFeedback] = useState("");
   const [updating, setUpdating] = useState(false);
@@ -198,7 +197,6 @@ export default function ManagerInterviewsPage() {
 
   const openUpdate = (iv: ManagerInterview) => {
     setUpdateIv(iv);
-    setUpdateResult((iv.result as "PASS" | "FAIL" | "HOLD" | null) ?? "");
     setUpdateNotes(iv.notes ?? "");
     setUpdateFeedback(iv.feedback ?? "");
   };
@@ -208,7 +206,6 @@ export default function ManagerInterviewsPage() {
     setUpdating(true);
     try {
       const payload = {
-        result: updateResult === "" ? null : updateResult,
         notes: updateNotes.trim() || null,
         feedback: updateFeedback.trim() || null,
       };
@@ -301,22 +298,6 @@ export default function ManagerInterviewsPage() {
             </div>
 
             <div className="grid grid-cols-1 gap-3 px-5 py-4">
-              <label className="text-xs font-semibold text-text-muted">
-                Result
-                <select
-                  value={updateResult}
-                  onChange={(e) =>
-                    setUpdateResult(e.target.value as "PASS" | "FAIL" | "HOLD" | "")
-                  }
-                  className="mt-1 w-full rounded-xl border border-border bg-bg px-3 py-2 text-sm text-text"
-                >
-                  <option value="">(not set)</option>
-                  <option value="PASS">PASS</option>
-                  <option value="FAIL">FAIL</option>
-                  <option value="HOLD">HOLD</option>
-                </select>
-              </label>
-
               <label className="text-xs font-semibold text-text-muted">
                 Notes
                 <textarea

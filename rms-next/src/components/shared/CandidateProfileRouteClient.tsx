@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { useAuth } from "@/contexts/useAuth";
 import {
@@ -27,6 +27,7 @@ export default function CandidateProfileRouteClient({
   candidateId: number;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const { user } = useAuth();
 
@@ -46,6 +47,10 @@ export default function CandidateProfileRouteClient({
   >(undefined);
 
   const userRoles = user?.roles ?? [];
+  const effectiveRoles =
+    pathname?.startsWith("/interviewer/")
+      ? ["Interviewer"]
+      : userRoles;
 
   const handleDismiss = useCallback(() => {
     if (returnTo?.startsWith("/")) {
@@ -138,7 +143,7 @@ export default function CandidateProfileRouteClient({
       candidate={candidate}
       onDismiss={handleDismiss}
       onUpdate={(updated) => setCandidate(updated)}
-      userRoles={userRoles}
+      userRoles={effectiveRoles}
       evaluationContext={evaluationContext}
       evaluationShortlistBlocked={evaluationShortlistBlocked}
       evaluationShortlistBlockedReason={

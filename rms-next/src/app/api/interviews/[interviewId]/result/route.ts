@@ -18,7 +18,7 @@ export async function POST(req: Request, { params }: Ctx) {
     if (user instanceof NextResponse) {
       return user;
     }
-    const denied = requireAnyRole(user, "TA", "HR", "Admin", "Manager");
+    const denied = requireAnyRole(user, "Interviewer");
     if (denied) {
       return denied;
     }
